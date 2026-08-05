@@ -25,3 +25,37 @@ body {
   color: var(--color-foreground);
   font-family: var(--font-sans);
 }
+
+.auth-overlay {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: var(--color-muted);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--color-card);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-panel);
+}
+
+.auth-card-header {
+  background: var(--color-header);
+  color: var(--color-primary-foreground);
+  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+}
+
+.auth-card-tagline {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.85;
+}
