@@ -67,8 +67,9 @@ Named so they are understood as decisions rather than oversights:
   fails, the order stays `pending`, nothing is debited, and the user retries
   with a fresh presentation. A production system would need a reconciliation
   job; a demo does not.
-- **No multi-replica support.** SQLite on a `ReadWriteOnce` volume pins each app
-  to one replica.
+- **No multi-replica support.** SQLite on a single-writer volume pins each app to
+  one instance. Running two instances of either app against the same volume is
+  unsupported and will corrupt state.
 - **No rate limiting.** Passwords are hashed, but there is no lockout, reset, or
   throttling.
 - **No component or visual regression tests.** The UI is judged by eye against
@@ -123,9 +124,30 @@ Additionally, because the wallet resolves the issuer itself from a phone,
 scans correctly — this is the failure mode most often misread as a `foundry`
 bug.
 
-**Verification before proceeding:** `curl` the admin offer endpoint with
-`credential_type_id: com.emvco.dpc.card` and confirm a `credential_offer_uri`
-comes back.
+### 3.1 Verification steps before app code is written
+
+All three must be confirmed against the running binary, because the admin
+OpenAPI schema types several of these fields as untyped JSON and therefore
+cannot answer them:
+
+1. **The credential type resolves.** `curl` `POST /admin/issuance/offers` with
+   `credential_type_id: com.emvco.dpc.card` and confirm a `credential_offer_uri`
+   comes back.
+2. **The correct `transport` value for a QR / cross-device presentation.**
+   `CreateVerificationRequest.transport` is `type: string` in the OpenAPI spec
+   with no enum. `dc_api` is known from `foundry`'s documentation; the value for
+   the QR transport must be read from `foundry-verifier`'s request handling. The
+   spec writes `cross_device` as a placeholder for that value — **confirm it
+   before use.**
+3. **The accepted `transaction_data` entry shape.**
+   `CreateVerificationRequest.transaction_data` is an untyped array. OpenID4VP
+   1.0 specifies each entry as a base64url-encoded JSON object requiring `type`
+   and `credential_ids`, and `foundry` may expect entries pre-encoded or as plain
+   JSON it encodes itself. Confirm by creating a verification request and
+   observing that the resulting verdict contains a `transaction_data_binding`
+   check. **If this cannot be made to work, fall back to a possession-only DCQL
+   query** — every other part of the design is unchanged, and the only loss is
+   the amount-binding claim on the success screen.
 
 ## 4. Architecture
 
@@ -238,10 +260,17 @@ credentials      id, user_id→users, card_id→cards,
                  credential_id, foundry_tx_id, state,
                  issued_at, revoked_at
 transactions     id, account_id→accounts, amount_cents, currency,
-                 counterparty, reference, booked_at, credential_id?
+                 counterparty, reference, booked_at, credential_id?,
+                 idempotency_key?  UNIQUE
 ```
 
-`credentials.state`: `offered` → `active` → `revoked` (or `failed`).
+`credentials.state`: `offered` → `active` → `revoked`, or `failed` if the
+`foundry` offer could not be created at issuance step 4.
+
+`transactions.idempotency_key` is the column that makes `POST /api/payments`
+idempotent: it carries the merchant's payment-session id, is `UNIQUE`, and is
+null for seeded history. A repeated debit request finds the existing row by this
+key and returns the original result instead of debiting again.
 
 **`credentials.credential_id` is the load-bearing value of the entire system.**
 It is a random opaque string the bank mints *before* creating the `foundry`
@@ -271,7 +300,10 @@ payment_sessions id, order_id→orders, foundry_verification_id, state,
                  bank_tx_id, failure_reason, created_at
 ```
 
-`orders.status`: `pending` → `paid` (or `failed`).
+`orders.status`: `pending` → `paid`, or `cancelled` when the user cancels the
+payment screen. A failed presentation or failed settlement leaves the order
+`pending` so it can be retried (§6.3) — there is deliberately no `failed` order
+status.
 
 `payment_sessions.state`: `pending` → `verified` → `settling` → `completed`,
 with `failed` reachable from any state.
@@ -295,8 +327,8 @@ login cookie is a stateless signed JWT).
 
 ### 5.3 Seed data
 
-- Bank: 2–3 users with known passwords, one checking account each with a
-  plausible balance, one card each, and roughly 10 historical transactions.
+- Bank: exactly 2 users with known passwords, one checking account each with a
+  plausible balance, one card each, and 10 historical transactions each.
 - Merchant: 6 products.
 - `pnpm seed` resets both databases to these fixtures.
 
@@ -312,7 +344,9 @@ login cookie is a stateless signed JWT).
 4. Bank → foundry admin:
       POST /admin/issuance/offers
       { credential_type_id: "com.emvco.dpc.card",
-        claims: { credential_id, network: "VISA", card_id: <cards.id> } }
+        claims: { credential_id,
+                  network: <cards.network>,
+                  card_id: <cards.id> } }
    ← { transaction_id, credential_offer_uri, dc_api_offer }
 5. Bank persists foundry_tx_id; returns { sessionId, offerUri }
 6. Browser renders QR (desktop) or deep-link button (touch)
@@ -340,12 +374,13 @@ must not.
  3. POST /api/payment-sessions { orderId }
     Merchant → foundry admin:
        POST /admin/verification/requests
-       { transport: "cross_device",
+       { transport: "cross_device",          // confirm value — §3.1(2)
          dcql_query: { credentials: [{ id: "card", format: "dc+sd-jwt",
                         meta: { vct_values: ["com.emvco.dpc.card"] },
                         claims: [{ path: ["credential_id"] },
                                  { path: ["network"] }] }] },
-         transaction_data: [{ type: "payment",
+         transaction_data: [{ type: "payment",   // shape — §3.1(3)
+                              credential_ids: ["card"],
                               amount: "47.98", currency: "EUR",
                               merchant: "Demo Shop", order_id: <id> }] }
     ← { verification_id, openid4vp_uri, request_uri }
@@ -443,10 +478,14 @@ it is the only one called by another service rather than a browser.
 | POST | `/api/payment-sessions/{id}/cancel` | user cancelled |
 | GET | `/api/health`, `/api/ready` | deployment contract |
 
-`GET /api/payment-sessions/{id}` does not return the `openid4vp_uri` after the
-first read and never returns disclosed claims to the browser. The `/pay` screen
-needs only a state machine; exposing the presentation URI on a polled endpoint
-would let a bystander hijack the request.
+`GET /api/payment-sessions/{id}` returns **only** `{state, checks?,
+failureReason?}` — never the `openid4vp_uri` and never the disclosed claims.
+The `/pay/{sessionId}` route obtains the URI once, server-side, when it renders
+(it is a server component reading its own database), and passes it to the QR
+component as a prop. The polled endpoint then carries state transitions only.
+Exposing the presentation URI on a polled endpoint would let a bystander who
+learns a session id hijack the request; keeping claims server-side means the
+browser never handles disclosed credential data at all.
 
 ## 8. Deployment contract
 
@@ -486,6 +525,12 @@ BANK_API_URL=http://bank:3001
 BANK_API_KEY=<secret>
 MERCHANT_NAME="Demo Shop"
 ```
+
+`BANK_PUBLIC_URL` and `MERCHANT_PUBLIC_URL` are each app's own externally
+reachable origin, used only to build absolute URLs in its own UI (redirects after
+checkout, links in the issuance dialog). Neither app sends its public URL to
+`foundry`; the wallet reaches `foundry` at `foundry`'s own configured
+`public_base_url` (§3).
 
 All environment is validated with zod at boot: a missing secret crashes the
 process at startup with a named error rather than failing on the first request.
@@ -629,6 +674,13 @@ States: awaiting-wallet (QR) · redirecting (spinner, touch devices) · success
 (EU flag, "Payment Successful", auto-advance after 1.5s) · error (warning glyph,
 message, Try Again and Cancel).
 
+On touch devices the original emitted an `EUDIPAY_REDIRECT` message so its parent
+window could follow the wallet deep link. With no parent, **this route navigates
+to the deep link itself** (`window.location.href = openid4vpUri`) and shows the
+redirecting spinner; polling continues when the browser is returned to. Touch
+detection uses `matchMedia("(pointer: coarse)")` rather than user-agent sniffing,
+matching the `banking-frontend` reference.
+
 Two changes from the original, both consequences of no longer being an iframe:
 **the amount and merchant are now displayed on this screen** (previously it had
 no knowledge of what was being paid — the parent held that), and the
@@ -665,8 +717,10 @@ produce tests that skip the only interesting part.
 The plan must sequence work so that a demoable state is reached as early as
 possible:
 
-1. **foundry prerequisite** (§3) — add the credential type, verify by curl.
-   Blocks everything.
+1. **foundry prerequisite** (§3) — add the credential type and complete all
+   three verification steps in §3.1, including confirming the `transport` value
+   and the `transaction_data` shape. Blocks everything; the outcome of §3.1(3)
+   decides whether amount binding is in or out.
 2. Workspace scaffold, `foundry-client`, shared `ui`.
 3. Bank: schema, seed, login, dashboard.
 4. Bank: issuance flow. *First demoable milestone — a card lands in a wallet.*
