@@ -75,14 +75,20 @@ contract below, which any orchestrator can satisfy.
 
 Every variable is validated with zod at boot. A missing secret **crashes the
 process at startup** with a named error rather than failing on a later request.
+This is enforced by `apps/bank/src/instrumentation.ts`, which Next.js runs once
+when the server process starts; it must call `process.exit(1)` on failure
+itself rather than letting the error propagate, or the container silently
+degrades to every route 500ing forever without ever exiting — verified against
+a real podman container while building this deployment contract.
 
 ### Building the image
 
 The build context is the repository root, because a pnpm workspace build needs
-the root manifests and the `packages/` sources:
+the root manifests and the `packages/` sources. `docker` and `podman` are both
+drop-in for this Dockerfile:
 
 ```bash
-docker build -f apps/bank/Dockerfile -t payment-demo-bank:latest .
+podman build -f apps/bank/Dockerfile -t payment-demo-bank:latest .
 ```
 
 ### Seeding a deployed instance

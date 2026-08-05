@@ -18,7 +18,7 @@ Every task's requirements implicitly include this section.
 
 - **Node** ≥ 22. **pnpm** 10.x. Verified present: Node v26.5.0, pnpm 10.29.2.
 - **TypeScript strict mode on** in every package. No `any` in committed code; use `unknown` plus a narrowing check.
-- **No hardcoded URLs or secrets anywhere.** All of them come from validated env (§8.1). A missing secret must crash the process at boot with a named error.
+- **No hardcoded URLs or secrets anywhere.** All of them come from validated env (§8.1). A missing secret must crash the process at boot with a named error — enforced via `src/instrumentation.ts`'s `register()` hook (added in Task 13), which imports `env.ts` and, on failure, calls `process.exit(1)` itself rather than merely `throw`ing. Verified against a real podman container in Task 13: with this hook in place, a container started with a missing secret exits (`exitcode=1`, the named error in its logs, no `Ready in ...` line) within seconds on its own, with no request sent. A bare `throw` was tried first and reproducibly failed to achieve this — depending on which of Next's internal call sites ends up invoking `register()`, an uncaught throw there can instead degrade to "every route permanently 500s" with the process never exiting, which is a far weaker signal for an orchestrator than a hard crash.
 - **All money is integer cents.** Never a float. Column names end in `_cents`.
 - **Credential type id / vct is exactly `com.emvco.dpc.card`** — a reverse-DNS identifier, not a URL.
 - **`foundry` admin auth is `Authorization: Bearer <FOUNDRY_ADMIN_KEY>`.**
@@ -4956,6 +4956,10 @@ git commit -m "feat(bank): add issuance dialog with QR and status polling"
 ### Task 13: Dockerfile and deployment contract
 
 **Files:**
+- Create: `apps/bank/src/instrumentation.ts` — forces `env.ts` to be imported (and
+  to crash, if invalid) on the first request the server receives; see the
+  Global Constraints note on why this file is required at all and why it
+  must live under `src/`, not the package root.
 - Create: `apps/bank/Dockerfile`
 - Create: `apps/bank/.dockerignore`
 - Create: `README.md`
@@ -5043,42 +5047,70 @@ CMD ["node", "server.js"]
 
 - [ ] **Step 3: Build and run the image**
 
+`docker` or `podman` both work — the CLI is a drop-in for this Dockerfile.
+Run detached (`-d`) rather than backgrounding a foreground `run`, so the
+container's own exit code and logs stay inspectable independently of the shell:
+
 ```bash
 cd /Users/senexi/dev/eudiw/payment-banking-demo
-docker build -f apps/bank/Dockerfile -t payment-demo-bank:dev .
+podman build -f apps/bank/Dockerfile -t payment-demo-bank:dev .
 
-docker run --rm -p 3001:3001 \
-  -e FOUNDRY_ADMIN_URL=http://host.docker.internal:9000 \
+podman run -d --name bank-check -p 3001:3001 \
+  -e FOUNDRY_ADMIN_URL=http://host.containers.internal:9000 \
   -e FOUNDRY_ADMIN_KEY=dev-admin-key \
   -e BANK_API_KEY=dev-bank-api-key \
   -e SESSION_SECRET=0123456789012345678901234567890123456789 \
   -e BANK_PUBLIC_URL=http://localhost:3001 \
   -v payment-demo-bank-data:/data \
-  payment-demo-bank:dev &
-sleep 10
+  payment-demo-bank:dev
+sleep 5
 curl -sS http://localhost:3001/api/health
 curl -sS http://localhost:3001/api/ready
+podman rm -f bank-check
 ```
+
+(With `docker`, swap `host.containers.internal` for `host.docker.internal`.)
 
 Expected: `{"status":"ok"}` and `{"status":"ready"}` — the latter proves
 migrations ran against the mounted volume. Note the container has **no seed
 data**; `/login` will render but no account exists yet. That is correct: seeding
 is an operator action, documented in the README.
 
-- [ ] **Step 4: Verify the contract holds — a missing secret must crash at boot**
+- [ ] **Step 4: Verify the contract holds — a missing secret must crash the container**
 
 ```bash
-docker run --rm -p 3002:3001 \
-  -e FOUNDRY_ADMIN_URL=http://host.docker.internal:9000 \
+podman run -d --name bank-crash-check -p 3002:3001 \
+  -e FOUNDRY_ADMIN_URL=http://host.containers.internal:9000 \
   -e FOUNDRY_ADMIN_KEY=dev-admin-key \
   -e BANK_API_KEY=dev-bank-api-key \
   payment-demo-bank:dev
+sleep 5
+podman inspect bank-crash-check --format '{{.State.Status}} exitcode={{.State.ExitCode}}'
+podman logs bank-crash-check
+podman rm -f bank-crash-check
 ```
 
-Expected: the process exits with
-`Invalid bank environment configuration — SESSION_SECRET: ...` rather than
-starting and failing later on a request. If it starts, `env.ts` is not being
-imported early enough — fix that, do not relax the test.
+Expected: `exited exitcode=1` — within about 5 seconds, with **no request
+sent** — and a log line
+`[bank] Fatal: invalid environment configuration — refusing to serve requests.
+Error: Invalid bank environment configuration — SESSION_SECRET: Required`.
+Note its absence: no `Ready in ...` line, because the crash happens during
+Next's own startup sequence, before the server finishes listening.
+
+**Do not** verify this with a bare foreground `run` — that was the original
+version of this step, and with it you cannot tell a genuine hang apart from
+a slow build; `-d` plus `podman inspect`/`podman logs` gives an unambiguous
+exit code. Also: **`register()` must call `process.exit(1)` itself**, not
+merely `throw` (see `src/instrumentation.ts`) — a bare throw was tried first
+while building this task and reproducibly failed to crash the container.
+Next's own instrumentation-loading call sites don't all treat a thrown error
+the same way: at least one path (the lazy one gating `handleRequest`, used
+on every actual HTTP request) converts it into a permanent per-request 500
+without ever exiting the process, which is a much weaker signal for an
+orchestrator than a hard crash and can silently mask a broken deployment
+behind a liveness probe that keeps reporting 500 forever instead of
+restarting. `process.exit(1)` sidesteps that inconsistency: whichever code
+path ends up invoking `register()`, ours is unconditionally fatal.
 
 - [ ] **Step 5: Write the README**
 
@@ -5237,14 +5269,26 @@ git commit -m "feat(bank): add Dockerfile and document the deployment contract"
 
 ## Definition of Done for Plan 1
 
-- [ ] `pnpm check` green across the workspace
-- [ ] `pnpm dev` starts the bank on :3001
+- [x] `pnpm check` green across the workspace (81 tests: 67 bank + 7
+      foundry-client + 7 ui, typecheck clean)
+- [x] `pnpm dev` starts the bank on :3001
 - [ ] A real EUDI wallet holds a `com.emvco.dpc.card` credential issued by the
-      bank, and the dashboard shows "Im Wallet ✓"
-- [ ] The bank container builds, applies migrations against a mounted volume, and
-      passes `/api/health` and `/api/ready`
-- [ ] A missing secret crashes the container at boot with a named error
-- [ ] The §3.1(3) `transaction_data` shape is recorded in the design spec, so
+      bank, and the dashboard shows "Im Wallet ✓" — **not verified**: this
+      environment has no phone/EUDI wallet app to scan the QR with. Everything
+      up to and including the wallet-facing step is verified against a real
+      running foundry (Task 11); only the physical scan-and-confirm remains.
+- [x] The bank container builds, applies migrations against a mounted volume, and
+      passes `/api/health` and `/api/ready` — verified with a real podman
+      container (Task 13): built the image, ran it with a mounted volume, both
+      endpoints returned 200.
+- [x] A missing secret crashes the container at boot with a named error —
+      verified with a real podman container (Task 13): `exited exitcode=1`
+      within seconds, no request sent, the named error in the logs. Required
+      adding `apps/bank/src/instrumentation.ts` with an explicit
+      `process.exit(1)` — env.ts's "validate at module load" design alone does
+      not fire until some code path imports it, and even then a bare `throw`
+      doesn't reliably crash the process (see instrumentation.ts's comment).
+- [x] The §3.1(3) `transaction_data` shape is recorded in the design spec, so
       Plan 2 starts from a known answer
 
 ## What Plan 2 will add
