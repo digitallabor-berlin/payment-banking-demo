@@ -27,6 +27,7 @@ Every task's requirements implicitly include this section.
 - **Polling everywhere:** 2000 ms interval, 10 minute cap, error after 5 consecutive failures, abort on unmount.
 - **Bank UI strings are German.** Code identifiers, comments, and commit messages are English.
 - **Bank port 3001** (merchant will take 3000 in Plan 2).
+- **Every Next.js app's `next.config.ts` must set `webpack(config) { config.resolve.extensionAlias = { ".js": [".ts", ".tsx", ".js"] }; return config; }`.** Found while executing Task 5/6: this codebase's local imports are written `./foo.js` for a `./foo.ts` file (correct Node ESM form, needed so vitest/tsc agree); Turbopack resolves that natively but `next build`'s webpack resolver does not, and every such import — including path-aliased ones — fails with "Module not found" without this. Applies to the merchant app in Plan 2 too.
 - **Commit after every task.** Conventional-commit prefixes (`feat:`, `test:`, `chore:`, `fix:`).
 
 ---
@@ -1422,8 +1423,8 @@ git commit -m "feat: add shared ui package with polling, QR, and touch detection
     "start": "next start --port ${PORT:-3001}",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "migrate": "tsx src/db/migrate.ts",
-    "seed": "tsx src/db/seed.ts",
+    "migrate": "tsx --env-file-if-exists=.env.local src/db/migrate.ts",
+    "seed": "tsx --env-file-if-exists=.env.local src/db/seed.ts",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
@@ -1478,9 +1479,16 @@ git commit -m "feat: add shared ui package with polling, QR, and touch detection
 }
 ```
 
-`apps/bank/next.config.ts` — the two settings below are mandatory for a pnpm
-workspace: without `outputFileTracingRoot` the standalone build omits workspace
-dependencies and the container starts with missing modules.
+`apps/bank/next.config.ts` — `output`/`outputFileTracingRoot` are mandatory for
+a pnpm workspace: without `outputFileTracingRoot` the standalone build omits
+workspace dependencies and the container starts with missing modules. The
+`webpack()` hook is mandatory for a different reason, found while executing
+this task: every local import in this codebase is written `./foo.js` pointing
+at a `./foo.ts` source file (the correct Node ESM specifier form, required so
+vitest and tsc's `moduleResolution: "bundler"` agree). Turbopack resolves that
+mapping natively, but `next build`'s webpack resolver does not, and fails
+*every* such import — including path-aliased ones like `@/db/index.js` — with
+"Module not found" unless told to also try `.ts`/`.tsx`.
 
 ```ts
 import path from "node:path";
@@ -1491,6 +1499,12 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(import.meta.dirname, "../.."),
   transpilePackages: ["@demo/ui", "@demo/foundry-client"],
   serverExternalPackages: ["better-sqlite3"],
+  webpack(config) {
+    config.resolve.extensionAlias = {
+      ".js": [".ts", ".tsx", ".js"],
+    };
+    return config;
+  },
 };
 
 export default nextConfig;
