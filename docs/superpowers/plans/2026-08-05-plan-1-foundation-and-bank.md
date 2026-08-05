@@ -322,7 +322,11 @@ packages:
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+    // DOM, not just ES2022: Node's global `fetch` is Web-Fetch-API-shaped, and
+    // without this lib, tsc cannot see `fetch`/`Request`/`Response`/`Headers`
+    // even though they exist at runtime — every fetch-touching file fails
+    // typecheck otherwise (caught while executing Task 3).
+    "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
