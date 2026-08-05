@@ -310,9 +310,18 @@ packages:
   },
   "devDependencies": {
     "typescript": "^5.7.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3"]
   }
 }
 ```
+
+pnpm 10 blocks native postinstall scripts by default. Without this allowlist,
+Task 5's `better-sqlite3` install silently ships with no compiled addon and
+fails at runtime rather than at `pnpm install` time (found while executing
+Task 5, against a very recent Node whose V8 also required bumping
+`better-sqlite3` past `^13.0.0` — see Task 5's note).
 
 - [ ] **Step 3: Create the shared TypeScript config**
 
@@ -1420,7 +1429,7 @@ git commit -m "feat: add shared ui package with polling, QR, and touch detection
   "dependencies": {
     "@demo/foundry-client": "workspace:*",
     "@demo/ui": "workspace:*",
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.38.2",
     "jose": "^5.9.6",
     "next": "^15.1.0",
@@ -1430,7 +1439,10 @@ git commit -m "feat: add shared ui package with polling, QR, and touch detection
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
-    "@types/better-sqlite3": "^7.6.12",
+    "@types/better-sqlite3": "^7.6.13",
+    // pnpm blocks native postinstall scripts by default — the root
+    // package.json's pnpm.onlyBuiltDependencies allowlist (Task 2) is what
+    // lets this compile at all.
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",

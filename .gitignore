@@ -8,3 +8,6 @@ data/
 *.db-journal
 .DS_Store
 .pi/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
