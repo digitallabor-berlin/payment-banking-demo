@@ -245,7 +245,19 @@ git add docs/superpowers/specs/2026-08-05-payment-banking-demo-design.md
 git commit -m "docs: record verified foundry transaction_data shape"
 ```
 
-Commit the foundry config change separately, in the foundry repo:
+`config.yaml` is gitignored in the `foundry` repo (it is the quickstart-generated
+dev file, deliberately never tracked, to avoid committing local dev PKI paths).
+There is nothing to commit there — verify this before assuming the plan's
+instruction applies to your checkout:
+
+```bash
+cd /Users/senexi/dev/eudiw/foundry
+git check-ignore -v config.yaml
+```
+
+If that prints a match, the edit is already correctly untracked and no action
+is needed. If it prints nothing (i.e. some checkout does track `config.yaml`),
+commit it there instead:
 
 ```bash
 cd /Users/senexi/dev/eudiw/foundry
