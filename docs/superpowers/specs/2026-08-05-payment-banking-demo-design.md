@@ -139,15 +139,29 @@ cannot answer them:
    is settled, not a guess. Confirm a `request_uri` and an `openid4vp_uri` come
    back in the response. (`dc_api` is the other supported value and is deferred;
    see §9.5.)
-3. **The accepted `transaction_data` entry shape.**
-   `CreateVerificationRequest.transaction_data` is an untyped array. OpenID4VP
-   1.0 specifies each entry as a base64url-encoded JSON object requiring `type`
-   and `credential_ids`, and `foundry` may expect entries pre-encoded or as plain
-   JSON it encodes itself. Confirm by creating a verification request and
-   observing that the resulting verdict contains a `transaction_data_binding`
-   check. **If this cannot be made to work, fall back to a possession-only DCQL
-   query** — every other part of the design is unchanged, and the only loss is
-   the amount-binding claim on the success screen.
+3. **The accepted `transaction_data` entry shape — CONFIRMED 2026-08-05.**
+   `foundry` accepts each `transaction_data` entry as a **plain JSON object**,
+   not pre-base64url-encoded — confirmed against the running binary with:
+
+   ```json
+   {
+     "transport": "request_uri",
+     "dcql_query": { "credentials": [{ "id": "card", "format": "dc+sd-jwt",
+       "meta": { "vct_values": ["com.emvco.dpc.card"] },
+       "claims": [{ "path": ["credential_id"] }, { "path": ["network"] }] }] },
+     "transaction_data": [{ "type": "payment", "credential_ids": ["card"],
+       "amount": "47.98", "currency": "EUR", "merchant": "Demo Shop",
+       "order_id": "ord_test" }]
+   }
+   ```
+
+   → HTTP 200 with a `verification_id`. Decoding the signed request JWT served
+   at the returned `request_uri` shows `foundry` does the OpenID4VP 1.0
+   base64url-JSON encoding itself — the wire-format `transaction_data` entry is
+   `base64url(JSON.stringify(entry))`, and `foundry` also injects
+   `transaction_data_hashes_alg: ["sha-256"]` into each entry automatically. The
+   caller therefore just POSTs plain JSON; no client-side encoding is needed.
+   The possession-only DCQL fallback is not required.
 
 ## 4. Architecture
 
@@ -379,7 +393,7 @@ must not.
                         meta: { vct_values: ["com.emvco.dpc.card"] },
                         claims: [{ path: ["credential_id"] },
                                  { path: ["network"] }] }] },
-         transaction_data: [{ type: "payment",   // shape — §3.1(3)
+         transaction_data: [{ type: "payment",   // plain JSON — §3.1(3)
                               credential_ids: ["card"],
                               amount: "47.98", currency: "EUR",
                               merchant: "Demo Shop", order_id: <id> }] }

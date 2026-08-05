@@ -159,7 +159,7 @@ already held by any wallet.
 
 ```bash
 cd /Users/senexi/dev/eudiw/foundry
-cargo run -p foundry -- validate --config config.yaml
+cargo run -p foundry -- config validate --config config.yaml
 ```
 
 Expected: exits 0. If it reports an unknown key, read
