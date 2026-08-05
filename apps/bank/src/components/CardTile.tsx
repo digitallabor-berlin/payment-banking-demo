@@ -1,4 +1,5 @@
 import type { CardDto } from "@/lib/queries.js";
+import { AddToWalletButton } from "./AddToWalletButton.js";
 
 const BADGE: Record<CardDto["credentialState"], { label: string; className: string }> = {
   none: {
@@ -34,14 +35,7 @@ export function CardTile({ card }: { card: CardDto }) {
         <span className={`badge mt-1.5 ${badge.className}`}>{badge.label}</span>
       </div>
 
-      <button
-        type="button"
-        disabled
-        title="Wird in Task 12 aktiviert"
-        className="rounded-[var(--radius)] bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-[var(--color-primary-foreground)] disabled:opacity-50"
-      >
-        Zum EUDI Wallet hinzufügen
-      </button>
+      <AddToWalletButton cardId={card.id} disabled={card.credentialState === "active"} />
     </div>
   );
 }

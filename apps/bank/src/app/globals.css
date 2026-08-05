@@ -90,3 +90,33 @@ body {
   background: color-mix(in oklab, var(--color-success) 15%, white);
   color: var(--color-success);
 }
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgb(17 24 39 / 0.5);
+  backdrop-filter: blur(4px);
+}
+
+.dialog-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--color-card);
+  border-radius: var(--radius);
+  padding: 1.75rem;
+  text-align: center;
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+}
+
+.qr-frame {
+  display: inline-block;
+  padding: 1rem;
+  background: #ffffff;
+  border: 2px solid color-mix(in oklab, var(--color-primary) 25%, white);
+  border-radius: 1.25rem;
+}
