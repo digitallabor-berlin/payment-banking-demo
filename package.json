@@ -1,0 +1,19 @@
+{
+  "name": "payment-banking-demo",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "packageManager": "pnpm@10.29.2",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "seed": "pnpm -r run seed",
+    "migrate": "pnpm -r run migrate",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
+    "check": "pnpm -r --parallel run typecheck && pnpm -r run test"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
