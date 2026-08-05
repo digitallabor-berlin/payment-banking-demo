@@ -58,11 +58,13 @@ the card.
 
 Named so they are understood as decisions rather than oversights:
 
-- **No real revocation.** `DELETE /api/credentials/{id}` marks the credential
-  revoked in the bank's own database so the bank stops accepting it. It does
-  **not** revoke in `foundry`'s status list, because `foundry` exposes no admin
-  revoke endpoint. The credential remains cryptographically valid; the bank
-  simply refuses it.
+- **No revocation at all.** There is no revoke endpoint and no revoked state.
+  `foundry` exposes no admin revoke endpoint, so a bank-local flag would stop
+  this bank accepting a credential while leaving it cryptographically valid
+  everywhere else — a half-measure that misrepresents what revocation means.
+  Issued credentials simply expire on `foundry`'s 12-hour DPC lifetime. Real
+  status-list revocation requires a `foundry` change and belongs in its own
+  spec.
 - **No settlement reconciliation.** If a presentation verifies but the debit
   fails, the order stays `pending`, nothing is debited, and the user retries
   with a fresh presentation. A production system would need a reconciliation
@@ -133,12 +135,10 @@ cannot answer them:
 1. **The credential type resolves.** `curl` `POST /admin/issuance/offers` with
    `credential_type_id: com.emvco.dpc.card` and confirm a `credential_offer_uri`
    comes back.
-2. **The correct `transport` value for a QR / cross-device presentation.**
-   `CreateVerificationRequest.transport` is `type: string` in the OpenAPI spec
-   with no enum. `dc_api` is known from `foundry`'s documentation; the value for
-   the QR transport must be read from `foundry-verifier`'s request handling. The
-   spec writes `cross_device` as a placeholder for that value — **confirm it
-   before use.**
+2. **The `transport` value round-trips.** The value is **`request_uri`** — this
+   is settled, not a guess. Confirm a `request_uri` and an `openid4vp_uri` come
+   back in the response. (`dc_api` is the other supported value and is deferred;
+   see §9.5.)
 3. **The accepted `transaction_data` entry shape.**
    `CreateVerificationRequest.transaction_data` is an untyped array. OpenID4VP
    1.0 specifies each entry as a base64url-encoded JSON object requiring `type`
@@ -258,14 +258,14 @@ cards            id, user_id→users, account_id→accounts,
                  pan_last4, network, card_alias, created_at
 credentials      id, user_id→users, card_id→cards,
                  credential_id, foundry_tx_id, state,
-                 issued_at, revoked_at
+                 issued_at
 transactions     id, account_id→accounts, amount_cents, currency,
                  counterparty, reference, booked_at, credential_id?,
                  idempotency_key?  UNIQUE
 ```
 
-`credentials.state`: `offered` → `active` → `revoked`, or `failed` if the
-`foundry` offer could not be created at issuance step 4.
+`credentials.state`: `offered` → `active`, or `failed` if the `foundry` offer
+could not be created at issuance step 4. There is no `revoked` state (§2).
 
 `transactions.idempotency_key` is the column that makes `POST /api/payments`
 idempotent: it carries the merchant's payment-session id, is `UNIQUE`, and is
@@ -374,7 +374,7 @@ must not.
  3. POST /api/payment-sessions { orderId }
     Merchant → foundry admin:
        POST /admin/verification/requests
-       { transport: "cross_device",          // confirm value — §3.1(2)
+       { transport: "request_uri",
          dcql_query: { credentials: [{ id: "card", format: "dc+sd-jwt",
                         meta: { vct_values: ["com.emvco.dpc.card"] },
                         claims: [{ path: ["credential_id"] },
@@ -402,6 +402,7 @@ must not.
           idempotency_key: <sessionId> }
  9. Bank resolves credential_id → credentials → cards → accounts
     Rejects if: unknown credential · state !== 'active' · insufficient funds
+    (credential expiry is enforced by foundry at presentation, not here)
     Else: balance -= amount; INSERT transactions (credential_id set)
     ← { bank_tx_id, new_balance_cents }
 10. Merchant: state='completed', orders.status='paid', bank_tx_id stored
@@ -435,7 +436,7 @@ specific check.
 | 5 consecutive poll errors | `failed` | "Lost connection to the payment service" |
 | `verified: false` | `failed` | "Card could not be verified" + failing check names |
 | Bank: insufficient funds | `failed` | "Payment declined by your bank" |
-| Bank: unknown or revoked credential | `failed` | "This card is no longer valid" |
+| Bank: unknown or expired credential | `failed` | "This card is no longer valid" |
 | Bank unreachable during settle | `failed` | "Could not reach your bank" + Try Again |
 
 The last row is the honest hard case: the presentation succeeded but settlement
@@ -459,7 +460,6 @@ failures, abort on unmount.
 | GET | `/api/transactions?limit=&offset=` | cookie | transactions, newest first |
 | POST | `/api/cards/{id}/credential` | cookie | start issuance → `{sessionId, offerUri}` |
 | GET | `/api/credentials/{id}/status` | cookie | `{state}` — polled |
-| DELETE | `/api/credentials/{id}` | cookie | mark revoked locally (see §2) |
 | POST | `/api/payments` | `X-API-Key` | the debit — merchant→bank |
 | GET | `/api/health`, `/api/ready` | — | deployment contract |
 
@@ -593,7 +593,7 @@ variant shifts to deep blue-greys with red retained. German UI strings.
 - **`/` (dashboard)** — top nav (logo, Übersicht / Umsätze / Karten, Logout;
   hamburger below 640px). Account panel with IBAN and a large balance; card
   tiles showing `•••• 4242`, the network mark, and a state badge (`Nicht im
-  Wallet` / `Im Wallet ✓` / `Widerrufen`) with an "Zum EUDI Wallet hinzufügen"
+  Wallet` / `Im Wallet ✓`) with an "Zum EUDI Wallet hinzufügen"
   action; then the five most recent transactions, wallet-paid rows badged.
 - **`/transactions`** — full paginated list reusing the same row component.
 - **Issuance dialog** — modal with a framed QR on desktop or an "Im Wallet
@@ -695,8 +695,8 @@ Deliberately proportionate. Over-testing a demo is its own failure mode.
 **Unit (vitest)** — the places where a bug is silent:
 
 - amount recomputation from cart ids (never trust the client)
-- `credential_id` → account resolution and each rejection path (unknown,
-  revoked, insufficient funds)
+- `credential_id` → account resolution and each rejection path (unknown
+  credential, credential not `active`, insufficient funds)
 - idempotency: the same key twice debits once
 - `foundry-client` request and response mapping, against fixtures captured from
   the real API
@@ -717,9 +717,8 @@ produce tests that skip the only interesting part.
 The plan must sequence work so that a demoable state is reached as early as
 possible:
 
-1. **foundry prerequisite** (§3) — add the credential type and complete all
-   three verification steps in §3.1, including confirming the `transport` value
-   and the `transaction_data` shape. Blocks everything; the outcome of §3.1(3)
+1. **foundry prerequisite** (§3) — add the credential type and complete the
+   three verification steps in §3.1. Blocks everything; the outcome of §3.1(3)
    decides whether amount binding is in or out.
 2. Workspace scaffold, `foundry-client`, shared `ui`.
 3. Bank: schema, seed, login, dashboard.
