@@ -1410,6 +1410,13 @@ git commit -m "feat: add shared ui package with polling, QR, and touch detection
 
 - [ ] **Step 1: Create the package manifest**
 
+Unlike every other workspace package, `apps/bank/package.json` deliberately
+has **no** `"type": "module"` field. Found and verified while executing
+Task 13: Next's standalone build output (`server.js`) is plain CommonJS
+(`require(...)`, `__dirname`), and Next copies this same `package.json`
+alongside it. Adding `"type": "module"` here would make Node parse that
+generated CJS `server.js` as ESM and crash on boot — do not "fix" this later.
+
 `apps/bank/package.json`:
 
 ```json
