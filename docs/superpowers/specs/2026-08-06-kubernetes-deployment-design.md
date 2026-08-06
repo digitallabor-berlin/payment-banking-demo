@@ -105,33 +105,55 @@ which is not worth a class of latent runtime bug.
 
 `drizzle/` must land at `<tree>/apps/<app>/drizzle`, because
 `apps/*/src/db/index.ts` resolves migrations as
-`path.join(process.cwd(), "drizzle")`. The Kubernetes manifest sets
-`workingDir` per container, so `process.cwd()` is correct without a shell
-wrapper in the pod spec:
+`path.join(process.cwd(), "drizzle")`. **The entrypoint script owns that
+working directory**, not the manifest:
 
-| Container | `workingDir` |
+| Argument | working directory |
 |---|---|
-| bank | `/app/bank/apps/bank` |
-| merchant | `/app/merchant/apps/merchant` |
+| `bank` | `/app/bank/apps/bank` |
+| `merchant` | `/app/merchant/apps/merchant` |
+
+The manifest deliberately sets no `workingDir`. The entrypoint has to `cd`
+regardless — otherwise `podman run <image> bank` would behave differently from
+the pod — and duplicating the path in the manifest would be a second source of
+truth that can drift from the image it describes.
 
 ### Dockerfile stages
 
 Structurally the existing `apps/bank/Dockerfile`, generalised to both apps:
 
 - **`base`** — `node:22-slim`, `corepack enable`.
-- **`deps`** — copies the root manifests plus **all four** package manifests
-  (`packages/foundry-client`, `packages/ui`, `apps/bank`, `apps/merchant`),
-  installs `python3 make g++` (`better-sqlite3` builds a native addon), then
-  `pnpm install --frozen-lockfile`.
-- **`build`** — runs both `next build`s. Needs placeholder values for every
+- **`build`** — installs `python3 make g++` (`better-sqlite3` builds a native
+  addon), then `COPY . .` and **only then** `pnpm install --frozen-lockfile`.
+
+  There is deliberately **no separate `deps` stage**. `.npmrc` sets
+  `node-linker=hoisted`, so third-party packages hoist to the root
+  `node_modules`, but the `@demo/*` workspace links live *only* in
+  `apps/<app>/node_modules` — verified: `node_modules/@demo` does not exist,
+  while `apps/bank/node_modules/@demo/` holds `ui` and `foundry-client` as
+  symlinks into `packages/`. A `deps` stage copying just `/repo/node_modules`
+  drops those links and `next build` then cannot resolve `@demo/ui`. Letting
+  pnpm run over the real tree creates every link itself. No useful cache is
+  lost: the in-cluster build Job clones fresh every time, so a `deps` layer
+  would never hit.
+
+  It then runs both `next build`s. Needs placeholder values for every
   secret both apps validate at import time (`env.ts` parses at module load), so
   the build does not require real ones: `FOUNDRY_ADMIN_KEY=build-only`,
   `BANK_API_KEY=build-only`, and a `SESSION_SECRET` of at least 32 characters
   for the bank. These never reach the runtime stage.
-- **`runtime`** — `node:22-slim`, both standalone trees, `entrypoint.sh`,
-  `/data` created and owned by uid 1000.
+- **`runtime`** — `node:22-slim`, both standalone trees, `docker-entrypoint.sh`,
+  `/data` created and owned by uid 1000. Also pins `ENV HOSTNAME=0.0.0.0`: a
+  Next standalone server binds to `$HOSTNAME` when set, and container runtimes
+  set it to the container/pod name, which is not a bindable interface — kubelet
+  probes would fail.
 
-### `entrypoint.sh`
+A root **`.dockerignore`** is required, and must be at the repo root: builds use
+the root as context, and Docker only honours `<context>/.dockerignore`. Excluding
+`**/node_modules` is what forces the build to compile its own `better-sqlite3`
+rather than inheriting the host's `arm64` addon.
+
+### `docker-entrypoint.sh`
 
 Takes exactly one argument, `bank` or `merchant`, and `exec`s the right
 `server.js` after `cd`-ing to that app's root. Anything else is a hard error
@@ -163,7 +185,7 @@ Namespace `payment-banking-demo`, one `manifest.yml`.
 | PVC | `bank-data`, 1Gi | `merchant-data`, 1Gi |
 | `DATABASE_PATH` | `/data/bank.db` | `/data/merchant.db` |
 | `args` | `["bank"]` | `["merchant"]` |
-| `workingDir` | `/app/bank/apps/bank` | `/app/merchant/apps/merchant` |
+| CWD (set by the entrypoint) | `/app/bank/apps/bank` | `/app/merchant/apps/merchant` |
 
 Both Deployments:
 
