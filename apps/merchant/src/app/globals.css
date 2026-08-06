@@ -24,3 +24,37 @@ body {
   color: var(--color-foreground);
   font-family: var(--font-sans);
 }
+.shop-header {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.shop-hero {
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--color-brand) 10%, white),
+    color-mix(in oklab, var(--color-accent) 10%, white)
+  );
+}
+
+.product-card {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 150ms ease;
+}
+
+.product-card:hover {
+  box-shadow: var(--shadow-card-hover);
+}
+
+.product-monogram {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  border-radius: calc(var(--radius) - 0.25rem);
+  font-size: 2rem;
+  font-weight: 700;
+  color: white;
+}
