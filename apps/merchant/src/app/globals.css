@@ -205,3 +205,27 @@ body {
     padding-bottom: calc(2.5rem + env(safe-area-inset-bottom));
   }
 }
+
+.success-card {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+
+.check-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+  padding: 0.5rem 0;
+  font-size: 0.875rem;
+}
+
+.check-row:last-child {
+  border-bottom: 0;
+}
+
+.check-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
