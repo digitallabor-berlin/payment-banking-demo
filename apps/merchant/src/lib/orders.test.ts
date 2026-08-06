@@ -25,35 +25,35 @@ const customer = { name: "Ada Lovelace", email: "ada@example.com" };
 
 describe("createOrder", () => {
   it("computes the total from the products table, not from the caller", () => {
-    // prod_1 is 12999 cents, prod_2 is 8999 cents (see db/seed.ts fixtures).
+    // cheese is 449 cents, berries 349 cents (see db/seed.ts fixtures).
     const result = createOrder(
       db,
       [
-        { productId: "prod_1", quantity: 2 },
-        { productId: "prod_2", quantity: 1 },
+        { productId: "cheese", quantity: 2 },
+        { productId: "berries", quantity: 1 },
       ],
       customer,
     );
     expect(result).toEqual({
       ok: true,
       orderId: expect.any(String),
-      totalCents: 12_999 * 2 + 8_999,
+      totalCents: 449 * 2 + 349,
     });
   });
 
   it("persists a pending order with the computed total", () => {
-    const result = createOrder(db, [{ productId: "prod_1", quantity: 1 }], customer);
+    const result = createOrder(db, [{ productId: "cheese", quantity: 1 }], customer);
     if (!result.ok) throw new Error("expected success");
     const row = db.select().from(orders).where(eq(orders.id, result.orderId)).get();
     expect(row?.status).toBe("pending");
-    expect(row?.totalCents).toBe(12_999);
+    expect(row?.totalCents).toBe(449);
     expect(row?.customerName).toBe("Ada Lovelace");
     expect(row?.customerEmail).toBe("ada@example.com");
   });
 
   it("multiplies price by quantity for each line", () => {
-    const result = createOrder(db, [{ productId: "prod_6", quantity: 3 }], customer);
-    expect(result).toMatchObject({ ok: true, totalCents: 1_799 * 3 });
+    const result = createOrder(db, [{ productId: "water", quantity: 3 }], customer);
+    expect(result).toMatchObject({ ok: true, totalCents: 89 * 3 });
   });
 
   it("rejects an empty cart", () => {
@@ -64,7 +64,7 @@ describe("createOrder", () => {
     const result = createOrder(
       db,
       [
-        { productId: "prod_1", quantity: 1 },
+        { productId: "cheese", quantity: 1 },
         { productId: "prod_nope", quantity: 1 },
       ],
       customer,

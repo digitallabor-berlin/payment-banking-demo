@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { QrCanvas, useIsTouch, useStatusPoll } from "@demo/ui";
+import { AlertMark, CheckMark } from "./StatusMark.js";
 
 /** Sparkasse red, matching --color-primary, for the QR's dark modules. */
 const QR_DARK = "#ff0000";
@@ -66,48 +67,41 @@ export function IssuanceDialog({ sessionId, offerUri, onClose }: IssuanceDialogP
       aria-modal="true"
       aria-label="Karte zum EUDI Wallet hinzufügen"
     >
-      <div className="dialog-card">
+      <div className="dialog-card px-7 py-8">
         {phase === "waiting" ? (
           <>
-            <h2 className="text-lg font-bold">Karte zum EUDI Wallet hinzufügen</h2>
+            <h2 className="panel-title">Karte zum EUDI Wallet hinzufügen</h2>
 
             {isTouch ? (
               <>
-                <a
-                  href={offerUri}
-                  className="mt-5 inline-block rounded-[var(--radius)] bg-[var(--color-primary)] px-5 py-2.5 font-semibold text-[var(--color-primary-foreground)]"
-                >
+                <a href={offerUri} className="btn btn-primary mt-6 px-5 py-3">
                   Im Wallet öffnen
                 </a>
-                <p className="mt-4 text-sm text-[var(--color-muted-foreground)]">
+                <p className="mt-4 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
                   Bestätigen Sie das Angebot in Ihrer EUDI Wallet App.
                 </p>
               </>
             ) : (
               <>
-                <div className="qr-frame mt-5">
+                <div className="qr-frame mt-6 p-3">
                   <QrCanvas
                     value={offerUri}
-                    size={240}
+                    size={220}
                     darkColor={QR_DARK}
                     ariaLabel="QR-Code für das Credential-Angebot"
                   />
                 </div>
-                <p className="mt-4 text-sm text-[var(--color-muted-foreground)]">
+                <p className="mt-4 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
                   Scannen Sie den Code mit Ihrer EUDI Wallet App.
                 </p>
               </>
             )}
 
-            <p className="mt-3 text-xs text-[var(--color-muted-foreground)]">
-              Status: {value === "offered" || value === null ? "Warte auf Wallet…" : value}
+            <p className="eyebrow mt-4">
+              {value === "offered" || value === null ? "Warte auf Wallet" : value}
             </p>
 
-            <button
-              type="button"
-              onClick={onClose}
-              className="mt-5 text-sm font-medium text-[var(--color-muted-foreground)] underline"
-            >
+            <button type="button" onClick={onClose} className="btn btn-quiet mt-5 px-3 py-2">
               Abbrechen
             </button>
           </>
@@ -115,13 +109,9 @@ export function IssuanceDialog({ sessionId, offerUri, onClose }: IssuanceDialogP
 
         {phase === "success" ? (
           <>
-            <div className="text-5xl" aria-hidden="true">
-              🇪🇺
-            </div>
-            <h2 className="mt-3 text-lg font-bold text-[var(--color-success)]">
-              Karte hinzugefügt
-            </h2>
-            <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
+            <CheckMark className="mx-auto h-12 w-12 text-[var(--color-success)]" />
+            <h2 className="panel-title mt-4 text-[var(--color-success)]">Karte hinzugefügt</h2>
+            <p className="mt-1.5 text-sm text-[var(--color-muted-foreground)]">
               Ihre Karte ist jetzt in Ihrem EUDI Wallet.
             </p>
           </>
@@ -129,18 +119,12 @@ export function IssuanceDialog({ sessionId, offerUri, onClose }: IssuanceDialogP
 
         {phase === "error" ? (
           <>
-            <div className="text-5xl" aria-hidden="true">
-              ⚠️
-            </div>
-            <h2 className="mt-3 text-lg font-bold">Fehlgeschlagen</h2>
-            <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
+            <AlertMark className="mx-auto h-12 w-12 text-[var(--color-destructive)]" />
+            <h2 className="panel-title mt-4">Fehlgeschlagen</h2>
+            <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
               {errorMessage}
             </p>
-            <button
-              type="button"
-              onClick={onClose}
-              className="mt-5 rounded-[var(--radius)] bg-[var(--color-primary)] px-5 py-2.5 font-semibold text-[var(--color-primary-foreground)]"
-            >
+            <button type="button" onClick={onClose} className="btn btn-primary mt-6 px-5 py-2.5">
               Schließen
             </button>
           </>

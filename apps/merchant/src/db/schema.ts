@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const products = sqliteTable("products", {
   id: text("id").primaryKey(),
@@ -7,6 +7,16 @@ export const products = sqliteTable("products", {
   priceCents: integer("price_cents").notNull(),
   imageUrl: text("image_url").notNull(),
   category: text("category").notNull(),
+  /** Pack size exactly as printed on the shelf ticket, e.g. "300 g", "750 ml". */
+  packLabel: text("pack_label").notNull(),
+  /**
+   * The same quantity expressed in `baseUnit`. Exists so the unit price can be
+   * computed rather than stored: EU Directive 98/6/EC requires a grocer to show
+   * the price per kg / per litre alongside the selling price, and a derived
+   * value cannot drift out of sync with priceCents the way a stored one can.
+   */
+  baseQuantity: real("base_quantity").notNull(),
+  baseUnit: text("base_unit", { enum: ["kg", "l", "pc"] }).notNull(),
 });
 
 export const orders = sqliteTable("orders", {

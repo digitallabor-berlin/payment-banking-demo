@@ -9,14 +9,13 @@ export function CartBadge() {
   return (
     <Link
       href="/cart"
-      className="relative rounded-[var(--radius)] border border-[var(--color-border)] px-3 py-1.5 text-sm font-medium"
+      className="btn btn-outline px-3.5 py-2"
+      aria-label={
+        itemCount === 0 ? "Cart, empty" : `Cart, ${itemCount} item${itemCount === 1 ? "" : "s"}`
+      }
     >
       Cart
-      {itemCount > 0 ? (
-        <span className="ml-1.5 rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-xs font-bold text-white">
-          {itemCount}
-        </span>
-      ) : null}
+      {itemCount > 0 ? <span className="count-pill">{itemCount}</span> : null}
     </Link>
   );
 }

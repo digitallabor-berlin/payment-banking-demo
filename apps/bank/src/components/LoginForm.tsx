@@ -36,7 +36,7 @@ export function LoginForm() {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="space-y-1.5">
-        <label htmlFor="username" className="text-sm font-medium">
+        <label htmlFor="username" className="eyebrow block">
           Anmeldename
         </label>
         <input
@@ -46,12 +46,12 @@ export function LoginForm() {
           value={username}
           onChange={(event) => setUsername(event.target.value)}
           required
-          className="w-full rounded-[var(--radius)] border border-[var(--color-border)] px-3 py-2 outline-none focus:border-[var(--color-primary)]"
+          className="field px-3.5 py-2.5"
         />
       </div>
 
       <div className="space-y-1.5">
-        <label htmlFor="password" className="text-sm font-medium">
+        <label htmlFor="password" className="eyebrow block">
           Passwort
         </label>
         <input
@@ -62,27 +62,25 @@ export function LoginForm() {
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           required
-          className="w-full rounded-[var(--radius)] border border-[var(--color-border)] px-3 py-2 outline-none focus:border-[var(--color-primary)]"
+          className="field px-3.5 py-2.5"
         />
       </div>
 
       {error ? (
-        <p role="alert" className="text-sm text-[var(--color-destructive)]">
+        <p role="alert" className="text-sm font-medium text-[var(--color-destructive)]">
           {error}
         </p>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="w-full rounded-[var(--radius)] bg-[var(--color-primary)] px-4 py-2.5 font-semibold text-[var(--color-primary-foreground)] disabled:opacity-60"
-      >
-        {pending ? "Anmelden…" : "Anmelden"}
+      <button type="submit" disabled={pending} className="btn btn-primary w-full py-3">
+        {pending ? "Wird angemeldet…" : "Anmelden"}
       </button>
 
-      <div className="rounded-[var(--radius)] bg-[var(--color-muted)] px-3 py-2 text-xs text-[var(--color-muted-foreground)]">
-        <strong className="font-semibold">Demo-Zugänge:</strong> anna / demo1234 ·
-        ben / demo1234
+      <div className="rounded-lg bg-[var(--color-muted)] px-3.5 py-3 text-xs leading-relaxed text-[var(--color-muted-foreground)]">
+        <span className="eyebrow">Demo-Zugänge</span>
+        <p className="mono mt-1.5 text-[var(--color-foreground)]">
+          anna / demo1234 · ben / demo1234
+        </p>
       </div>
     </form>
   );

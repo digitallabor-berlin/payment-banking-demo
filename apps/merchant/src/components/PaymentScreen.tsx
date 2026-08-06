@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { QrCanvas, useIsTouch, useStatusPoll } from "@demo/ui";
 import { formatEuroCents } from "@/lib/format.js";
 import { EudiPayLogo } from "./EudiPayLogo.js";
+import { AlertMark, CheckMark } from "./StatusMark.js";
 
 /** EudiPay brand blue — also the QR's dark modules (spec §9.5). */
 const BRAND_BLUE = "#004DD7";
@@ -149,33 +150,32 @@ export function PaymentScreen({
 
   return (
     <div className="eudipay-overlay" role="dialog" aria-modal="true" aria-label="EudiPay payment">
-      <div className="eudipay-card">
-        <EudiPayLogo className="mx-auto h-[100px] w-[100px]" />
-        <h1 className="eudipay-headline mt-2">EudiPay</h1>
+      <div className="eudipay-card px-7 py-8">
+        <EudiPayLogo className="mx-auto h-16 w-16" />
+        <h1 className="eudipay-headline mt-2.5">EudiPay</h1>
 
-        <p className="eudipay-amount mt-4">{formatEuroCents(amountCents)}</p>
-        <p className="eudipay-muted text-sm">
-          {merchantName} · Order {orderId}
+        {/* The amount is what is being consented to, so it is the largest
+            thing on the sheet. Merchant and order sit beneath it as context. */}
+        <p className="eudipay-amount mt-6">{formatEuroCents(amountCents)}</p>
+        <p className="eudipay-muted mt-2 text-sm">
+          {merchantName} · Order <span className="font-mono text-xs">{orderId}</span>
         </p>
 
         {state === "completed" ? (
           <>
-            <div className="mt-6 text-5xl" aria-hidden="true">
-              🇪🇺
-            </div>
+            <CheckMark className="mx-auto mt-7 h-12 w-12 text-[#004DD7]" />
             <p className="mt-3 text-lg font-bold" style={{ color: BRAND_BLUE }}>
-              Payment Successful
+              Payment successful
             </p>
+            <p className="eudipay-muted mt-1 text-sm">Taking you to your receipt…</p>
           </>
         ) : showError ? (
           <>
-            <div className="mt-6 text-5xl" aria-hidden="true">
-              ⚠️
-            </div>
+            <AlertMark className="mx-auto mt-7 h-12 w-12 text-[#b91c1c]" />
             <p className="mt-3 text-lg font-bold">Payment failed</p>
             <p className="eudipay-muted mt-1 text-sm">{errorMessage}</p>
             {failedChecks.length > 0 ? (
-              <p className="eudipay-muted mt-2 text-xs">
+              <p className="eudipay-muted mt-3 text-xs">
                 Failed checks: <span className="font-mono">{failedChecks.join(", ")}</span>
               </p>
             ) : null}
@@ -184,60 +184,60 @@ export function PaymentScreen({
                 {retryError}
               </p>
             ) : null}
-            <div className="mt-6 flex flex-col gap-2">
+            <div className="mt-7 flex flex-col gap-1.5">
               {failureReason === "cancelled" ? null : (
                 <button
                   type="button"
                   onClick={tryAgain}
-                  className="eudipay-button eudipay-button-primary"
+                  className="eudipay-button eudipay-button-primary py-3"
                 >
-                  Try Again
+                  Try again
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => router.replace("/")}
-                className="eudipay-button eudipay-button-secondary"
+                className="eudipay-button eudipay-button-secondary py-3"
               >
-                Back to shop
+                Back to the shop
               </button>
             </div>
           </>
         ) : redirecting ? (
           <>
-            <div className="eudipay-spinner mt-6" />
+            <div className="eudipay-spinner mt-8" />
             <p className="eudipay-muted mt-4 text-sm">Opening your wallet…</p>
             <button
               type="button"
               onClick={cancel}
-              className="eudipay-button eudipay-button-secondary mt-4"
+              className="eudipay-button eudipay-button-secondary mt-5 py-3"
             >
               Cancel
             </button>
           </>
         ) : (
           <>
-            <p className="eudipay-badge mt-4">
+            <p className="eudipay-badge mt-5 px-3 py-1.5">
               {state === "settling" ? "Contacting your bank…" : "Waiting for your wallet"}
             </p>
 
-            <div className="eudipay-qr-frame mt-5">
+            <div className="eudipay-qr-frame mt-5 p-3">
               <QrCanvas
                 value={openid4vpUri}
-                size={240}
+                size={220}
                 darkColor={BRAND_BLUE}
                 ariaLabel="QR code for the payment request"
               />
             </div>
 
             <p className="eudipay-muted mt-4 text-sm">
-              Scan this code with your EUDI Wallet app to authorize the payment.
+              Scan this with your EUDI Wallet to approve the payment.
             </p>
 
             <button
               type="button"
               onClick={cancel}
-              className="eudipay-button eudipay-button-secondary mt-5"
+              className="eudipay-button eudipay-button-secondary mt-5 py-3"
             >
               Cancel
             </button>

@@ -1,34 +1,29 @@
 import type { TransactionDto } from "@/lib/queries.js";
-import { formatBookedAt, formatEuroCents } from "@/lib/format.js";
+import { formatEuroCents } from "@/lib/format.js";
+import { EuStars } from "./EuStars.js";
 
 export function TransactionRow({ transaction }: { transaction: TransactionDto }) {
   const isDebit = transaction.amountCents < 0;
 
   return (
-    <li className="flex items-center gap-3 border-b border-[var(--color-border)] py-3 last:border-b-0">
-      <div className="min-w-0 flex-1">
-        <p className="truncate font-medium">{transaction.counterparty}</p>
-        <p className="truncate text-xs text-[var(--color-muted-foreground)]">
-          {formatBookedAt(transaction.bookedAt)} · {transaction.reference}
+    <li className="ledger-row py-3">
+      <div className="min-w-0">
+        <p className="ledger-counterparty truncate">{transaction.counterparty}</p>
+        <p className="ledger-meta mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="truncate">{transaction.reference}</span>
+          {transaction.paidWithWallet ? (
+            // The wallet mark rather than a grey pill: it is the same twelve
+            // stars that appear on the card, so the connection between "I
+            // added this card" and "I paid with it" is visible at a glance.
+            <span className="badge badge-wallet px-2 py-0.5">
+              <EuStars className="h-3 w-3" />
+              EUDI Wallet
+            </span>
+          ) : null}
         </p>
       </div>
 
-      {transaction.paidWithWallet ? (
-        <span
-          className="badge bg-[var(--color-muted)] text-[var(--color-foreground)]"
-          title="Mit dem EUDI Wallet bezahlt"
-        >
-          EUDI Wallet
-        </span>
-      ) : null}
-
-      <span
-        className={
-          isDebit
-            ? "tabular-nums font-semibold"
-            : "tabular-nums font-semibold text-[var(--color-success)]"
-        }
-      >
+      <span className="ledger-amount" data-direction={isDebit ? "debit" : "credit"}>
         {formatEuroCents(transaction.amountCents)}
       </span>
     </li>

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { AccountPanel } from "@/components/AccountPanel.js";
 import { AppHeader } from "@/components/AppHeader.js";
 import { CardTile } from "@/components/CardTile.js";
-import { TransactionRow } from "@/components/TransactionRow.js";
+import { TransactionLedger } from "@/components/TransactionLedger.js";
 import { getDb } from "@/db/index.js";
 import { listAccounts, listCards, listTransactions } from "@/lib/queries.js";
 import { getSession } from "@/lib/session.js";
@@ -23,35 +23,36 @@ export default async function DashboardPage() {
     <>
       <AppHeader displayName={session.displayName} active="dashboard" />
 
-      <main className="mx-auto max-w-5xl space-y-6 px-4 py-6">
-        <div className="grid gap-4 sm:grid-cols-2">
+      <main className="mx-auto max-w-5xl space-y-10 px-4 py-8">
+        <h1 className="page-title">Guten Tag, {session.displayName}</h1>
+
+        <section className="grid gap-4 sm:grid-cols-2">
           {accounts.map((account) => (
             <AccountPanel key={account.id} account={account} />
           ))}
-        </div>
-
-        <section className="space-y-3">
-          <h2 className="text-lg font-semibold">Karten</h2>
-          {cards.map((card) => (
-            <CardTile key={card.id} card={card} />
-          ))}
         </section>
 
-        <section className="panel p-5">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Letzte Umsätze</h2>
+        <section>
+          <h2 className="eyebrow">Karten</h2>
+          <div className="mt-3 space-y-4">
+            {cards.map((card) => (
+              <CardTile key={card.id} card={card} holder={session.displayName} />
+            ))}
+          </div>
+        </section>
+
+        <section className="panel p-6">
+          <div className="panel-divider flex items-baseline justify-between gap-4 border-t-0 pb-4">
+            <h2 className="panel-title">Letzte Umsätze</h2>
             <Link
               href="/transactions"
-              className="text-sm font-medium text-[var(--color-primary)]"
+              className="text-sm font-semibold text-[var(--color-primary)] hover:underline"
             >
               Alle anzeigen
             </Link>
           </div>
-          <ul>
-            {recent.map((transaction) => (
-              <TransactionRow key={transaction.id} transaction={transaction} />
-            ))}
-          </ul>
+
+          <TransactionLedger transactions={recent} />
         </section>
       </main>
     </>

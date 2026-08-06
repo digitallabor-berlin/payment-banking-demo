@@ -10,11 +10,18 @@ export function AddToCartButton({ product }: { product: ProductDto }) {
     <button
       type="button"
       onClick={() =>
-        add({ productId: product.id, name: product.name, priceCents: product.priceCents })
+        add({
+          productId: product.id,
+          name: product.name,
+          priceCents: product.priceCents,
+          imageUrl: product.imageUrl,
+          packLabel: product.packLabel,
+        })
       }
-      className="rounded-[var(--radius)] bg-[var(--color-brand)] px-3 py-2 text-sm font-semibold text-white hover:bg-[var(--color-brand-dark)]"
+      className="btn btn-solid px-3.5 py-2"
+      aria-label={`Add ${product.name} to cart`}
     >
-      Add to Cart
+      Add
     </button>
   );
 }

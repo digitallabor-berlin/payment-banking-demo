@@ -8,6 +8,12 @@ export interface ProductDto {
   description: string;
   priceCents: number;
   category: string;
+  /** Shelf photography, served from `public/products/`. */
+  imageUrl: string;
+  /** Pack size as printed, e.g. "300 g". */
+  packLabel: string;
+  baseQuantity: number;
+  baseUnit: "kg" | "l" | "pc";
 }
 
 function toDto(row: typeof products.$inferSelect): ProductDto {
@@ -17,6 +23,10 @@ function toDto(row: typeof products.$inferSelect): ProductDto {
     description: row.description,
     priceCents: row.priceCents,
     category: row.category,
+    imageUrl: row.imageUrl,
+    packLabel: row.packLabel,
+    baseQuantity: row.baseQuantity,
+    baseUnit: row.baseUnit,
   };
 }
 
@@ -27,4 +37,26 @@ export function listProducts(db: Db): ProductDto[] {
 export function getProduct(db: Db, id: string): ProductDto | null {
   const row = db.select().from(products).where(eq(products.id, id)).get();
   return row ? toDto(row) : null;
+}
+
+export interface Aisle {
+  name: string;
+  products: ProductDto[];
+}
+
+/**
+ * Groups the catalogue into aisles in first-appearance order. A shop is laid
+ * out in aisles, so the storefront is too — and the seed's order is the
+ * merchandiser's decision, which an alphabetical sort here would overrule.
+ */
+export function listAisles(db: Db): Aisle[] {
+  const aisles: Aisle[] = [];
+
+  for (const product of listProducts(db)) {
+    const existing = aisles.find((aisle) => aisle.name === product.category);
+    if (existing) existing.products.push(product);
+    else aisles.push({ name: product.category, products: [product] });
+  }
+
+  return aisles;
 }

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader.js";
-import { TransactionRow } from "@/components/TransactionRow.js";
+import { TransactionLedger } from "@/components/TransactionLedger.js";
 import { getDb } from "@/db/index.js";
 import { listTransactions } from "@/lib/queries.js";
 import { getSession } from "@/lib/session.js";
@@ -31,39 +31,32 @@ export default async function TransactionsPage({
     <>
       <AppHeader displayName={session.displayName} active="transactions" />
 
-      <main className="mx-auto max-w-5xl px-4 py-6">
-        <h1 className="mb-4 text-lg font-semibold">Umsätze</h1>
+      <main className="mx-auto max-w-5xl px-4 py-8">
+        <div className="flex items-baseline justify-between gap-4">
+          <h1 className="page-title">Umsätze</h1>
+          <span className="eyebrow">Seite {page}</span>
+        </div>
 
-        <section className="panel p-5">
-          <ul>
-            {visible.map((transaction) => (
-              <TransactionRow key={transaction.id} transaction={transaction} />
-            ))}
-          </ul>
-          {visible.length === 0 ? (
-            <p className="py-4 text-sm text-[var(--color-muted-foreground)]">
-              Keine weiteren Umsätze.
-            </p>
-          ) : null}
+        <section className="panel mt-5 p-6">
+          <TransactionLedger
+            transactions={visible}
+            emptyLabel="Keine weiteren Umsätze."
+          />
         </section>
 
-        <nav className="mt-4 flex items-center justify-between text-sm">
+        <nav
+          className="mt-5 flex items-center justify-between gap-4"
+          aria-label="Seitennavigation"
+        >
           {page > 1 ? (
-            <Link
-              href={`/transactions?page=${page - 1}`}
-              className="font-medium text-[var(--color-primary)]"
-            >
+            <Link href={`/transactions?page=${page - 1}`} className="btn btn-outline px-4 py-2">
               ← Neuer
             </Link>
           ) : (
             <span />
           )}
-          <span className="text-[var(--color-muted-foreground)]">Seite {page}</span>
           {hasNext ? (
-            <Link
-              href={`/transactions?page=${page + 1}`}
-              className="font-medium text-[var(--color-primary)]"
-            >
+            <Link href={`/transactions?page=${page + 1}`} className="btn btn-outline px-4 py-2">
               Älter →
             </Link>
           ) : (

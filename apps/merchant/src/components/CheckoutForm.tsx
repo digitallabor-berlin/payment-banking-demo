@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { formatEuroCents } from "@/lib/format.js";
@@ -27,7 +28,7 @@ export function CheckoutForm() {
         }),
       });
       if (!orderResponse.ok) {
-        setError("Could not create the order. Please check your cart and try again.");
+        setError("Could not create the order. Please check your basket and try again.");
         return;
       }
       const order = (await orderResponse.json()) as { orderId: string };
@@ -53,51 +54,97 @@ export function CheckoutForm() {
   }
 
   if (items.length === 0) {
-    return <p className="text-[var(--color-muted-foreground)]">Your cart is empty.</p>;
+    return (
+      <div className="surface p-10 text-center">
+        <p className="text-[15px] text-[var(--color-muted-foreground)]">
+          There is nothing to pay for yet.
+        </p>
+        <Link href="/" className="btn btn-solid mt-5 px-5 py-2.5">
+          Browse the shelves
+        </Link>
+      </div>
+    );
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="space-y-1.5">
-        <label htmlFor="name" className="text-sm font-medium">
-          Full name
-        </label>
-        <input
-          id="name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          required
-          className="w-full rounded-[var(--radius)] border border-[var(--color-border)] px-3 py-2"
-        />
-      </div>
+    <div className="grid gap-8 md:grid-cols-[1fr_18rem] md:items-start">
+      <form onSubmit={onSubmit} className="space-y-5">
+        <div className="space-y-1.5">
+          <label htmlFor="name" className="eyebrow block">
+            Full name
+          </label>
+          <input
+            id="name"
+            name="name"
+            autoComplete="name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            required
+            className="field px-3.5 py-2.5"
+          />
+        </div>
 
-      <div className="space-y-1.5">
-        <label htmlFor="email" className="text-sm font-medium">
-          Email
-        </label>
-        <input
-          id="email"
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          required
-          className="w-full rounded-[var(--radius)] border border-[var(--color-border)] px-3 py-2"
-        />
-      </div>
+        <div className="space-y-1.5">
+          <label htmlFor="email" className="eyebrow block">
+            Email
+          </label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            required
+            className="field px-3.5 py-2.5"
+          />
+          <p className="text-xs text-[var(--color-muted-foreground)]">
+            Your receipt goes here. Nothing else.
+          </p>
+        </div>
 
-      {error ? (
-        <p role="alert" className="text-sm text-[var(--color-destructive)]">
-          {error}
-        </p>
-      ) : null}
+        {error ? (
+          <p role="alert" className="text-sm font-medium text-[var(--color-destructive)]">
+            {error}
+          </p>
+        ) : null}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="checkout-cta w-full rounded-[var(--radius)] py-3 font-semibold text-white disabled:opacity-60"
-      >
-        {pending ? "Starting payment…" : `Pay with EUDI Wallet — ${formatEuroCents(totalCents)}`}
-      </button>
-    </form>
+        <button
+          type="submit"
+          disabled={pending}
+          className="checkout-cta btn w-full py-3.5 text-[0.9375rem]"
+        >
+          {pending
+            ? "Starting payment…"
+            : `Pay ${formatEuroCents(totalCents)} with your EUDI Wallet`}
+        </button>
+      </form>
+
+      {/* The basket stays visible: nobody should have to trust a total they
+          cannot see while typing their name. */}
+      <aside className="surface p-5">
+        <h2 className="eyebrow">Your basket</h2>
+        <ul className="mt-3 space-y-2.5">
+          {items.map((item) => (
+            <li key={item.productId} className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="min-w-0">
+                <span className="data mr-1.5 text-[var(--color-muted-foreground)]">
+                  {item.quantity}×
+                </span>
+                {item.name}
+              </span>
+              <span className="shrink-0 tabular-nums">
+                {formatEuroCents(item.priceCents * item.quantity)}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div className="rule-strong mt-4 pb-2.5" />
+        <div className="flex items-baseline justify-between">
+          <span className="eyebrow">Total</span>
+          <span className="display text-2xl">{formatEuroCents(totalCents)}</span>
+        </div>
+      </aside>
+    </div>
   );
 }

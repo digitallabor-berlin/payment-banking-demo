@@ -3,6 +3,16 @@ export interface CartItem {
   name: string;
   priceCents: number;
   quantity: number;
+  /**
+   * Shelf photograph and pack size, carried so the cart can show what was
+   * picked without a round trip to the products table.
+   *
+   * Optional on purpose: the cart lives in localStorage, and a cart written
+   * before these fields existed must still load. Consumers fall back rather
+   * than assume.
+   */
+  imageUrl?: string;
+  packLabel?: string;
 }
 
 export function addItem(

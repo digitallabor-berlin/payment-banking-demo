@@ -39,17 +39,17 @@ export function AddToWalletButton({
 
   return (
     <>
-      <div className="flex flex-col items-end gap-1">
+      <div className="flex flex-col items-start gap-1.5">
         <button
           type="button"
           onClick={start}
           disabled={disabled || pending}
-          className="rounded-[var(--radius)] bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-[var(--color-primary-foreground)] disabled:opacity-50"
+          className="btn btn-primary px-4 py-2.5"
         >
           {pending ? "Wird vorbereitet…" : "Zum EUDI Wallet hinzufügen"}
         </button>
         {error ? (
-          <span role="alert" className="text-xs text-[var(--color-destructive)]">
+          <span role="alert" className="text-xs font-medium text-[var(--color-destructive)]">
             {error}
           </span>
         ) : null}

@@ -1,110 +1,382 @@
 @import "tailwindcss";
 
+/*
+ * Larder — a neighbourhood grocer.
+ *
+ * The palette is built outward from #004dd7, the EudiPay brand blue that spec
+ * §9.4 pins to the checkout button. Making the shop's own accent a member of
+ * that same blue family means the payment step reads as the shop's own voice
+ * continuing, rather than a foreign brand crashing the page.
+ *
+ * The one warm note is `--color-ticket`, the yellow of a supermarket shelf
+ * label. It appears in exactly one place: the rail down the left of a price
+ * ticket.
+ *
+ * There are no box-shadows in this file, on purpose. Surfaces separate by
+ * hairline border and by ground colour, which keeps the photography — the only
+ * thing on the page with real depth — as the sole source of dimension.
+ *
+ * Specificity note: these component classes sit outside Tailwind's layers and
+ * therefore beat its utilities. They declare appearance only, never padding or
+ * margin, so spacing stays adjustable from the markup.
+ */
 @theme {
-  --color-brand: oklch(0.51 0.09 162);
-  --color-brand-dark: oklch(0.4 0.09 162);
-  --color-accent: oklch(0.74 0.14 55);
-  --color-background: oklch(0.97 0.01 60);
+  --color-ink: oklch(0.21 0.042 264);
+  --color-paper: oklch(0.976 0.004 250);
+  --color-shelf: oklch(0.935 0.01 250);
   --color-surface: oklch(1 0 0);
-  --color-foreground: oklch(0.24 0.02 260);
-  --color-muted-foreground: oklch(0.52 0.01 260);
-  --color-border: oklch(0.9 0.01 50);
-  --color-success: oklch(0.58 0.15 145);
-  --color-destructive: oklch(0.55 0.19 25);
+  --color-signal: oklch(0.45 0.225 264);
+  --color-signal-dark: oklch(0.37 0.2 264);
+  --color-ticket: oklch(0.855 0.155 92);
+  --color-foreground: oklch(0.21 0.042 264);
+  --color-muted-foreground: oklch(0.5 0.018 262);
+  --color-border: oklch(0.855 0.012 258);
+  --color-success: oklch(0.55 0.14 150);
+  --color-destructive: oklch(0.53 0.2 27);
 
-  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
-  --radius: 1rem;
+  --font-sans: var(--font-body), system-ui, -apple-system, sans-serif;
+  --font-display: var(--font-display-face), var(--font-body), system-ui, sans-serif;
+  --font-mono: var(--font-mono-plex), ui-monospace, SFMono-Regular, monospace;
 
-  --shadow-card: 0 10px 24px rgb(20 40 30 / 0.06);
-  --shadow-card-hover: 0 16px 32px rgb(20 40 30 / 0.1);
+  --radius: 0.625rem;
 }
 
 body {
-  background: var(--color-background);
-  color: var(--color-foreground);
+  background: var(--color-paper);
+  color: var(--color-ink);
   font-family: var(--font-sans);
 }
-.shop-header {
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
-}
 
-.shop-hero {
-  background: linear-gradient(
-    135deg,
-    color-mix(in oklab, var(--color-brand) 10%, white),
-    color-mix(in oklab, var(--color-accent) 10%, white)
-  );
-}
+/* ---------------------------------------------------------------- type ---- */
 
-.product-card {
-  background: var(--color-surface);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-card);
-  transition: box-shadow 150ms ease;
-}
-
-.product-card:hover {
-  box-shadow: var(--shadow-card-hover);
-}
-
-.product-monogram {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  aspect-ratio: 4 / 3;
-  border-radius: calc(var(--radius) - 0.25rem);
-  font-size: 2rem;
+.display {
+  font-family: var(--font-display);
   font-weight: 700;
-  color: white;
+  letter-spacing: -0.03em;
+  line-height: 0.95;
 }
 
-.cart-row {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+/* Aisle names, form labels, table headers — one label style across the app. */
+.eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
+
+.data {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+  letter-spacing: -0.01em;
+}
+
+/* ------------------------------------------------------------ furniture ---- */
+
+.rule {
   border-bottom: 1px solid var(--color-border);
-  padding: 1rem 0;
 }
 
-.quantity-stepper {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
+.rule-strong {
+  border-bottom: 1.5px solid var(--color-ink);
+}
+
+.site-header {
+  background: var(--color-paper);
+  border-bottom: 1.5px solid var(--color-ink);
+}
+
+/*
+ * The masthead. No gradient: the shop's ground is the shelf colour, and the
+ * type does the work.
+ */
+.masthead {
+  background: var(--color-shelf);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.surface {
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  padding: 0.25rem 0.5rem;
 }
 
-.checkout-summary {
+/* ------------------------------------------------- the shelf-edge ticket ---- */
+
+/*
+ * The signature element. A grocer's product is not a card with a title and a
+ * price in the corner — it is a photograph above a shelf-edge label, and that
+ * label has a fixed hierarchy the shopper already knows how to read: name
+ * small, price large, unit price fine print. Following the real hierarchy is
+ * what makes the grid read as a shop rather than as a generic catalogue.
+ *
+ * The unit price is not decoration. EU Directive 98/6/EC obliges a grocer to
+ * print the price per kg or litre so pack sizes can be compared, and it is
+ * computed from the selling price in lib/format.ts.
+ */
+.shelf-item {
+  display: flex;
+  flex-direction: column;
   background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  transition: border-color 140ms ease;
 }
 
+.shelf-item:hover {
+  border-color: var(--color-ink);
+}
+
+.shelf-photo {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  background: var(--color-shelf);
+}
+
+/*
+ * A column so the price block can be pushed to the bottom with `mt-auto`:
+ * descriptions run to one or two lines, and prices that do not sit on a shared
+ * baseline across the row stop reading as a shelf.
+ */
+.ticket {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  flex: 1;
+}
+
+/* The yellow rail of a supermarket shelf label — the page's only warm colour. */
+.ticket::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--color-ticket);
+}
+
+.ticket-name {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  letter-spacing: -0.01em;
+}
+
+.ticket-price {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.875rem;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ticket-unit {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-muted-foreground);
+}
+
+/* ------------------------------------------------------------- controls ---- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: 1.5px solid transparent;
+  transition:
+    background-color 130ms ease,
+    border-color 130ms ease,
+    color 130ms ease;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-solid {
+  background: var(--color-ink);
+  color: var(--color-paper);
+  border-color: var(--color-ink);
+}
+
+.btn-solid:hover:not(:disabled) {
+  background: var(--color-signal);
+  border-color: var(--color-signal);
+}
+
+.btn-outline {
+  background: transparent;
+  border-color: var(--color-border);
+  color: var(--color-ink);
+}
+
+.btn-outline:hover:not(:disabled) {
+  border-color: var(--color-ink);
+}
+
+.btn-quiet {
+  background: transparent;
+  color: var(--color-muted-foreground);
+  font-weight: 500;
+}
+
+.btn-quiet:hover:not(:disabled) {
+  color: var(--color-ink);
+}
+
+/*
+ * Spec §9.4: the checkout button is the one place the merchant palette yields
+ * to the EudiPay brand. --color-signal is deliberately a near neighbour of it,
+ * so the handover is a shift in weight rather than in hue.
+ */
 .checkout-cta {
-  background: #004dd7; /* EudiPay blue — the one place the merchant palette
-                           yields to the payment brand (spec §9.4) */
+  background: #004dd7;
+  border-color: #004dd7;
+  color: #ffffff;
 }
 
-.checkout-cta:hover {
+.checkout-cta:hover:not(:disabled) {
   background: #0040ad;
+  border-color: #0040ad;
 }
 
-@keyframes eudipay-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+.field {
+  width: 100%;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  font-size: 0.9375rem;
+  color: var(--color-ink);
+  transition:
+    border-color 130ms ease,
+    box-shadow 130ms ease;
 }
 
-@keyframes eudipay-slide-up {
-  from { transform: translateY(16px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+.field:hover {
+  border-color: color-mix(in oklab, var(--color-ink) 40%, white);
 }
 
-@keyframes eudipay-spin {
-  to { transform: rotate(360deg); }
+.field:focus {
+  outline: none;
+  border-color: var(--color-signal);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-signal) 16%, white);
 }
 
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.stepper button {
+  width: 2rem;
+  height: 2rem;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--color-muted-foreground);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.stepper button:hover {
+  background: var(--color-shelf);
+  color: var(--color-ink);
+}
+
+.stepper-value {
+  min-width: 2rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.count-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.3rem;
+  border-radius: 9999px;
+  background: var(--color-signal);
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- rows ---- */
+
+.line-row {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr auto;
+  align-items: center;
+  column-gap: 1rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.line-row:last-child {
+  border-bottom: 0;
+}
+
+.line-thumb {
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: cover;
+  border-radius: 0.375rem;
+  background: var(--color-shelf);
+}
+
+.check-row {
+  display: grid;
+  grid-template-columns: 1rem 1fr auto;
+  align-items: baseline;
+  column-gap: 0.6rem;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.8125rem;
+}
+
+.check-row:last-child {
+  border-bottom: 0;
+}
+
+.check-name {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+/* -------------------------------------------------- EudiPay payment sheet ---- */
+
+/*
+ * Spec §9.4/§9.5 fix this surface to the EudiPay brand, so its blue and yellow
+ * are hard-coded rather than tokenised — they are not Larder's to change. Only
+ * the craft (spacing, type scale, motion, focus) is ours.
+ */
 .eudipay-overlay {
   position: fixed;
   inset: 0;
@@ -113,63 +385,69 @@ body {
   align-items: center;
   justify-content: center;
   min-height: 100dvh;
-  padding: 1.5rem;
-  background: rgb(17 24 39 / 0.5);
-  backdrop-filter: blur(4px);
-  animation: eudipay-fade-in 0.3s ease;
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  background: rgb(11 18 32 / 0.55);
+  backdrop-filter: blur(6px);
+  animation: eudipay-fade-in 0.24s ease both;
+  font-family: var(--font-sans);
 }
 
 .eudipay-card {
   width: 100%;
-  max-width: 400px;
-  padding: 2.5rem;
+  max-width: 25rem;
   background: #ffffff;
-  border-radius: 1.5rem;
-  border-top: 6px solid #004dd7;
-  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  border-radius: 1rem;
+  border-top: 5px solid #004dd7;
   text-align: center;
-  color: #1f2937;
-  animation: eudipay-slide-up 0.4s ease;
+  color: #16233c;
+  animation: eudipay-slide-up 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both;
 }
 
 .eudipay-headline {
-  font-size: 1.75rem;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
   font-weight: 800;
+  letter-spacing: -0.035em;
   color: #004dd7;
 }
 
 .eudipay-amount {
-  font-size: 1.5rem;
+  font-family: var(--font-display);
+  font-size: 2.25rem;
   font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .eudipay-muted {
-  color: #4b5563;
+  color: #55627a;
 }
 
 .eudipay-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   border-radius: 9999px;
-  background: #ffefb4;
-  padding: 0.25rem 0.75rem;
-  font-size: 0.8rem;
+  background: #fff4cc;
+  color: #6b5300;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
 .eudipay-qr-frame {
   display: inline-block;
-  padding: 1rem;
   background: #ffffff;
-  border: 2px solid #ffefb4;
-  border-radius: 1rem;
+  border: 1px solid #dbe2ee;
+  border-radius: 0.75rem;
 }
 
 .eudipay-button {
-  font-size: 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9375rem;
   font-weight: 600;
-  border-radius: 0.75rem;
-  padding: 0.75rem 1.25rem;
+  border-radius: 0.5rem;
 }
 
 .eudipay-button-primary {
@@ -177,55 +455,99 @@ body {
   color: #ffffff;
 }
 
+.eudipay-button-primary:hover {
+  background: #0040ad;
+}
+
 .eudipay-button-secondary {
   background: transparent;
-  color: #4b5563;
+  color: #55627a;
+}
+
+.eudipay-button-secondary:hover {
+  color: #16233c;
 }
 
 .eudipay-spinner {
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.25rem;
+  height: 2.25rem;
   margin: 0 auto;
-  border: 3px solid #ffefb4;
+  border-radius: 50%;
+  border: 3px solid #dbe2ee;
   border-top-color: #004dd7;
-  border-radius: 9999px;
-  animation: eudipay-spin 1s linear infinite;
+  animation: eudipay-spin 0.8s linear infinite;
 }
 
-/* Mobile: slide up from the bottom, top-only rounded corners. */
+/* Mobile: the sheet slides up from the bottom edge, as a payment sheet should. */
 @media (max-width: 480px) {
   .eudipay-overlay {
     align-items: flex-end;
-    padding: 0;
   }
 
   .eudipay-card {
     max-width: none;
-    border-radius: 1.5rem 1.5rem 0 0;
-    padding-bottom: calc(2.5rem + env(safe-area-inset-bottom));
+    border-radius: 1rem 1rem 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
   }
 }
 
-.success-card {
-  background: var(--color-surface);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-card);
+/* -------------------------------------------------------------- motion ---- */
+
+@keyframes eudipay-fade-in {
+  from {
+    opacity: 0;
+  }
 }
 
-.check-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  border-bottom: 1px solid var(--color-border);
-  padding: 0.5rem 0;
-  font-size: 0.875rem;
+@keyframes eudipay-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
 }
 
-.check-row:last-child {
-  border-bottom: 0;
+@keyframes eudipay-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-.check-name {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8rem;
+/*
+ * The page's one orchestrated moment: the shelf fills in, aisle by aisle, on
+ * load. --stagger is set per item from the markup.
+ */
+@keyframes shelf-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+.shelf-item {
+  animation: shelf-in 0.42s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  animation-delay: calc(var(--stagger, 0) * 45ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf-item,
+  .eudipay-overlay,
+  .eudipay-card {
+    animation: none;
+  }
+
+  .eudipay-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+/* --------------------------------------------------------------- focus ---- */
+
+:where(a, button, input, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-signal);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.eudipay-card :where(a, button, summary):focus-visible {
+  outline-color: #004dd7;
 }

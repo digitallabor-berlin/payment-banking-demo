@@ -19,9 +19,9 @@ afterEach(() => {
 });
 
 describe("seed", () => {
-  it("creates exactly six products", () => {
+  it("creates exactly fifteen products", () => {
     seed(db);
-    expect(db.select().from(products).all()).toHaveLength(6);
+    expect(db.select().from(products).all()).toHaveLength(15);
   });
 
   it("gives each product a positive price in whole cents", () => {
@@ -29,6 +29,15 @@ describe("seed", () => {
     for (const product of db.select().from(products).all()) {
       expect(product.priceCents).toBeGreaterThan(0);
       expect(Number.isInteger(product.priceCents)).toBe(true);
+    }
+  });
+
+  it("gives each product a pack size a unit price can be computed from", () => {
+    seed(db);
+    for (const product of db.select().from(products).all()) {
+      expect(product.packLabel).not.toBe("");
+      expect(product.baseQuantity).toBeGreaterThan(0);
+      expect(["kg", "l", "pc"]).toContain(product.baseUnit);
     }
   });
 
@@ -41,7 +50,7 @@ describe("seed", () => {
   it("is idempotent — running twice leaves the same row count", () => {
     seed(db);
     seed(db);
-    expect(db.select().from(products).all()).toHaveLength(6);
+    expect(db.select().from(products).all()).toHaveLength(15);
   });
 
   it("does not delete orders created after seeding, only re-running seed does", () => {

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { SiteHeader } from "@/components/SiteHeader.js";
 import { VerificationDetails } from "@/components/VerificationDetails.js";
 import { getDb } from "@/db/index.js";
 import { formatEuroCents } from "@/lib/format.js";
@@ -19,42 +20,46 @@ export default async function SuccessPage({
   if (!order) notFound();
 
   return (
-    <main className="mx-auto max-w-lg px-4 py-16">
-      <div className="success-card p-8 text-center">
-        <div className="text-5xl" aria-hidden="true">
-          ✅
-        </div>
-        <h1 className="mt-4 text-2xl font-bold">Payment successful</h1>
-        <p className="mt-1 text-[var(--color-muted-foreground)]">
-          Thanks, {order.customerName}. Your order is confirmed.
+    <>
+      <SiteHeader />
+
+      <main className="mx-auto max-w-xl px-5 py-14">
+        <p className="eyebrow">Receipt</p>
+        <h1 className="display mt-2 text-4xl">Paid. Thanks, {order.customerName}.</h1>
+        <p className="mt-3 text-[15px] text-[var(--color-muted-foreground)]">
+          Your bank has settled this order. A copy is on its way to your inbox.
         </p>
 
-        <dl className="mt-6 space-y-2 text-left text-sm">
-          <div className="flex justify-between">
-            <dt className="text-[var(--color-muted-foreground)]">Order</dt>
-            <dd className="font-mono">{order.id}</dd>
+        {/*
+          A receipt, laid out as one: amount dominant, references in mono
+          beneath it, hairline rules between rows.
+        */}
+        <div className="surface mt-8 p-6">
+          <div className="rule flex items-baseline justify-between gap-4 pb-4">
+            <span className="eyebrow">Total paid</span>
+            <span className="display text-4xl">{formatEuroCents(order.totalCents)}</span>
           </div>
-          <div className="flex justify-between">
-            <dt className="text-[var(--color-muted-foreground)]">Total</dt>
-            <dd className="font-semibold">{formatEuroCents(order.totalCents)}</dd>
-          </div>
-          {order.bankTxId ? (
-            <div className="flex justify-between">
-              <dt className="text-[var(--color-muted-foreground)]">Bank reference</dt>
-              <dd className="font-mono text-xs">{order.bankTxId}</dd>
+
+          <dl className="mt-4 space-y-3">
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="eyebrow">Order</dt>
+              <dd className="data">{order.id}</dd>
             </div>
-          ) : null}
-        </dl>
+            {order.bankTxId ? (
+              <div className="flex items-baseline justify-between gap-4">
+                <dt className="eyebrow">Bank reference</dt>
+                <dd className="data break-all text-right">{order.bankTxId}</dd>
+              </div>
+            ) : null}
+          </dl>
+        </div>
 
         <VerificationDetails checks={order.checks} />
 
-        <Link
-          href="/"
-          className="mt-8 inline-block rounded-[var(--radius)] bg-[var(--color-brand)] px-5 py-2.5 font-semibold text-white"
-        >
-          Continue shopping
+        <Link href="/" className="btn btn-solid mt-8 px-5 py-3">
+          Back to the shop
         </Link>
-      </div>
-    </main>
+      </main>
+    </>
   );
 }

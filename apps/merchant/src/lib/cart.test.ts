@@ -8,56 +8,74 @@ import {
   type CartItem,
 } from "./cart.js";
 
-const headphones = { productId: "prod_1", name: "Wireless Headphones", priceCents: 12_999 };
-const keyboard = { productId: "prod_2", name: "Mechanical Keyboard", priceCents: 8_999 };
+const cheese = { productId: "cheese", name: "Aged Gouda", priceCents: 449 };
+const berries = { productId: "berries", name: "Mixed Berries", priceCents: 349 };
 
 describe("addItem", () => {
   it("adds a new item with quantity 1 by default", () => {
-    const items = addItem([], headphones);
-    expect(items).toEqual([{ ...headphones, quantity: 1 }]);
+    const items = addItem([], cheese);
+    expect(items).toEqual([{ ...cheese, quantity: 1 }]);
   });
 
   it("merges quantities when the product is already in the cart", () => {
-    const items = addItem([{ ...headphones, quantity: 1 }], headphones, 2);
-    expect(items).toEqual([{ ...headphones, quantity: 3 }]);
+    const items = addItem([{ ...cheese, quantity: 1 }], cheese, 2);
+    expect(items).toEqual([{ ...cheese, quantity: 3 }]);
   });
 
   it("leaves other items untouched", () => {
-    const items = addItem([{ ...headphones, quantity: 1 }], keyboard);
+    const items = addItem([{ ...cheese, quantity: 1 }], berries);
     expect(items).toHaveLength(2);
+  });
+
+  it("carries the photo and pack size through to the cart line", () => {
+    const items = addItem([], {
+      ...cheese,
+      imageUrl: "/products/cheese.jpg",
+      packLabel: "200 g",
+    });
+    expect(items[0]).toMatchObject({
+      imageUrl: "/products/cheese.jpg",
+      packLabel: "200 g",
+    });
+  });
+
+  it("accepts a line saved before those fields existed", () => {
+    // Carts persist in localStorage, so an older shape must still load.
+    const items = addItem([{ ...cheese, quantity: 1 }], cheese, 1);
+    expect(items[0]).toEqual({ ...cheese, quantity: 2 });
   });
 });
 
 describe("updateQuantity", () => {
-  const cart: CartItem[] = [{ ...headphones, quantity: 2 }];
+  const cart: CartItem[] = [{ ...cheese, quantity: 2 }];
 
   it("sets a new quantity", () => {
-    expect(updateQuantity(cart, "prod_1", 5)).toEqual([{ ...headphones, quantity: 5 }]);
+    expect(updateQuantity(cart, "cheese", 5)).toEqual([{ ...cheese, quantity: 5 }]);
   });
 
   it("removes the item when the quantity drops to zero or below", () => {
-    expect(updateQuantity(cart, "prod_1", 0)).toEqual([]);
-    expect(updateQuantity(cart, "prod_1", -1)).toEqual([]);
+    expect(updateQuantity(cart, "cheese", 0)).toEqual([]);
+    expect(updateQuantity(cart, "cheese", -1)).toEqual([]);
   });
 });
 
 describe("removeItem", () => {
   it("removes only the named product", () => {
     const cart: CartItem[] = [
-      { ...headphones, quantity: 1 },
-      { ...keyboard, quantity: 1 },
+      { ...cheese, quantity: 1 },
+      { ...berries, quantity: 1 },
     ];
-    expect(removeItem(cart, "prod_1")).toEqual([{ ...keyboard, quantity: 1 }]);
+    expect(removeItem(cart, "cheese")).toEqual([{ ...berries, quantity: 1 }]);
   });
 });
 
 describe("cartTotalCents", () => {
   it("sums price times quantity across items", () => {
     const cart: CartItem[] = [
-      { ...headphones, quantity: 2 },
-      { ...keyboard, quantity: 1 },
+      { ...cheese, quantity: 2 },
+      { ...berries, quantity: 1 },
     ];
-    expect(cartTotalCents(cart)).toBe(12_999 * 2 + 8_999);
+    expect(cartTotalCents(cart)).toBe(449 * 2 + 349);
   });
 
   it("is zero for an empty cart", () => {
@@ -68,8 +86,8 @@ describe("cartTotalCents", () => {
 describe("cartItemCount", () => {
   it("sums quantities, not item rows", () => {
     const cart: CartItem[] = [
-      { ...headphones, quantity: 2 },
-      { ...keyboard, quantity: 3 },
+      { ...cheese, quantity: 2 },
+      { ...berries, quantity: 3 },
     ];
     expect(cartItemCount(cart)).toBe(5);
   });

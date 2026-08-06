@@ -1,32 +1,60 @@
+import type { CSSProperties } from "react";
 import type { ProductDto } from "@/lib/queries.js";
-import { formatEuroCents } from "@/lib/format.js";
+import { formatEuroCents, formatUnitPrice } from "@/lib/format.js";
 import { AddToCartButton } from "./AddToCartButton.js";
 
-const CATEGORY_COLOR: Record<string, string> = {
-  Electronics: "var(--color-brand)",
-  Home: "var(--color-accent)",
-  Accessories: "var(--color-brand-dark)",
-};
-
-export function ProductCard({ product }: { product: ProductDto }) {
-  const color = CATEGORY_COLOR[product.category] ?? "var(--color-brand)";
+/**
+ * A shelf-edge ticket under a photograph.
+ *
+ * The hierarchy is the one a shopper already knows from a supermarket shelf:
+ * name small, selling price large, pack size and unit price as fine print.
+ * The unit price is required of a grocer by EU Directive 98/6/EC and is
+ * derived from priceCents, so it cannot disagree with what is charged.
+ *
+ * `index` drives the load stagger declared in globals.css.
+ */
+export function ProductCard({ product, index = 0 }: { product: ProductDto; index?: number }) {
+  const unitPrice = formatUnitPrice(
+    product.priceCents,
+    product.baseQuantity,
+    product.baseUnit,
+  );
 
   return (
-    <div className="product-card overflow-hidden">
-      <div className="product-monogram" style={{ background: color }}>
-        {product.name.slice(0, 2).toUpperCase()}
-      </div>
-      <div className="space-y-2 p-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">
-          {product.category}
+    <article className="shelf-item" style={{ "--stagger": index } as CSSProperties}>
+      {/*
+        Plain <img> rather than next/image: the files are pre-cropped to a
+        uniform 900×900 and served from /public, so the optimiser would add a
+        sharp dependency to the standalone container for no gain.
+      */}
+      <img
+        src={product.imageUrl}
+        alt={product.name}
+        width={900}
+        height={900}
+        loading={index < 4 ? "eager" : "lazy"}
+        className="shelf-photo"
+      />
+
+      <div className="ticket py-3.5 pl-5 pr-4">
+        <h3 className="ticket-name">{product.name}</h3>
+        <p className="mt-1 text-xs leading-snug text-[var(--color-muted-foreground)]">
+          {product.description}
         </p>
-        <h3 className="font-semibold">{product.name}</h3>
-        <p className="text-sm text-[var(--color-muted-foreground)]">{product.description}</p>
-        <div className="flex items-center justify-between pt-2">
-          <span className="text-lg font-bold">{formatEuroCents(product.priceCents)}</span>
+
+        {/* mt-auto pins the price to the bottom of the ticket, so prices sit
+            on one baseline across a row of uneven descriptions. */}
+        <div className="mt-auto flex items-end justify-between gap-3 pt-4">
+          <div>
+            <p className="ticket-price">{formatEuroCents(product.priceCents)}</p>
+            <p className="ticket-unit mt-1.5">
+              {product.packLabel}
+              {unitPrice ? ` · ${unitPrice}` : ""}
+            </p>
+          </div>
           <AddToCartButton product={product} />
         </div>
       </div>
-    </div>
+    </article>
   );
 }
