@@ -100,31 +100,54 @@ anonymous until checkout, and the cart lives in the browser's `localStorage`.
 
 ### Building the image
 
-The build context is the repository root, because a pnpm workspace build needs
-the root manifests and the `packages/` sources. `docker` and `podman` are both
-drop-in for this Dockerfile:
+There is **one** `Dockerfile`, at the repository root, and it produces **one**
+image containing both apps. The entrypoint argument selects which one a
+container runs. The build context is the repository root, because a pnpm
+workspace build needs the root manifests and the `packages/` sources. Use
+`podman` (docker is not installed here); the CLIs are drop-in for this
+Dockerfile.
 
 ```bash
-podman build -f apps/bank/Dockerfile -t payment-demo-bank:latest .
-podman build -f apps/merchant/Dockerfile -t payment-demo-merchant:latest .
+podman build -t payment-demo:dev .
+
+podman run -d --name pbd-bank -p 3001:3001 \
+  -e FOUNDRY_ADMIN_KEY=x -e BANK_API_KEY=x \
+  -e SESSION_SECRET=0123456789012345678901234567890123456789 \
+  payment-demo:dev bank
+
+podman run -d --name pbd-merchant -p 3000:3000 \
+  -e FOUNDRY_ADMIN_KEY=x -e BANK_API_KEY=x -e MERCHANT_NAME=Larder \
+  payment-demo:dev merchant
 ```
+
+The entrypoint defaults `PORT` (bank 3001, merchant 3000) and `DATABASE_PATH`
+(`/data/<app>.db`, the image's declared `VOLUME`) per app, so the two commands
+above need no further configuration. `env.ts` defaults `DATABASE_PATH` to a
+*relative* `./data/<app>.db`, which resolves under the app directory — owned by
+root and unwritable by the image's non-root user. An explicit value still wins,
+and the Kubernetes manifest sets both.
+
+Anything other than `bank` or `merchant` exits `64` (`EX_USAGE`) with a usage
+message, rather than silently starting the wrong app.
+
+A local build on Apple Silicon produces an `arm64` image, useful for checking
+layout and startup but **not** runnable on the cluster. The deployed
+`linux/amd64` image is built in-cluster — see
+`~/dev/dl-infra-k8s/payment-banking-demo/README.md`.
 
 ### Seeding a deployed instance
 
-The runtime image carries only Next's standalone output plus the migrations — no
-`src/` and no `tsx` — so the seed script **cannot** be run inside it. Seed by
-pointing a local checkout at the same database file:
+Nothing to do. Each app seeds itself at boot when its database is empty
+(`src/instrumentation.ts` → `seedIfEmpty`), so a fresh volume comes up
+demoable. A populated database is never touched — the guard is an empty-table
+check, and the underlying `seed()` deletes rows before inserting.
 
-```bash
-DATABASE_PATH=/path/to/mounted/bank.db \
-  FOUNDRY_ADMIN_KEY=x \
-  BANK_API_KEY=x \
-  SESSION_SECRET=0123456789012345678901234567890123456789 \
-  pnpm --filter @demo/bank run seed
-```
+To force a re-seed, destroy the volume. In Kubernetes that is `make reset` in
+`~/dev/dl-infra-k8s/payment-banking-demo/`; locally, delete the SQLite file and
+restart.
 
-Stop the container first. SQLite is single-writer, and seeding while the app
-holds the file open risks a lock error or a half-reset database.
+`pnpm seed` still exists for local development and resets to the fixtures
+unconditionally.
 
 ## End-to-end walkthrough
 

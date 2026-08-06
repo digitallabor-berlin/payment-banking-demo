@@ -21,14 +21,20 @@ owner** of credential state — the merchant never persists it.
 ## Layout
 
 ```
+Dockerfile          ONE image containing BOTH apps (see below)
+docker-entrypoint.sh  Takes `bank` or `merchant`; anything else exits 64
+.dockerignore       Must live here, at the build-context root
 apps/bank/          Next.js 15, port 3001, German UI
 apps/merchant/      Next.js 15, port 3000, English UI
 packages/foundry-client/   Typed client for foundry's admin API
 packages/ui/        Shared hooks + QrCanvas (NOT shared design tokens)
 docs/superpowers/specs/    Design spec — the source of truth
-docs/superpowers/plans/    Implementation plans 1 and 2 (both executed)
+docs/superpowers/plans/    Implementation plans 1-3 (all executed)
 tools/cdp/          Headless-Chrome driver for ad hoc browser verification
 ```
+
+There are no per-app Dockerfiles. `apps/bank/Dockerfile` and
+`apps/merchant/Dockerfile` were deleted in favour of the root one.
 
 Reference apps at `../foundry`, `../eudipay-merchant-mock`,
 `../banking-frontend`, `../eudipay-frontend` are **visual/UX references only**.
@@ -47,7 +53,13 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**162 tests** (77 bank + 71 merchant + 7 foundry-client + 7 ui).
+**186 tests** (85 bank + 87 merchant + 7 foundry-client + 7 ui), measured.
+
+That number was **162** for most of this project's life, and a stale `162` is
+still quoted in the Plan 3 document. The difference is not drift: 20 of those
+tests arrived with in-flight UI work that sat uncommitted in the working tree
+for a long stretch, and 4 are the `seedIfEmpty` tests. If a count disagrees with
+yours, measure — do not trust a number written in a plan.
 
 ## Hard-won constraints
 
@@ -66,6 +78,31 @@ them without reading the linked reasoning first.
 - **`better-sqlite3` must be `^13.0.3`.** The `^11.x` line fails to compile
   against current Node's V8 (`GetPrototype`, `Context::GetIsolate`,
   `PropertyCallbackInfo::This` were removed).
+
+- **There is ONE Dockerfile, at the repo root, producing ONE image for both
+  apps.** The entrypoint takes `bank` or `merchant`. Its `pnpm install` runs
+  *after* `COPY . .` on purpose: `.npmrc` sets `node-linker=hoisted`, so
+  third-party packages hoist to the root `node_modules` but the `@demo/*`
+  workspace links exist only in `apps/<app>/node_modules` (verified:
+  `node_modules/@demo` does not exist). A `deps` stage that copies just
+  `/repo/node_modules` drops them and `next build` cannot resolve `@demo/ui`.
+  Do not "optimise" this back into a separate deps stage.
+
+- **`.dockerignore` must be at the repo root.** Builds use the root as context,
+  and Docker only honours `<context>/.dockerignore`. Two per-app `.dockerignore`
+  files previously sat at paths Docker never reads and were silently inert,
+  which let the host's `node_modules` — including an `arm64` `better-sqlite3`
+  addon — leak into the build. That also masked the deps-stage bug above, so the
+  earlier "verified in a real podman container" claim for those Dockerfiles only
+  held by accident.
+
+- **`docker-entrypoint.sh` defaults `PORT` and `DATABASE_PATH` per app.**
+  `env.ts` defaults `DATABASE_PATH` to a *relative* `./data/<app>.db`, which
+  resolves under the app directory — owned by root, unwritable by `USER 1000`,
+  so both apps exited 1 at boot with `EACCES` until the entrypoint pointed them
+  at `/data`. `PORT` is defaulted for the same class of reason: Next uses 3000
+  for both apps, so `podman run -p 3001:3001 <image> bank` would otherwise
+  listen on the wrong port and every request would hang. Explicit values win.
 
 - **Root `package.json` needs `pnpm.onlyBuiltDependencies: ["better-sqlite3"]`.**
   pnpm 10 blocks native postinstall scripts by default.

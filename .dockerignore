@@ -2,7 +2,11 @@
 **/.next
 **/data
 **/*.db
+**/*.db-journal
 **/.env
 **/.env.local
+**/*.tsbuildinfo
 .git
+.pi
 docs
+tools
