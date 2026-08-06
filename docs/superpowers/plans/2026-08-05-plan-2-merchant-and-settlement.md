@@ -94,6 +94,25 @@ for the story if you want it, but you don't need to rediscover the bug.
   `failed` reachable from any of the first three.
 - **Commit after every task.** Conventional-commit prefixes (`feat:`, `test:`,
   `chore:`, `fix:`).
+- **Ad-hoc DB-poking scripts must run under `tsx`, from a scratch `.ts` file —
+  not `node --experimental-strip-types`, and not `tsx -e`.** Node's type
+  stripping does not apply the `./foo.js` → `./foo.ts` mapping this codebase's
+  imports rely on, so it dies with `ERR_MODULE_NOT_FOUND` on the *transitive*
+  `../env.js` import even when the script itself writes `./src/db/index.ts`.
+  `tsx -e` fails differently — it evaluates as CJS and chokes on `import`.
+  The pattern that works, used by every verification step below:
+
+  ```bash
+  cat > scratch.ts <<'TS'
+  import { createDb } from "./src/db/index.js";
+  // ...
+  TS
+  pnpm exec tsx --env-file-if-exists=.env.local scratch.ts
+  rm -f scratch.ts
+  ```
+
+  (Found while executing Task 6; the same root cause as the webpack
+  `extensionAlias` constraint above.)
 - **Deployment verification uses `podman`** in this environment (`docker` is
   not installed); the two CLIs are drop-in for the same Dockerfile syntax.
   Run containers detached (`-d`) and inspect with `podman inspect`/`podman
@@ -2973,16 +2992,18 @@ real producer does not exist yet:
 
 ```bash
 cd apps/merchant
-node --experimental-strip-types -e '
+cat > scratch.ts <<'TS'
 import { eq } from "drizzle-orm";
-import { createDb } from "./src/db/index.ts";
-import { orders } from "./src/db/schema.ts";
+import { createDb } from "./src/db/index.js";
+import { orders } from "./src/db/schema.js";
 const db = createDb(process.env.DATABASE_PATH ?? "./data/merchant.db", false);
 const row = db.select().from(orders).where(eq(orders.status, "pending")).get();
 if (!row) throw new Error("no pending order to flip — run the block above first");
 db.update(orders).set({ status: "paid" }).where(eq(orders.id, row.id)).run();
 console.log("flipped to paid:", row.id);
-'
+TS
+pnpm exec tsx --env-file-if-exists=.env.local scratch.ts
+rm -f scratch.ts
 
 pnpm dev &
 sleep 12
@@ -3482,16 +3503,18 @@ available:
 
 ```bash
 cd apps/bank
-node --experimental-strip-types -e '
-import { createDb } from "./src/db/index.ts";
-import { credentials } from "./src/db/schema.ts";
+cat > scratch.ts <<'TS'
+import { createDb } from "./src/db/index.js";
+import { credentials } from "./src/db/schema.js";
 const db = createDb(process.env.DATABASE_PATH ?? "./data/bank.db", false);
 db.insert(credentials).values({
   id: "cred_manual_test", userId: "user_anna", cardId: "card_anna",
   credentialId: "dpc_manual_test", state: "active", issuedAt: Date.now(), createdAt: Date.now(),
 }).run();
 console.log("inserted a synthetic active credential: dpc_manual_test");
-'
+TS
+pnpm exec tsx --env-file-if-exists=.env.local scratch.ts
+rm -f scratch.ts
 
 pnpm dev &
 sleep 12
@@ -4302,14 +4325,16 @@ first end-to-end run (Task 11's walkthrough) and come back here:
 ```bash
 # With a session that has just been presented to by a real wallet:
 cd apps/merchant
-node --experimental-strip-types -e '
-import { createDb } from "./src/db/index.ts";
-import { paymentSessions } from "./src/db/schema.ts";
+cat > scratch.ts <<'TS'
+import { createDb } from "./src/db/index.js";
+import { paymentSessions } from "./src/db/schema.js";
 const db = createDb(process.env.DATABASE_PATH ?? "./data/merchant.db", false);
 for (const row of db.select().from(paymentSessions).all()) {
   console.log(row.id, row.state, row.disclosedClaimsJson);
 }
-'
+TS
+pnpm exec tsx --env-file-if-exists=.env.local scratch.ts
+rm -f scratch.ts
 ```
 
 If the printed claims are nested (`{"card":{"credential_id":...}}`), delete the
@@ -5362,25 +5387,27 @@ ORDER_ID=$(curl -sS -X POST http://localhost:3000/api/orders \
   | sed -E 's/.*"orderId":"([^"]+)".*/\1/')
 kill %1
 
-node --experimental-strip-types -e "
-import { eq } from 'drizzle-orm';
-import { createDb } from './src/db/index.ts';
-import { orders, paymentSessions } from './src/db/schema.ts';
-const db = createDb(process.env.DATABASE_PATH ?? './data/merchant.db', false);
-const id = '$ORDER_ID';
-db.update(orders).set({ status: 'paid' }).where(eq(orders.id, id)).run();
+cat > scratch.ts <<TS
+import { eq } from "drizzle-orm";
+import { createDb } from "./src/db/index.js";
+import { orders, paymentSessions } from "./src/db/schema.js";
+const db = createDb(process.env.DATABASE_PATH ?? "./data/merchant.db", false);
+const id = "\$ORDER_ID";
+db.update(orders).set({ status: "paid" }).where(eq(orders.id, id)).run();
 db.insert(paymentSessions).values({
-  id: 'sess_synthetic', orderId: id, state: 'completed', bankTxId: 'tx_synthetic',
+  id: "sess_synthetic", orderId: id, state: "completed", bankTxId: "tx_synthetic",
   checksJson: JSON.stringify([
-    { check: 'sd_jwt_vc_signature_and_kb_jwt', passed: true },
-    { check: 'dcql_match', passed: true },
-    { check: 'status_check', passed: true },
-    { check: 'transaction_data_binding', passed: true },
+    { check: "sd_jwt_vc_signature_and_kb_jwt", passed: true },
+    { check: "dcql_match", passed: true },
+    { check: "status_check", passed: true },
+    { check: "transaction_data_binding", passed: true },
   ]),
   createdAt: Date.now(),
 }).run();
-console.log('synthetic completed session for', id);
-"
+console.log("synthetic completed session for", id);
+TS
+pnpm exec tsx --env-file-if-exists=.env.local scratch.ts
+rm -f scratch.ts
 
 pnpm dev &
 sleep 12

@@ -1,28 +1,24 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { formatEuroCents } from "@/lib/format.js";
 import { useCart } from "@/lib/useCart.js";
 
-interface CreatedOrder {
-  orderId: string;
-  totalCents: number;
-}
-
 export function CheckoutForm() {
+  const router = useRouter();
   const { items, totalCents, clear } = useCart();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [created, setCreated] = useState<CreatedOrder | null>(null);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setPending(true);
     try {
-      const response = await fetch("/api/orders", {
+      const orderResponse = await fetch("/api/orders", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -30,30 +26,30 @@ export function CheckoutForm() {
           customer: { name, email },
         }),
       });
-      if (!response.ok) {
+      if (!orderResponse.ok) {
         setError("Could not create the order. Please check your cart and try again.");
         return;
       }
-      const body = (await response.json()) as CreatedOrder;
+      const order = (await orderResponse.json()) as { orderId: string };
+
+      const sessionResponse = await fetch("/api/payment-sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ orderId: order.orderId }),
+      });
+      if (!sessionResponse.ok) {
+        setError("Could not start the payment. Please try again.");
+        return;
+      }
+      const session = (await sessionResponse.json()) as { sessionId: string };
+
       clear();
-      setCreated(body);
+      router.push(`/pay/${session.sessionId}`);
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
       setPending(false);
     }
-  }
-
-  if (created) {
-    return (
-      <div className="checkout-summary p-6">
-        <h2 className="text-lg font-semibold">Thanks, {name}!</h2>
-        <p className="mt-2 text-[var(--color-muted-foreground)]">
-          Order <span className="font-mono">{created.orderId}</span> created — total{" "}
-          {formatEuroCents(created.totalCents)}.
-        </p>
-      </div>
-    );
   }
 
   if (items.length === 0) {
@@ -100,7 +96,7 @@ export function CheckoutForm() {
         disabled={pending}
         className="checkout-cta w-full rounded-[var(--radius)] py-3 font-semibold text-white disabled:opacity-60"
       >
-        {pending ? "Placing order…" : `Pay with EUDI Wallet — ${formatEuroCents(totalCents)}`}
+        {pending ? "Starting payment…" : `Pay with EUDI Wallet — ${formatEuroCents(totalCents)}`}
       </button>
     </form>
   );
