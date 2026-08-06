@@ -184,12 +184,23 @@ them without reading the linked reasoning first.
 
 ## Known-unverifiable
 
-The wallet leg cannot be exercised in this environment: no phone, no EUDI
-wallet app (`adb devices` shows none attached), and foundry's wallet-facing
-listener is bound to `localhost:8443` rather than a public HTTPS origin. Two
-Definition-of-Done items in Plan 2 remain open for that reason, including
-confirming the real nesting shape of foundry's disclosed verification claims
-(`apps/merchant/src/lib/checks.ts` keeps both plausible branches on purpose).
+The wallet leg cannot be exercised in this environment: no phone and no EUDI
+wallet app (`adb devices` shows none attached). Two Definition-of-Done items in
+Plan 2 remain open for that reason, including confirming the real nesting shape
+of foundry's disclosed verification claims (`apps/merchant/src/lib/checks.ts`
+keeps both plausible branches on purpose).
+
+The *reason* narrowed in Plan 3. This used to also say foundry's wallet-facing
+listener was bound to `localhost:8443` rather than a public HTTPS origin. That
+is no longer true of the deployed system: foundry is reachable at
+`https://foundry.digitallabor.dev`, both apps are on public HTTPS origins
+(`sparkasse-musterstadt.digitallabor.dev`, `larder-shop.digitallabor.dev`), and
+a real checkout there produces an `openid4vp://` URI whose `request_uri` points
+at that public foundry host. So the infrastructural blocker is gone and a human
+with a device can now run the full flow.
+
+That is a strictly different claim from having run it. No wallet flow has been
+exercised. The local `pnpm dev` setup still talks to a `localhost` foundry.
 
 Do not fake this. If a change depends on real wallet behaviour, say so.
 
