@@ -5739,22 +5739,53 @@ git commit -m "feat(merchant): add Dockerfile and document the end-to-end walkth
 
 ## Definition of Done for Plan 2
 
-- [ ] `pnpm check` green across all four workspace projects
-- [ ] `pnpm dev` starts the merchant on :3000 and the bank on :3001 together
+- [x] `pnpm check` green across all four workspace projects — 162 tests
+      (77 bank + 71 merchant + 7 foundry-client + 7 ui), typecheck clean on
+      every one, verified from a genuinely clean `data/` state.
+- [x] `pnpm dev` starts the merchant on :3000 and the bank on :3001 together —
+      real 200s from both `/api/health` endpoints with correctly prefixed
+      interleaved log output (`apps/bank dev: ...`).
 - [ ] A real EUDI wallet holding the DPC credential from Plan 1 pays for a real
       order, and the wallet's authorization prompt shows the same amount the
-      merchant computed server-side
-- [ ] The success screen lists `foundry`'s real checks, including
-      `transaction_data_binding`
-- [ ] The bank dashboard shows the purchase, a reduced balance, and the row
-      badged "EUDI Wallet"
-- [ ] Repeating a settle call with the same `idempotency_key` debits once
-- [ ] The merchant container builds, applies migrations against a mounted
-      volume, and passes `/api/health` and `/api/ready`
-- [ ] A missing secret crashes the merchant container at boot with a named
-      error, verified by `podman inspect` reporting `exitcode=1`
+      merchant computed server-side — **not verified**. No phone and no EUDI
+      wallet app exist in this environment (`adb devices` shows none attached),
+      and `foundry`'s wallet-facing listener here is bound to `localhost:8443`,
+      not a public HTTPS origin, so a cross-device scan is not physically
+      possible regardless of tooling. This is the same limitation Plan 1
+      already recorded as its one open item — not new here.
+- [x] The success screen lists `foundry`'s real checks, including
+      `transaction_data_binding` — verified with a synthetic completed session
+      (Task 10 Step 9): all four check names render, `<details>` opens to show
+      each with a passed mark.
+- [x] The bank dashboard shows the purchase, a reduced balance, and the row
+      badged "EUDI Wallet" — verified with a real `POST /api/payments` call
+      (not a wallet fake — this is the bank-side half of the loop, fully
+      testable without a device): anna's balance dropped by exactly 3499 cents
+      to `3.452,13 €`, the dashboard rendered the "EUDI Wallet" badge exactly
+      once, and "Demo Shop" appeared in the transaction row.
+- [x] Repeating a settle call with the same `idempotency_key` debits once —
+      unit-tested (`payments.test.ts`) and verified over real HTTP in Task 7
+      Step 11: two identical requests returned the identical `bank_tx_id` and
+      `new_balance_cents`.
+- [x] The merchant container builds, applies migrations against a mounted
+      volume, and passes `/api/health` and `/api/ready` — verified with a real
+      podman container: `running exitcode=0`, then `{"status":"ok"}` and
+      `{"status":"ready"}`.
+- [x] A missing secret crashes the merchant container at boot with a named
+      error, verified by `podman inspect` reporting `exitcode=1` — confirmed:
+      `exited exitcode=1` within seconds, no `Ready in ...` line, no request
+      sent.
 - [ ] The real shape of `foundry`'s disclosed verification claims is recorded
-      (Task 8 Step 11) rather than left as a guess
+      (Task 8 Step 11) rather than left as a guess — **not resolved**, same
+      root cause as the wallet item above: confirming this requires a real
+      presentation, which requires a real wallet. `extractCredentialId`
+      deliberately keeps both the nested and flat branches, exactly as the
+      plan permits when a real wallet cannot be exercised.
+
+7 of 9 items closed with evidence above; the remaining 2 share one root
+cause — no physical EUDI wallet available in this environment — and require
+a human to run the walkthrough with a real phone against a publicly
+reachable `foundry`.
 
 ## What this plan deliberately does not do
 
