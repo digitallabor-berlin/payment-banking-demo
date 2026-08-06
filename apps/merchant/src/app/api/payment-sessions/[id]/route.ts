@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/db/index.js";
-import { getPaymentSessionStatus } from "@/lib/payment-sessions.js";
+import { getBankClient } from "@/lib/bank.js";
+import { getFoundry } from "@/lib/foundry.js";
+import { refreshPaymentSessionState } from "@/lib/payment-sessions.js";
 
 export const dynamic = "force-dynamic";
 
@@ -9,9 +11,15 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
-  const status = getPaymentSessionStatus(getDb(), id);
-  if (!status) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  const result = await refreshPaymentSessionState(
+    getDb(),
+    getFoundry(),
+    getBankClient(),
+    id,
+  );
+
+  if (!result.ok) {
+    return NextResponse.json({ error: result.reason }, { status: 404 });
   }
-  return NextResponse.json(status);
+  return NextResponse.json(result.status);
 }
