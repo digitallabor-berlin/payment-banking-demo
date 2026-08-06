@@ -90,7 +90,7 @@ function makePage(ws) {
     },
     async eval(expression) {
       const result = await send("Runtime.evaluate", {
-        expression: `(() => { ${expression} })()`,
+        expression: `(async () => { ${expression} })()`,
         returnByValue: true,
         awaitPromise: true,
       });

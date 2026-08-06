@@ -90,3 +90,118 @@ body {
 .checkout-cta:hover {
   background: #0040ad;
 }
+
+@keyframes eudipay-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes eudipay-slide-up {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes eudipay-spin {
+  to { transform: rotate(360deg); }
+}
+
+.eudipay-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: 1.5rem;
+  background: rgb(17 24 39 / 0.5);
+  backdrop-filter: blur(4px);
+  animation: eudipay-fade-in 0.3s ease;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+.eudipay-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 2.5rem;
+  background: #ffffff;
+  border-radius: 1.5rem;
+  border-top: 6px solid #004dd7;
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  text-align: center;
+  color: #1f2937;
+  animation: eudipay-slide-up 0.4s ease;
+}
+
+.eudipay-headline {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: #004dd7;
+}
+
+.eudipay-amount {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.eudipay-muted {
+  color: #4b5563;
+}
+
+.eudipay-badge {
+  display: inline-block;
+  border-radius: 9999px;
+  background: #ffefb4;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.eudipay-qr-frame {
+  display: inline-block;
+  padding: 1rem;
+  background: #ffffff;
+  border: 2px solid #ffefb4;
+  border-radius: 1rem;
+}
+
+.eudipay-button {
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-radius: 0.75rem;
+  padding: 0.75rem 1.25rem;
+}
+
+.eudipay-button-primary {
+  background: #004dd7;
+  color: #ffffff;
+}
+
+.eudipay-button-secondary {
+  background: transparent;
+  color: #4b5563;
+}
+
+.eudipay-spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  margin: 0 auto;
+  border: 3px solid #ffefb4;
+  border-top-color: #004dd7;
+  border-radius: 9999px;
+  animation: eudipay-spin 1s linear infinite;
+}
+
+/* Mobile: slide up from the bottom, top-only rounded corners. */
+@media (max-width: 480px) {
+  .eudipay-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .eudipay-card {
+    max-width: none;
+    border-radius: 1.5rem 1.5rem 0 0;
+    padding-bottom: calc(2.5rem + env(safe-area-inset-bottom));
+  }
+}
