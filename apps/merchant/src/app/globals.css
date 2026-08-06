@@ -75,3 +75,18 @@ body {
   border-radius: var(--radius);
   padding: 0.25rem 0.5rem;
 }
+
+.checkout-summary {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+
+.checkout-cta {
+  background: #004dd7; /* EudiPay blue — the one place the merchant palette
+                           yields to the payment brand (spec §9.4) */
+}
+
+.checkout-cta:hover {
+  background: #0040ad;
+}
