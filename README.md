@@ -6,8 +6,8 @@ built against the [`foundry`](../foundry) issuer/verifier service.
 - **`apps/bank`** — online banking. Issues an EMVCo Digital Payment Credential
   (`com.emvco.dpc.card`) into a user's EUDI wallet.
 - **`apps/merchant`** — web shop. Requests that credential at checkout with
-  `transaction_data` amount binding, then settles against the bank. *(Plan 2 —
-  not yet implemented.)*
+  `transaction_data` amount binding, verifies it through `foundry`, then
+  settles by debiting the bank over its REST API.
 
 Design: [`docs/superpowers/specs/2026-08-05-payment-banking-demo-design.md`](docs/superpowers/specs/2026-08-05-payment-banking-demo-design.md)
 
@@ -24,9 +24,10 @@ Design: [`docs/superpowers/specs/2026-08-05-payment-banking-demo-design.md`](doc
 ```bash
 pnpm install
 cp apps/bank/.env.example apps/bank/.env.local
+cp apps/merchant/.env.example apps/merchant/.env.local
 pnpm migrate
 pnpm seed
-pnpm dev          # bank on :3001, merchant on :3000 once it exists
+pnpm dev          # bank on :3001, merchant on :3000
 ```
 
 Sign in at <http://localhost:3001/login> with **anna / demo1234** or
@@ -81,6 +82,22 @@ itself rather than letting the error propagate, or the container silently
 degrades to every route 500ing forever without ever exiting — verified against
 a real podman container while building this deployment contract.
 
+### Merchant environment
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `PORT` | no | `3000` | Listen port |
+| `DATABASE_PATH` | no | `./data/merchant.db` | SQLite file; its directory must be writable |
+| `MERCHANT_PUBLIC_URL` | no | `http://localhost:3000` | Own external origin |
+| `FOUNDRY_ADMIN_URL` | no | `http://127.0.0.1:9000` | foundry's **admin** listener — never expose publicly |
+| `FOUNDRY_ADMIN_KEY` | **yes** | — | Bearer token for foundry's admin API |
+| `BANK_API_URL` | no | `http://localhost:3001` | The bank's REST API |
+| `BANK_API_KEY` | **yes** | — | Shared secret sent as `X-API-Key` on `POST /api/payments`; **must match the bank's own `BANK_API_KEY`** |
+| `MERCHANT_NAME` | no | `Demo Shop` | Shown in the wallet's authorization prompt and on the bank statement |
+
+The merchant has no `SESSION_SECRET` because it has no login — the shop is
+anonymous until checkout, and the cart lives in the browser's `localStorage`.
+
 ### Building the image
 
 The build context is the repository root, because a pnpm workspace build needs
@@ -89,6 +106,7 @@ drop-in for this Dockerfile:
 
 ```bash
 podman build -f apps/bank/Dockerfile -t payment-demo-bank:latest .
+podman build -f apps/merchant/Dockerfile -t payment-demo-merchant:latest .
 ```
 
 ### Seeding a deployed instance
@@ -107,6 +125,47 @@ DATABASE_PATH=/path/to/mounted/bank.db \
 
 Stop the container first. SQLite is single-writer, and seeding while the app
 holds the file open risks a lock error or a half-reset database.
+
+## End-to-end walkthrough
+
+This is the demo. It needs a phone with an EUDI wallet app, and a `foundry`
+whose **wallet-facing** listener is reachable from that phone over HTTPS — a
+`localhost` URL will not work cross-device.
+
+    pnpm install
+    cp apps/bank/.env.example apps/bank/.env.local
+    cp apps/merchant/.env.example apps/merchant/.env.local
+    pnpm migrate && pnpm seed
+    pnpm dev            # bank :3001, merchant :3000
+
+1. **Issue the card.** Open <http://localhost:3001/login>, sign in as
+   **anna / demo1234**, and click "Zum EUDI Wallet hinzufügen" on the card
+   tile. Scan the QR with the wallet and accept. The tile turns
+   "Im Wallet ✓". Note the balance — **3.487,12 €**.
+2. **Shop.** Open <http://localhost:3000>, add something to the cart, then go
+   to checkout, fill in a name and email, and press "Pay with EUDI Wallet".
+3. **Pay.** The `/pay` screen shows the amount, the merchant, and a QR with
+   blue modules. Scan it. **The wallet prompt must show the same amount** —
+   that is the `transaction_data` binding doing its job. Approve it.
+4. **Watch it settle.** Within a few seconds the screen becomes "Payment
+   Successful" and redirects to the success page, which lists `foundry`'s
+   real checks including `transaction_data_binding`.
+5. **See the money move.** Back at <http://localhost:3001>, the balance is
+   reduced by the order total and the newest transaction is badged
+   "EUDI Wallet".
+
+To run it again from a clean state: `pnpm seed`.
+
+### Trying the failure paths
+
+- **Declined by the wallet** — reject the prompt instead of approving. The
+  screen shows "Your card could not be verified" with a Try Again button.
+- **Insufficient funds** — order more than the account holds. The
+  presentation succeeds, the debit does not, and the order stays `pending`,
+  so Try Again starts a fresh presentation.
+- **Bank unreachable** — stop the bank's dev process before approving. The
+  screen reports "Could not reach your bank. Nothing was charged." Nothing is
+  debited and the order stays `pending`.
 
 ## Security notes
 
@@ -127,3 +186,7 @@ Deliberate, documented in the design doc §2:
   fails, the order stays pending and nothing is debited; the user retries.
 - **Single replica only.** SQLite on a single-writer volume.
 - **No rate limiting**, no account lockout, no password reset.
+- **Concurrent payment sessions per order are possible.** Nothing prevents
+  opening several sessions for one `pending` order; whichever the user
+  completes wins and the rest expire in `foundry`. Double-charging is
+  prevented by the bank's `idempotency_key`, not by a schema constraint.
