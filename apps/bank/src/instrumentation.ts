@@ -48,4 +48,25 @@ export async function register() {
     );
     process.exit(1);
   }
+
+  // Seed a fresh deployment so it is immediately demoable. Both imports must
+  // stay dynamic and inside this function: a static top-level import of
+  // ./db/index.js would transitively evaluate ./env.js at module load, before
+  // the try/catch above, undoing the fix this file's header describes.
+  try {
+    const { getDb } = await import("./db/index.js");
+    const { seedIfEmpty } = await import("./db/seed.js");
+    const seeded = seedIfEmpty(getDb());
+    console.log(
+      seeded
+        ? "[bank] Seeded an empty database with the demo fixtures."
+        : "[bank] Database already populated — left untouched.",
+    );
+  } catch (error) {
+    console.error(
+      "[bank] Fatal: could not open or seed the database — refusing to serve requests.",
+      error,
+    );
+    process.exit(1);
+  }
 }

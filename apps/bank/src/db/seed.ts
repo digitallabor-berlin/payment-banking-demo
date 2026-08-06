@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { hashPassword } from "../lib/password.js";
 import { createDb, type Db } from "./index.js";
 import { accounts, cards, credentials, transactions, users } from "./schema.js";
@@ -120,6 +121,23 @@ export function seed(db: Db, now = Date.now()): void {
         .run();
     });
   }
+}
+
+/**
+ * Seeds only a database that has never been seeded. Called at server boot from
+ * `src/instrumentation.ts` so a fresh deployment (empty PVC) is immediately
+ * demoable without an operator step — `seed.ts` is a tsx script and is not in
+ * the runtime image, so `pnpm seed` has no in-cluster equivalent.
+ *
+ * The emptiness check is the entire safety property: `seed()` deletes every row
+ * before inserting, so calling it on a populated database would destroy live
+ * demo state. Returns whether it seeded, so the caller can log which happened.
+ */
+export function seedIfEmpty(db: Db, now = Date.now()): boolean {
+  const row = db.select({ n: sql<number>`count(*)` }).from(users).get();
+  if ((row?.n ?? 0) > 0) return false;
+  seed(db, now);
+  return true;
 }
 
 /** CLI entry point: `pnpm seed`. */
