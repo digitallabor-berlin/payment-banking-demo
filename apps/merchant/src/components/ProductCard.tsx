@@ -1,5 +1,6 @@
 import type { ProductDto } from "@/lib/queries.js";
 import { formatEuroCents } from "@/lib/format.js";
+import { AddToCartButton } from "./AddToCartButton.js";
 
 const CATEGORY_COLOR: Record<string, string> = {
   Electronics: "var(--color-brand)",
@@ -23,14 +24,7 @@ export function ProductCard({ product }: { product: ProductDto }) {
         <p className="text-sm text-[var(--color-muted-foreground)]">{product.description}</p>
         <div className="flex items-center justify-between pt-2">
           <span className="text-lg font-bold">{formatEuroCents(product.priceCents)}</span>
-          <button
-            type="button"
-            disabled
-            title="Cart is wired up in the next task"
-            className="rounded-[var(--radius)] bg-[var(--color-brand)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
-          >
-            Add to Cart
-          </button>
+          <AddToCartButton product={product} />
         </div>
       </div>
     </div>

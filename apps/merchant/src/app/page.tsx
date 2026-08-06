@@ -1,3 +1,4 @@
+import { CartBadge } from "@/components/CartBadge.js";
 import { ProductCard } from "@/components/ProductCard.js";
 import { getDb } from "@/db/index.js";
 import { listProducts } from "@/lib/queries.js";
@@ -12,6 +13,7 @@ export default function ShopPage() {
       <header className="shop-header">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
           <span className="text-xl font-bold text-[var(--color-brand-dark)]">Demo Shop</span>
+          <CartBadge />
         </div>
       </header>
 
