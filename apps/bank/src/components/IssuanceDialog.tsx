@@ -2,7 +2,16 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { QrCanvas, useIsTouch, useStatusPoll } from "@demo/ui";
+import {
+  DC_API_ISSUANCE_PROTOCOL,
+  QrCanvas,
+  invokeDcCreate,
+  isDcApiNotSupportedError,
+  prepareDcApiRequest,
+  useDcApiSupport,
+  useIsTouch,
+  useStatusPoll,
+} from "@demo/ui";
 import { AlertMark, CheckMark } from "./StatusMark.js";
 
 /** Sparkasse red, matching --color-primary, for the QR's dark modules. */
@@ -13,12 +22,21 @@ type Phase = "waiting" | "success" | "error";
 export interface IssuanceDialogProps {
   sessionId: string;
   offerUri: string;
+  dcApiOffer: unknown;
   onClose: () => void;
 }
 
-export function IssuanceDialog({ sessionId, offerUri, onClose }: IssuanceDialogProps) {
+export function IssuanceDialog({
+  sessionId,
+  offerUri,
+  dcApiOffer,
+  onClose,
+}: IssuanceDialogProps) {
   const router = useRouter();
   const isTouch = useIsTouch();
+  const dcSupported = useDcApiSupport("create", DC_API_ISSUANCE_PROTOCOL);
+  const [dcFailed, setDcFailed] = useState(false);
+  const [dcMessage, setDcMessage] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("waiting");
 
   const fetchOnce = useCallback(async () => {
@@ -60,6 +78,24 @@ export function IssuanceDialog({ sessionId, offerUri, onClose }: IssuanceDialogP
         ? "Verbindung zum Server verloren."
         : "Die Karte konnte nicht hinzugefügt werden.";
 
+  // No `await` may execute before invokeDcCreate — Chrome consumes the click's
+  // transient activation otherwise. dcApiOffer is already a prop, so nothing
+  // needs fetching here.
+  async function addViaDcApi() {
+    try {
+      await invokeDcCreate(prepareDcApiRequest(dcApiOffer, DC_API_ISSUANCE_PROTOCOL));
+    } catch (err) {
+      // English on purpose (spec D5): a browser-capability failure is a
+      // technical signal, not customer copy.
+      setDcMessage(
+        isDcApiNotSupportedError(err)
+          ? "This browser does not support the Digital Credentials API."
+          : "The wallet handover was cancelled.",
+      );
+      setDcFailed(true);
+    }
+  }
+
   return (
     <div
       className="dialog-overlay"
@@ -72,7 +108,26 @@ export function IssuanceDialog({ sessionId, offerUri, onClose }: IssuanceDialogP
           <>
             <h2 className="panel-title">Karte zum EUDI Wallet hinzufügen</h2>
 
-            {isTouch ? (
+            {dcSupported === null ? (
+              /* "Not yet known" is NOT "unavailable". Rendering the QR here
+                 would flash it on Android before it disappears. */
+              <p className="mt-6 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
+                Wird vorbereitet…
+              </p>
+            ) : dcSupported && !dcFailed ? (
+              <>
+                <button
+                  type="button"
+                  onClick={addViaDcApi}
+                  className="btn btn-primary mt-6 px-5 py-3"
+                >
+                  Zum EUDI Wallet hinzufügen
+                </button>
+                <p className="mt-4 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
+                  Bestätigen Sie das Angebot in Ihrer EUDI Wallet App.
+                </p>
+              </>
+            ) : isTouch ? (
               <>
                 <a href={offerUri} className="btn btn-primary mt-6 px-5 py-3">
                   Im Wallet öffnen
@@ -96,6 +151,12 @@ export function IssuanceDialog({ sessionId, offerUri, onClose }: IssuanceDialogP
                 </p>
               </>
             )}
+
+            {dcMessage ? (
+              <p role="alert" className="mt-3 text-xs font-medium text-[var(--color-destructive)]">
+                {dcMessage}
+              </p>
+            ) : null}
 
             <p className="eyebrow mt-4">
               {value === "offered" || value === null ? "Warte auf Wallet" : value}

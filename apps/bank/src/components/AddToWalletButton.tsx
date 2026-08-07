@@ -6,6 +6,7 @@ import { IssuanceDialog } from "./IssuanceDialog.js";
 interface Session {
   sessionId: string;
   offerUri: string;
+  dcApiOffer: unknown;
 }
 
 export function AddToWalletButton({
@@ -29,7 +30,11 @@ export function AddToWalletButton({
         return;
       }
       const body = (await response.json()) as Session;
-      setSession({ sessionId: body.sessionId, offerUri: body.offerUri });
+      setSession({
+        sessionId: body.sessionId,
+        offerUri: body.offerUri,
+        dcApiOffer: body.dcApiOffer,
+      });
     } catch {
       setError("Verbindung zum Server fehlgeschlagen.");
     } finally {
@@ -59,6 +64,7 @@ export function AddToWalletButton({
         <IssuanceDialog
           sessionId={session.sessionId}
           offerUri={session.offerUri}
+          dcApiOffer={session.dcApiOffer}
           onClose={() => setSession(null)}
         />
       ) : null}
