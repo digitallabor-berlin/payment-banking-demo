@@ -28,5 +28,9 @@ export async function POST(
     return NextResponse.json({ error: result.reason }, { status });
   }
 
-  return NextResponse.json({ sessionId: result.sessionId, offerUri: result.offerUri });
+  return NextResponse.json({
+    sessionId: result.sessionId,
+    offerUri: result.offerUri,
+    dcApiOffer: result.dcApiOffer,
+  });
 }
