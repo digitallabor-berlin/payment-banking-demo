@@ -2,7 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { QrCanvas, useIsTouch, useStatusPoll } from "@demo/ui";
+import {
+  DC_API_PRESENTATION_PROTOCOL,
+  QrCanvas,
+  invokeDcGet,
+  isDcApiNotSupportedError,
+  prepareDcApiRequest,
+  useIsTouch,
+  useStatusPoll,
+} from "@demo/ui";
 import { formatEuroCents } from "@/lib/format.js";
 import { EudiPayLogo } from "./EudiPayLogo.js";
 import { AlertMark, CheckMark } from "./StatusMark.js";
@@ -16,6 +24,8 @@ export interface PaymentScreenProps {
   amountCents: number;
   merchantName: string;
   openid4vpUri: string;
+  transport: "request_uri" | "dc_api";
+  dcApiRequest: unknown;
   /** A session that was already terminal when the page rendered. */
   initialState: string;
   initialFailureReason?: string;
@@ -45,6 +55,8 @@ export function PaymentScreen({
   amountCents,
   merchantName,
   openid4vpUri,
+  transport,
+  dcApiRequest,
   initialState,
   initialFailureReason,
 }: PaymentScreenProps) {
@@ -52,6 +64,9 @@ export function PaymentScreen({
   const isTouch = useIsTouch();
   const [redirecting, setRedirecting] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [dcFailed, setDcFailed] = useState(false);
+  const [dcMessage, setDcMessage] = useState<string | null>(null);
+  const [dcBusy, setDcBusy] = useState(false);
 
   const terminalAtRender = initialState === "completed" || initialState === "failed";
 
@@ -100,11 +115,14 @@ export function PaymentScreen({
   // link rather than rendering a QR nobody can scan. Previously this was an
   // EUDIPAY_REDIRECT postMessage to a parent frame; with no parent, this route
   // navigates itself (spec §9.5).
+  // Under dc_api there is no URI to navigate to, and the gesture requirement
+  // forbids an on-mount action anyway.
   useEffect(() => {
+    if (transport !== "request_uri") return;
     if (!isTouch || terminalAtRender || redirecting) return;
     setRedirecting(true);
     window.location.href = openid4vpUri;
-  }, [isTouch, terminalAtRender, redirecting, openid4vpUri]);
+  }, [transport, isTouch, terminalAtRender, redirecting, openid4vpUri]);
 
   useEffect(() => {
     if (state !== "completed") return;
@@ -124,7 +142,57 @@ export function PaymentScreen({
       const response = await fetch("/api/payment-sessions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ orderId }),
+        // A dc_api session existing at all is proof detection said yes on this
+        // browser, so a retry keeps the preferred transport (spec D1).
+        body: JSON.stringify({ orderId, dcApi: transport === "dc_api" }),
+      });
+      if (!response.ok) {
+        setRetryError("Could not start a new payment. Please start over from the shop.");
+        return;
+      }
+      const body = (await response.json()) as { sessionId: string };
+      router.replace(`/pay/${body.sessionId}`);
+    } catch {
+      setRetryError("Could not reach the server. Please try again.");
+    }
+  }
+
+  // No `await` may execute before invokeDcGet — Chrome consumes the click's
+  // transient activation otherwise. dcApiRequest is already a prop.
+  async function payViaDcApi() {
+    setDcBusy(true);
+    try {
+      const data = await invokeDcGet(
+        prepareDcApiRequest(dcApiRequest, DC_API_PRESENTATION_PROTOCOL),
+      );
+      await fetch(`/api/payment-sessions/${sessionId}/dc-api-response`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ response: data.response }),
+      });
+      // The poll already running picks up the verdict on its next tick.
+    } catch (err) {
+      setDcMessage(
+        isDcApiNotSupportedError(err)
+          ? "This browser does not support the Digital Credentials API."
+          : "Could not open your wallet on this device.",
+      );
+      setDcFailed(true);
+    } finally {
+      setDcBusy(false);
+    }
+  }
+
+  // A dc_api session cannot be re-rendered as a QR: it is bound to
+  // response_mode dc_api.jwt with an inlined request object. Recovery means a
+  // fresh request_uri session for the same still-pending order.
+  async function showQrInstead() {
+    setRetryError(null);
+    try {
+      const response = await fetch("/api/payment-sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ orderId, dcApi: false }),
       });
       if (!response.ok) {
         setRetryError("Could not start a new payment. Please start over from the shop.");
@@ -221,18 +289,54 @@ export function PaymentScreen({
               {state === "settling" ? "Contacting your bank…" : "Waiting for your wallet"}
             </p>
 
-            <div className="eudipay-qr-frame mt-5 p-3">
-              <QrCanvas
-                value={openid4vpUri}
-                size={220}
-                darkColor={BRAND_BLUE}
-                ariaLabel="QR code for the payment request"
-              />
-            </div>
+            {transport === "dc_api" && !dcFailed ? (
+              <>
+                <button
+                  type="button"
+                  onClick={payViaDcApi}
+                  disabled={dcBusy}
+                  className="eudipay-button eudipay-button-primary mt-6 py-3"
+                >
+                  {dcBusy ? "Opening your wallet…" : "Pay with your wallet"}
+                </button>
+                <p className="eudipay-muted mt-4 text-sm">
+                  Approve the payment in your EUDI Wallet.
+                </p>
+              </>
+            ) : transport === "dc_api" ? (
+              <>
+                <p role="alert" className="mt-6 text-sm font-medium text-[#b91c1c]">
+                  {dcMessage}
+                </p>
+                <button
+                  type="button"
+                  onClick={showQrInstead}
+                  className="eudipay-button eudipay-button-primary mt-4 py-3"
+                >
+                  Show QR code
+                </button>
+                {retryError ? (
+                  <p role="alert" className="eudipay-muted mt-2 text-sm">
+                    {retryError}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <div className="eudipay-qr-frame mt-5 p-3">
+                  <QrCanvas
+                    value={openid4vpUri}
+                    size={220}
+                    darkColor={BRAND_BLUE}
+                    ariaLabel="QR code for the payment request"
+                  />
+                </div>
 
-            <p className="eudipay-muted mt-4 text-sm">
-              Scan this with your EUDI Wallet to approve the payment.
-            </p>
+                <p className="eudipay-muted mt-4 text-sm">
+                  Scan this with your EUDI Wallet to approve the payment.
+                </p>
+              </>
+            )}
 
             <button
               type="button"

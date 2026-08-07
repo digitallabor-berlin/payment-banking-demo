@@ -53,7 +53,11 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**186 tests** (85 bank + 87 merchant + 7 foundry-client + 7 ui), measured.
+**218 tests** (87 bank + 97 merchant + 9 foundry-client + 25 ui), measured.
+
+That was **186** before the DC API transport work, which added 32. The plan for
+that work projected 210 and was simply wrong — its per-task arithmetic did not
+match the number of `it()` blocks actually written. Measure.
 
 That number was **162** for most of this project's life, and a stale `162` is
 still quoted in the Plan 3 document. The difference is not drift: 20 of those
@@ -150,6 +154,16 @@ them without reading the linked reasoning first.
 
 ### Environment notes
 
+- **`pnpm dev` is currently broken — use `pnpm build` then `pnpm --filter
+  @demo/<app> start`.** Both apps return HTTP 500 with `Module not found: Can't
+  resolve 'fs'`, trace `better-sqlite3 → src/db/index.ts → src/instrumentation.ts`.
+  Next compiles `instrumentation.ts` for the **edge** runtime as well as node,
+  and `serverExternalPackages: ["better-sqlite3"]` does not apply to the edge
+  bundle. A `process.env.NEXT_RUNTIME !== "nodejs"` early return does **not**
+  fix it — measured, the dynamic `await import("./db/index.js")` is still pulled
+  into the edge graph. This reproduces on a clean `main`; it is not caused by
+  any feature branch. `next build` and `next start` are unaffected, so ad hoc
+  browser verification should go through a production server.
 - **Use `podman`, not `docker`** — docker is not installed here. Same Dockerfile
   syntax. Container-to-host is `host.containers.internal` (podman) vs
   `host.docker.internal` (docker).
@@ -182,6 +196,39 @@ them without reading the linked reasoning first.
   `docs:`). Commit messages state what was *verified*, and state plainly what
   was not.
 
+### DC API
+
+- **`packages/ui/src/dcApi.ts` injects browser globals on purpose.** All four
+  vitest projects run `environment: "node"` with `include: ["src/**/*.test.ts"]`
+  — there is no jsdom and `.tsx` is not matched. Reading `window` at module
+  scope would make detection untestable. Keep decisions in `.ts`, rendering in
+  `.tsx`. `selectTransport` in the merchant exists for exactly this reason.
+- **No `await` may execute between a click handler starting and
+  `navigator.credentials.get()` / `.create()`.** Chrome consumes the click's
+  transient activation. This is why both apps have the DC API payload in the
+  component as a prop before the click, rather than fetching it in the handler.
+- **The `create` gate is lenient, the `get` gate is strict** —
+  `supportsDcApi` skips `userAgentAllowsProtocol` for `create`. Measured on
+  HeadlessChrome 151: `userAgentAllowsProtocol` exists and returns `true` for
+  **both** `openid4vp-v1-unsigned` and `openid4vci-v1`, so on that build the
+  leniency is currently doing no work. It is kept because `openid4vci-v1` is a
+  Chrome origin-trial identifier behind
+  `chrome://flags/#web-identity-digital-credentials-creation`, not a shipped
+  protocol, and a browser that can issue may still answer `false`.
+- **`useDcApiSupport` returning `null` is not `false`.** It means "not yet
+  known". Rendering the QR fallback on `null` flashes a QR on Android.
+- **A `dc_api` session can never be re-rendered as a QR.** It is bound to
+  `response_mode: dc_api.jwt` with an inlined unsigned request object and
+  foundry returns neither `openid4vp_uri` nor `request_uri`. Recovery creates a
+  *new* `request_uri` session — that is what "Show QR code" does.
+- **foundry needs `verifier.dc_api_expected_origins` to list the merchant
+  origin.** Over the DC API transport the KB-JWT audience MUST be the
+  browsing-context Origin. Unset, foundry accepts only an origin derived from
+  its own `public_base_url`. Until this is configured, a merchant DC API
+  payment fails `transaction_data_binding` *as a payment decline*, not as a
+  transport error — nothing throws in the browser, so the "Show QR code"
+  recovery never appears. `config.yaml` is gitignored in `../foundry`.
+
 ## Known-unverifiable
 
 The wallet leg cannot be exercised in this environment: no phone and no EUDI
@@ -203,6 +250,22 @@ That is a strictly different claim from having run it. No wallet flow has been
 exercised. The local `pnpm dev` setup still talks to a `localhost` foundry.
 
 Do not fake this. If a change depends on real wallet behaviour, say so.
+
+The DC API work narrowed this further, in a way worth stating precisely.
+Headless Chrome **does** expose `window.DigitalCredential` here (the DC API
+plan wrongly assumed it does not), so everything up to the wallet handover is
+locally verifiable and was verified: detection returns true, the merchant
+creates a real `transport: dc_api` verification against a running foundry,
+the row stores foundry's inline `dc_api_request` with `response_mode:
+dc_api.jwt` and both URIs null, and the pay screen renders the DC API button
+rather than a QR.
+
+What remains unverified is only the leg that needs a wallet:
+`navigator.credentials.get()` / `.create()` never resolve successfully here —
+they throw, which is what exercised the fallback paths. So no wallet has ever
+returned a `DigitalCredential`, no response has ever been relayed to
+`/dc-api-response`, and `submitDcApiResponse` has never been called against a
+real foundry.
 
 ## foundry
 

@@ -66,6 +66,14 @@ const verificationOk = () => ({
   },
 });
 
+const dcApiOk = () => ({
+  status: 200,
+  body: {
+    verification_id: "ver_dc",
+    dc_api_request: { client_id: "x509_hash:abc", nonce: "n1" },
+  },
+});
+
 describe("startPaymentSession", () => {
   it("creates a pending session and returns the presentation uri", async () => {
     const result = await startPaymentSession(db, stubClient(verificationOk), "ord_1", "Demo Shop");
@@ -91,6 +99,41 @@ describe("startPaymentSession", () => {
       transport: "request_uri",
       dcql_query: { credentials: [{ id: "card" }] },
       transaction_data: [{ amount: "47.98", order_id: "ord_1", merchant: "Demo Shop" }],
+    });
+  });
+
+  it("defaults to the request_uri transport and records it on the row", async () => {
+    await startPaymentSession(db, stubClient(verificationOk), "ord_1", "Demo Shop");
+
+    const row = db.select().from(paymentSessions).get();
+    expect(row?.transport).toBe("request_uri");
+    expect(row?.dcApiRequestJson).toBeNull();
+  });
+
+  it("asks foundry for the dc_api transport when told to", async () => {
+    let sentBody: unknown = null;
+    const client = stubClient((_url, init) => {
+      sentBody = JSON.parse(String(init.body));
+      return dcApiOk();
+    });
+
+    await startPaymentSession(db, client, "ord_1", "Demo Shop", true);
+
+    expect(sentBody).toMatchObject({ transport: "dc_api" });
+  });
+
+  it("persists the inline dc_api_request and leaves both uris null", async () => {
+    const result = await startPaymentSession(db, stubClient(dcApiOk), "ord_1", "Demo Shop", true);
+
+    expect(result).toEqual({ ok: true, sessionId: expect.any(String), uri: "" });
+
+    const row = db.select().from(paymentSessions).get();
+    expect(row?.transport).toBe("dc_api");
+    expect(row?.openid4vpUri).toBeNull();
+    expect(row?.requestUri).toBeNull();
+    expect(JSON.parse(row?.dcApiRequestJson ?? "null")).toEqual({
+      client_id: "x509_hash:abc",
+      nonce: "n1",
     });
   });
 

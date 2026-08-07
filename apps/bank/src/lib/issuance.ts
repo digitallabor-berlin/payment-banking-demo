@@ -9,7 +9,7 @@ import { mintCredentialId } from "./credential-id.js";
 export const DPC_CREDENTIAL_TYPE_ID = "com.emvco.dpc.card";
 
 export type StartIssuanceResult =
-  | { ok: true; sessionId: string; offerUri: string }
+  | { ok: true; sessionId: string; offerUri: string; dcApiOffer: unknown }
   | { ok: false; reason: "card_not_found" | "foundry_unavailable" };
 
 export type RefreshResult =
@@ -67,7 +67,15 @@ export async function startIssuance(
       .where(eq(credentials.id, rowId))
       .run();
 
-    return { ok: true, sessionId: rowId, offerUri: offer.credential_offer_uri };
+    // Two renderings of ONE offer: the deep link and the DC API payload.
+    // dcApiOffer is deliberately not persisted — the offer is already recorded
+    // by foundryTxId, so a column would duplicate state (spec 2).
+    return {
+      ok: true,
+      sessionId: rowId,
+      offerUri: offer.credential_offer_uri,
+      dcApiOffer: offer.dc_api_offer,
+    };
   } catch {
     db.update(credentials).set({ state: "failed" }).where(eq(credentials.id, rowId)).run();
     return { ok: false, reason: "foundry_unavailable" };

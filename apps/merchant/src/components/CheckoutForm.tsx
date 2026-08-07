@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { DC_API_PRESENTATION_PROTOCOL, useDcApiSupport } from "@demo/ui";
 import { formatEuroCents } from "@/lib/format.js";
+import { selectTransport } from "@/lib/transport.js";
 import { useCart } from "@/lib/useCart.js";
 
 export function CheckoutForm() {
@@ -13,6 +15,9 @@ export function CheckoutForm() {
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Detection must happen HERE, not on the pay page: `transport` changes the
+  // OpenID4VP wire and is therefore fixed when the session is created.
+  const dcApiSupported = useDcApiSupport("get", DC_API_PRESENTATION_PROTOCOL);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -36,7 +41,10 @@ export function CheckoutForm() {
       const sessionResponse = await fetch("/api/payment-sessions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ orderId: order.orderId }),
+        body: JSON.stringify({
+          orderId: order.orderId,
+          dcApi: selectTransport(dcApiSupported) === "dc_api",
+        }),
       });
       if (!sessionResponse.ok) {
         setError("Could not start the payment. Please try again.");

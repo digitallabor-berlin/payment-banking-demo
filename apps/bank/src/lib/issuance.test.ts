@@ -42,7 +42,10 @@ const offerOk = () => ({
   body: {
     transaction_id: "tx_foundry_1",
     credential_offer_uri: "openid-credential-offer://?x=1",
-    dc_api_offer: {},
+    dc_api_offer: {
+      credential_issuer: "https://foundry.example",
+      credential_configuration_ids: ["com.emvco.dpc.card"],
+    },
   },
 });
 
@@ -54,6 +57,7 @@ describe("startIssuance", () => {
       ok: true,
       sessionId: expect.any(String),
       offerUri: "openid-credential-offer://?x=1",
+      dcApiOffer: expect.any(Object),
     });
 
     const row = db.select().from(credentials).get();
@@ -120,6 +124,30 @@ describe("startIssuance", () => {
     await startIssuance(db, stubClient(offerOk), "user_anna", "card_anna");
     await startIssuance(db, stubClient(offerOk), "user_anna", "card_anna");
     expect(db.select().from(credentials).all()).toHaveLength(2);
+  });
+
+  it("returns foundry's dc_api_offer verbatim alongside the deep-link uri", async () => {
+    const result = await startIssuance(db, stubClient(offerOk), "user_anna", "card_anna");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.offerUri).toBe("openid-credential-offer://?x=1");
+    expect(result.dcApiOffer).toEqual({
+      credential_issuer: "https://foundry.example",
+      credential_configuration_ids: ["com.emvco.dpc.card"],
+    });
+  });
+
+  it("returns an undefined dcApiOffer when foundry omits it", async () => {
+    const noDcApi = () => ({
+      status: 200,
+      body: { transaction_id: "tx_1", credential_offer_uri: "openid-credential-offer://?x=1" },
+    });
+    const result = await startIssuance(db, stubClient(noDcApi), "user_anna", "card_anna");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.dcApiOffer).toBeUndefined();
   });
 });
 

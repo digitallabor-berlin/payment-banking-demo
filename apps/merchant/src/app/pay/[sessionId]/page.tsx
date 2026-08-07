@@ -32,6 +32,8 @@ export default async function PayPage({
       amountCents={order.totalCents}
       merchantName={env.MERCHANT_NAME}
       openid4vpUri={session.openid4vpUri ?? session.requestUri ?? ""}
+      transport={session.transport}
+      dcApiRequest={session.dcApiRequestJson ? JSON.parse(session.dcApiRequestJson) : null}
       initialState={session.state}
       initialFailureReason={session.failureReason ?? undefined}
     />

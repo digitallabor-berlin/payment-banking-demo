@@ -119,12 +119,31 @@ the same `idempotency_key` returns the identical `bank_tx_id`.
   carried in the credential.
 - The credential row is written **before** foundry is called, so a foundry
   outage leaves a visible `failed` row rather than nothing.
-- UI: `AddToWalletButton` → `IssuanceDialog` (QR + status polling via
-  `useStatusPoll` from `@demo/ui`). QR dark modules are `#ff0000`.
+- UI: `AddToWalletButton` → `IssuanceDialog` (status polling via `useStatusPoll`
+  from `@demo/ui`). QR dark modules are `#ff0000`.
+- **Issuance prefers the W3C Digital Credentials API** (`openid4vci-v1` via
+  `navigator.credentials.create`), falling back to the deep link on touch or
+  the QR on desktop. foundry's `POST /admin/issuance/offers` *always* returns
+  `dc_api_offer` beside `credential_offer_uri` — two renderings of one offer,
+  no transport parameter — so `dcApiOffer` is passed through the API but
+  deliberately **not persisted**: the offer is already recorded by
+  `foundryTxId`.
+- Because both are renderings of the same offer, a DC API failure reveals the
+  QR/deep link **immediately**, with no intermediate button. This is
+  deliberately asymmetric with the merchant, where the fallback costs a whole
+  new foundry verification request.
+- A human testing this needs
+  `chrome://flags/#web-identity-digital-credentials-creation` enabled. No
+  origin-trial token is embedded in the markup, by design.
+- **DC API diagnostic strings are English; all other copy stays German.** A
+  browser-capability failure is a technical signal, not customer copy. The two
+  strings are `"This browser does not support the Digital Credentials API."`
+  and `"The wallet handover was cancelled."`.
 
 ## Testing
 
-`pnpm test` → **77 tests**. `pnpm typecheck` must also be clean.
+`pnpm test` → **87 tests**. `pnpm typecheck` must also be clean. (This line read
+`77` while the real count was higher; measure rather than trusting it.)
 
 `vitest.config.ts` carries an explicit `test.env` block; `env.ts` validates at
 import time, so tests fail without it. `apiKey.test.ts` uses

@@ -49,6 +49,15 @@ export interface CheckResult {
   detail?: string | null;
 }
 
+/**
+ * Body of POST /admin/verification/requests/{id}/dc-api-response.
+ * See openapi.json AdminDcApiResponseBody. The value is the wallet's
+ * encrypted JWE, taken verbatim from `DigitalCredential.data.response`.
+ */
+export interface AdminDcApiResponseBody {
+  response: string;
+}
+
 export interface VerificationResult {
   verified: boolean;
   checks: CheckResult[];
