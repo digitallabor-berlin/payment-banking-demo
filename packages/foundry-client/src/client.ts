@@ -4,6 +4,7 @@ import type {
   CreateOfferResponse,
   CreateVerificationRequest,
   CreateVerificationResponse,
+  VerificationResult,
   VerificationTransaction,
 } from "./types.js";
 
@@ -61,6 +62,21 @@ export class FoundryClient {
   async getVerificationStatus(verificationId: string): Promise<VerificationTransaction> {
     const path = `/admin/verification/requests/${encodeURIComponent(verificationId)}`;
     return this.request<VerificationTransaction>("GET", path);
+  }
+
+  /**
+   * Relays a browser Digital Credentials API response to foundry. This is an
+   * ADMIN endpoint, so it can only ever be called server-side — the admin key
+   * must never reach a browser. foundry verifies synchronously and returns the
+   * verdict, but callers may discard it: the transaction state it also writes
+   * is what the existing poll reads.
+   */
+  async submitDcApiResponse(
+    verificationId: string,
+    response: string,
+  ): Promise<VerificationResult> {
+    const path = `/admin/verification/requests/${encodeURIComponent(verificationId)}/dc-api-response`;
+    return this.request<VerificationResult>("POST", path, { response });
   }
 
   private async request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {

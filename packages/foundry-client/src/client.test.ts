@@ -181,4 +181,44 @@ describe("FoundryClient verification methods", () => {
     expect(res.result?.verified).toBe(true);
     expect(res.result?.checks[0]?.check).toBe("transaction_data_binding");
   });
+
+  it("relays a DC API response to the admin endpoint and returns the verdict", async () => {
+    let seenUrl = "";
+    let seenInit: RequestInit = {};
+    const client = makeClient(
+      stubFetch(
+        200,
+        { verified: true, checks: [{ check: "dcql_match", passed: true }], claims: {} },
+        (url, init) => {
+          seenUrl = url;
+          seenInit = init;
+        },
+      ),
+    );
+
+    const result = await client.submitDcApiResponse("v_1", "eyJhbGciOi.encrypted.jwe");
+
+    expect(seenUrl).toBe(
+      "http://foundry.test:9000/admin/verification/requests/v_1/dc-api-response",
+    );
+    expect(seenInit.method).toBe("POST");
+    expect(new Headers(seenInit.headers).get("authorization")).toBe("Bearer k-123");
+    expect(JSON.parse(String(seenInit.body))).toEqual({
+      response: "eyJhbGciOi.encrypted.jwe",
+    });
+    expect(result.verified).toBe(true);
+  });
+
+  it("percent-encodes the verification id in the dc-api-response path", async () => {
+    let seenUrl = "";
+    const client = makeClient(
+      stubFetch(200, { verified: false, checks: [], claims: {} }, (url) => {
+        seenUrl = url;
+      }),
+    );
+    await client.submitDcApiResponse("a/b", "jwe");
+    expect(seenUrl).toBe(
+      "http://foundry.test:9000/admin/verification/requests/a%2Fb/dc-api-response",
+    );
+  });
 });

@@ -1,6 +1,7 @@
 export { FoundryClient, FoundryError } from "./client.js";
 export type { FoundryClientOptions } from "./client.js";
 export type {
+  AdminDcApiResponseBody,
   AdminIssuanceStatus,
   CheckResult,
   CreateOfferRequest,
