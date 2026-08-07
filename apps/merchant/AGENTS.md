@@ -122,8 +122,22 @@ types collapse into local state, and `EUDIPAY_REDIRECT` becomes a plain
   tokens** — this screen is EudiPay-branded, not merchant-branded, and must not
   drift when the shop palette changes. Brand blue `#004DD7` (also the QR's dark
   modules), accents `#FFEFB4` / `#FFCC00`.
-- On a touch device it follows the `openid4vp://` deep link instead of rendering
-  a QR nobody can scan.
+- **The DC API wins wherever it is available — touch and desktop alike.** The
+  deep link is now only the *touch fallback*, and the QR only the desktop
+  fallback. On a `dc_api` session the screen shows a "Pay with your wallet"
+  button and the auto-redirect effect returns early; there is no URI to follow
+  and `credentials.get()` requires a user gesture anyway, so the zero-click
+  Android redirect is deliberately given up.
+- **Transport is fixed when the session is created**, because it changes the
+  OpenID4VP wire. Detection therefore lives in `CheckoutForm`, not here, and
+  travels in the `POST /api/payment-sessions` body as `dcApi: boolean`.
+  `PaymentScreen` never calls `useDcApiSupport` and has no `null` phase — by
+  the time it renders, `transport` is a fact on the row.
+- On failure the screen shows an explicit **"Show QR code"** button rather than
+  silently swapping in a QR: a user who just dismissed a wallet sheet would not
+  understand a QR appearing on its own. It mints a fresh `request_uri` session
+  for the same still-pending order. `tryAgain` in contrast *preserves*
+  `dc_api`, since the session existing at all proves the browser supports it.
 - **No countdown timer or progress bar.** The 10-minute cap lives in
   `useStatusPoll` and surfaces only if reached.
 - `EudiPayLogo.tsx` is inline SVG — no binary asset.
@@ -135,6 +149,13 @@ Response contract for `GET /api/payment-sessions/{id}` is exactly
 
 `POST /api/payment-sessions/{id}/cancel` is the one failure that marks the
 **order** cancelled rather than leaving it retryable.
+
+`POST /api/payment-sessions/{id}/dc-api-response` relays the wallet's encrypted
+JWE to foundry. It exists **only** because foundry's `dc-api-response` endpoint
+is admin-authenticated and the admin key must never reach a browser. It returns
+**204 and discards foundry's `VerificationResult`** on purpose: the verdict
+reaches the UI through the poll that is already running, so there is one state
+path rather than two.
 
 `GET /api/orders/{id}` exists and is curl-able, but there is no "my orders"
 page — the demo's narrative ends at the success screen and continues in the
