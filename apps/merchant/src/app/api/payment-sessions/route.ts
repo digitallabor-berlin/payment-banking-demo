@@ -7,7 +7,11 @@ import { startPaymentSession } from "@/lib/payment-sessions.js";
 
 export const dynamic = "force-dynamic";
 
-const bodySchema = z.object({ orderId: z.string().min(1) });
+const bodySchema = z.object({
+  orderId: z.string().min(1),
+  /** The browser's DC API detection result. Absent means "no". */
+  dcApi: z.boolean().optional(),
+});
 
 export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
@@ -20,6 +24,7 @@ export async function POST(request: Request) {
     getFoundry(),
     parsed.data.orderId,
     env.MERCHANT_NAME,
+    parsed.data.dcApi ?? false,
   );
 
   if (!result.ok) {

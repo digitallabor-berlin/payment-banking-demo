@@ -15,6 +15,13 @@
       "when": 1786006735285,
       "tag": "0001_lively_senator_kelly",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786091587593,
+      "tag": "0002_funny_legion",
+      "breakpoints": true
     }
   ]
 }

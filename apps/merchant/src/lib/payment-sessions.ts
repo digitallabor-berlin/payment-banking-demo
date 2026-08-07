@@ -32,6 +32,7 @@ export async function startPaymentSession(
   client: FoundryClient,
   orderId: string,
   merchantName: string,
+  useDcApi = false,
   now: number = Date.now(),
 ): Promise<StartPaymentSessionResult> {
   const order = db.select().from(orders).where(eq(orders.id, orderId)).get();
@@ -46,11 +47,13 @@ export async function startPaymentSession(
 
   try {
     const response = await client.createVerificationRequest({
-      transport: "request_uri",
+      transport: useDcApi ? "dc_api" : "request_uri",
       dcql_query: buildDcqlQuery(),
       transaction_data: buildTransactionData(order.id, order.totalCents, merchantName),
     });
 
+    // Under dc_api foundry returns neither uri — the request object is inlined
+    // and unsigned because response_mode is dc_api.jwt.
     const uri = response.openid4vp_uri ?? response.request_uri ?? "";
 
     db.update(paymentSessions)
@@ -58,6 +61,11 @@ export async function startPaymentSession(
         foundryVerificationId: response.verification_id,
         openid4vpUri: response.openid4vp_uri ?? null,
         requestUri: response.request_uri ?? null,
+        transport: useDcApi ? "dc_api" : "request_uri",
+        dcApiRequestJson:
+          response.dc_api_request === undefined || response.dc_api_request === null
+            ? null
+            : JSON.stringify(response.dc_api_request),
       })
       .where(eq(paymentSessions.id, sessionId))
       .run();

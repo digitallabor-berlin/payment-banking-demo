@@ -55,6 +55,16 @@ export const paymentSessions = sqliteTable("payment_sessions", {
     .default("pending"),
   openid4vpUri: text("openid4vp_uri"),
   requestUri: text("request_uri"),
+  /**
+   * How this session's presentation was requested. Recorded rather than
+   * inferred: `openid4vp_uri IS NULL` is ambiguous between a dc_api session
+   * and a foundry failure.
+   */
+  transport: text("transport", { enum: ["request_uri", "dc_api"] })
+    .notNull()
+    .default("request_uri"),
+  /** foundry's inline unsigned request object, verbatim. Only for dc_api. */
+  dcApiRequestJson: text("dc_api_request_json"),
   /** foundry's verdict, stored verbatim so the success screen can show it. */
   disclosedClaimsJson: text("disclosed_claims_json"),
   checksJson: text("checks_json"),
