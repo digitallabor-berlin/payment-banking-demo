@@ -238,8 +238,9 @@ Detection must happen in `CheckoutForm`, before the session exists
 The default keeps every existing row valid, so `pnpm migrate` is
 non-destructive.
 
-**Relay route.** `POST /api/payment-sessions/[sessionId]/dc-api-response`, body
-`{ response: string }`. Looks up `foundryVerificationId`, calls a new
+**Relay route.** `POST /api/payment-sessions/[id]/dc-api-response`, body
+`{ response: string }`. (The merchant's dynamic segment is `[id]`, not
+`[sessionId]` — see the sibling `[id]/cancel/route.ts`.) Looks up `foundryVerificationId`, calls a new
 `FoundryClient.submitDcApiResponse(id, response)` →
 `POST /admin/verification/requests/:id/dc-api-response`. Server-side only
 (constraint 4). foundry returns a `VerificationResult` synchronously; the route
