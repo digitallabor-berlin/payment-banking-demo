@@ -11,3 +11,6 @@ data/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# superpowers brainstorming mockups
+.superpowers/
