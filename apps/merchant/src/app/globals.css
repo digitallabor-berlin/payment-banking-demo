@@ -421,8 +421,8 @@ body {
 .eudipay-sheet {
   width: 100%;
   max-width: 25rem;
-  /* The instrument's ground. Already a brand shade — it is the stripe in
-   * EudiPayLogo — rather than a new invention. */
+  /* The instrument's ground. Already a brand shade — it was the stripe in the
+   * retired EudiPayLogo mark — rather than a new invention. */
   background: #003ba8;
   color: #ffffff;
   border-radius: 20px;
