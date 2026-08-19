@@ -1,19 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { DC_API_PRESENTATION_PROTOCOL, useDcApiSupport } from "@demo/ui";
 import { cartHasAgeRestricted } from "@/lib/cart.js";
+import type { SheetSession } from "@/lib/checkout-session.js";
 import { isAgeRestricted } from "@/lib/dcql.js";
 import { formatEuroCents } from "@/lib/format.js";
 import { selectTransport } from "@/lib/transport.js";
 import { AgeChip } from "./AgeChip.js";
 import { useCart } from "@/lib/useCart.js";
 
-export function CheckoutForm() {
-  const router = useRouter();
-  const { items, totalCents, clear } = useCart();
+export function CheckoutForm({
+  onSessionStarted,
+}: {
+  onSessionStarted: (session: SheetSession) => void;
+}) {
+  const { items, totalCents } = useCart();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -53,10 +56,30 @@ export function CheckoutForm() {
         setError("Could not start the payment. Please try again.");
         return;
       }
-      const session = (await sessionResponse.json()) as { sessionId: string };
+      // The cart is NOT cleared here. The basket is the content the payment
+      // sheet now sits over, and a declined payment must leave it intact.
+      // PaymentScreen clears it on completion instead.
+      const session = (await sessionResponse.json()) as {
+        sessionId: string;
+        uri: string | null;
+        orderId: string;
+        amountCents: number;
+        transport: "request_uri" | "dc_api";
+        ageRequested: boolean;
+        dcApiRequest: unknown;
+        state: string;
+      };
 
-      clear();
-      router.push(`/pay/${session.sessionId}`);
+      onSessionStarted({
+        sessionId: session.sessionId,
+        orderId: session.orderId,
+        amountCents: session.amountCents,
+        openid4vpUri: session.uri ?? "",
+        transport: session.transport,
+        ageRequested: session.ageRequested,
+        dcApiRequest: session.dcApiRequest,
+        initialState: session.state,
+      });
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
