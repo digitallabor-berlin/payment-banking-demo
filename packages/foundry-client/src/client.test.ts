@@ -60,6 +60,53 @@ describe("FoundryClient.createIssuanceOffer", () => {
     expect(res.credential_offer_uri).toBe("openid-credential-offer://x");
   });
 
+  /**
+   * The two DPC display arrays must reach foundry byte-identical: it validates
+   * them structurally (`display_metadata.rs`) and rejects the WHOLE offer on any
+   * deviation, so a client that reshaped or dropped a member would surface as an
+   * unexplained issuance failure rather than as missing artwork. That rejection
+   * is an HTTP 500 — see the note on `CreateOfferRequest.offer_display`.
+   */
+  it("forwards offer_display and credential_response_display verbatim", async () => {
+    let seenInit: RequestInit = {};
+    const client = makeClient(
+      stubFetch(
+        200,
+        { transaction_id: "tx_1", credential_offer_uri: "u", dc_api_offer: {} },
+        (_url, init) => {
+          seenInit = init;
+        },
+      ),
+    );
+
+    const offerDisplay = [
+      { locale: "en-US", card: { type: { code: "DEBIT" } } },
+    ];
+    const responseDisplay = [
+      {
+        locale: "en-US",
+        card: {
+          last_four: "2051",
+          card_art: [
+            { theme: "DEFAULT", image_url: "https://b.example/c.webp" },
+          ],
+        },
+      },
+    ];
+
+    await client.createIssuanceOffer({
+      credential_type_id: "com.emvco.dpc.card",
+      offer_display: offerDisplay,
+      credential_response_display: responseDisplay,
+    });
+
+    expect(JSON.parse(String(seenInit.body))).toEqual({
+      credential_type_id: "com.emvco.dpc.card",
+      offer_display: offerDisplay,
+      credential_response_display: responseDisplay,
+    });
+  });
+
   it("strips a trailing slash from adminUrl so paths never double up", async () => {
     let seenUrl = "";
     const client = new FoundryClient({

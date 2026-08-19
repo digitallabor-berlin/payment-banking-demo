@@ -11,6 +11,13 @@ interface Fixture {
   username: string;
   displayName: string;
   accountId: string;
+  /**
+   * MUST end in four digits. `lib/display-metadata.ts` derives the DPC
+   * `card.last_four` from it and foundry enforces `^[0-9]{4}$`, rejecting the
+   * entire issuance offer otherwise. `seed.test.ts` asserts this against the
+   * seeded rows — `seed` is the only writer of `accounts`, so that check covers
+   * the whole database.
+   */
   iban: string;
   balanceCents: number;
   cardId: string;
@@ -29,7 +36,7 @@ const FIXTURES: Fixture[] = [
     balanceCents: 348_712,
     cardId: "card_anna",
     panLast4: "4242",
-    network: "VISA",
+    network: "girocard",
     cardAlias: "Girocard",
   },
   {
@@ -41,23 +48,69 @@ const FIXTURES: Fixture[] = [
     balanceCents: 129_540,
     cardId: "card_ben",
     panLast4: "8815",
-    network: "Mastercard",
+    // girocard for both cards: it is the only network the DPC display metadata
+    // has branding assets for, and the merchant's fixtures already assume it.
+    network: "girocard",
     cardAlias: "Kreditkarte",
   },
 ];
 
 /** Ten plausible booked transactions, newest first. */
-const HISTORY: Array<{ counterparty: string; reference: string; amountCents: number }> = [
-  { counterparty: "REWE Markt GmbH", reference: "Kartenzahlung", amountCents: -4_215 },
-  { counterparty: "Deutsche Bahn AG", reference: "Fahrkarte Berlin-Hamburg", amountCents: -8_990 },
-  { counterparty: "Stadtwerke Musterstadt", reference: "Abschlag Strom", amountCents: -7_400 },
-  { counterparty: "Arbeitgeber GmbH", reference: "Gehalt", amountCents: 245_000 },
-  { counterparty: "Netflix International", reference: "Abo", amountCents: -1_799 },
-  { counterparty: "Apotheke am Markt", reference: "Kartenzahlung", amountCents: -2_340 },
-  { counterparty: "Vermietung Mustermann", reference: "Miete", amountCents: -98_000 },
-  { counterparty: "dm-drogerie markt", reference: "Kartenzahlung", amountCents: -3_112 },
-  { counterparty: "Telekom Deutschland", reference: "Mobilfunk", amountCents: -3_999 },
-  { counterparty: "Buchhandlung Lesezeit", reference: "Kartenzahlung", amountCents: -2_650 },
+const HISTORY: Array<{
+  counterparty: string;
+  reference: string;
+  amountCents: number;
+}> = [
+  {
+    counterparty: "REWE Markt GmbH",
+    reference: "Kartenzahlung",
+    amountCents: -4_215,
+  },
+  {
+    counterparty: "Deutsche Bahn AG",
+    reference: "Fahrkarte Berlin-Hamburg",
+    amountCents: -8_990,
+  },
+  {
+    counterparty: "Stadtwerke Musterstadt",
+    reference: "Abschlag Strom",
+    amountCents: -7_400,
+  },
+  {
+    counterparty: "Arbeitgeber GmbH",
+    reference: "Gehalt",
+    amountCents: 245_000,
+  },
+  {
+    counterparty: "Netflix International",
+    reference: "Abo",
+    amountCents: -1_799,
+  },
+  {
+    counterparty: "Apotheke am Markt",
+    reference: "Kartenzahlung",
+    amountCents: -2_340,
+  },
+  {
+    counterparty: "Vermietung Mustermann",
+    reference: "Miete",
+    amountCents: -98_000,
+  },
+  {
+    counterparty: "dm-drogerie markt",
+    reference: "Kartenzahlung",
+    amountCents: -3_112,
+  },
+  {
+    counterparty: "Telekom Deutschland",
+    reference: "Mobilfunk",
+    amountCents: -3_999,
+  },
+  {
+    counterparty: "Buchhandlung Lesezeit",
+    reference: "Kartenzahlung",
+    amountCents: -2_650,
+  },
 ];
 
 /**

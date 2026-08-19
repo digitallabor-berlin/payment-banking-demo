@@ -53,8 +53,12 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**305 tests** (97 bank + 167 merchant + 10 foundry-client + 31 ui), measured
+**329 tests** (120 bank + 167 merchant + 11 foundry-client + 31 ui), measured
 2026-08-19.
+
+That was **305** before the DPC display-metadata work, which added 24: 19 in
+`apps/bank/src/lib/display-metadata.test.ts`, 2 seed-invariant tests, 2 issuance
+tests, and 1 forwarding test in `packages/foundry-client`.
 
 That was **295** before the card-artwork / session-scoped-issuing work, which
 added 10 (all in `apps/bank/src/lib/card-state.test.ts`).
@@ -371,6 +375,18 @@ Not in this repo. Run it from `../foundry`:
   `pending | verified | failed`.
 - `config.yaml` is gitignored there; it needs the `com.emvco.dpc.card`
   credential type. Validate with `foundry config validate`.
+- **A long-running local foundry may silently predate the feature you are
+  testing.** The local server here had been up since Aug 5 and returned `200`
+  for a deliberately invalid `offer_display` — serde ignores unknown fields, so
+  an old binary accepts new request members and drops them. A 200 is therefore
+  not evidence that a new field was honoured. Either assert on the echo
+  (`credential_offer.display`) or send a known-bad payload and require the
+  rejection. `pkill -f 'target/debug/foundry serve'` and restart it after
+  pulling.
+- **A rejected display payload is HTTP 500, not 400** — body
+  `{"error": "invalid request: <path>: <reason>"}`. The error *code* is
+  `invalid_request`; the status is not. Verified 2026-08-19 on both the local and
+  the deployed instance.
 - **Send `transaction_data` as plain JSON.** foundry performs the OpenID4VP
   base64url encoding itself and adds `transaction_data_hashes_alg` when the key
   is absent (`or_insert_with`, so an explicitly sent value wins rather than

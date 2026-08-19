@@ -25,7 +25,7 @@ table and never persists one — it only forwards a `credential_id` string.
 ## Environment
 
 | Variable | Required | Default | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `PORT` | no | `3001` | Listen port |
 | `DATABASE_PATH` | no | `./data/bank.db` | SQLite file; directory must be writable |
 | `BANK_PUBLIC_URL` | no | `http://localhost:3001` | Own external origin |
@@ -57,9 +57,9 @@ table and never persists one — it only forwards a `credential_id` string.
 Two users, password `demo1234` for both:
 
 | User | Account | Balance | Card |
-|---|---|---|---|
-| `anna` (`user_anna`) | `acc_anna` | `348712` cents | `card_anna`, VISA 4242 |
-| `ben` (`user_ben`) | `acc_ben` | `129540` cents | `card_ben`, Mastercard 8815 |
+| --- | --- | --- | --- |
+| `anna` (`user_anna`) | `acc_anna` | `348712` cents | `card_anna`, girocard 4242 |
+| `ben` (`user_ben`) | `acc_ben` | `129540` cents | `card_ben`, girocard 8815 |
 
 Ten booked transactions each (20 total). **No credentials are seeded** — issuing
 one requires a real wallet. To exercise a payment path without a device, insert
@@ -67,6 +67,52 @@ a synthetic `active` credential with a scratch script (see root `AGENTS.md`).
 
 `seed()` deletes every row first, so `pnpm seed` returns the demo to a known
 state.
+
+Two fixture properties are load-bearing for issuance, and `seed.test.ts` asserts
+both against the seeded rows rather than the fixture array:
+
+- **Every IBAN must end in four digits.** `lib/display-metadata.ts` derives the
+  DPC `card.last_four` from the IBAN — *not* from `panLast4`, which is why
+  `card_anna` sends `2051` (from `DE02120300000000202051`) and not `4242`.
+  foundry enforces `^[0-9]{4}$` and rejects the entire offer otherwise.
+- **Both cards are `girocard`.** It is the only network `NETWORK_LOGOS` has an
+  asset for, and the merchant's own fixtures already assumed it — they used to
+  disagree with the bank's `VISA`/`Mastercard`. An unknown network still yields a
+  valid offer (branding degrades to a name with no logo), so this is a fidelity
+  requirement, not a correctness one.
+
+## DPC display metadata (`src/lib/display-metadata.ts`)
+
+Issuance sends foundry two independent display arrays, validated against
+*different* rules:
+
+| Field | foundry stage | `last_four` / `alias` / `card_art` |
+| --- | --- | --- |
+| `offer_display` | `DisplayStage::Offer` | withheld — PII must not appear on an offer |
+| `credential_response_display` | `DisplayStage::CredentialResponse` | required |
+
+Validation is all-or-nothing: any deviation kills the offer, so a malformed
+member surfaces as a **failed issuance**, not as a card missing its artwork. The
+builders are therefore pure functions with their own tests — every vitest project
+is `environment: "node"` with `include: ["src/**/*.test.ts"]`, so a decision
+embedded in JSX or an inline literal would be uncovered.
+
+Logo URLs (`files.digitallabor.dev`) are module constants on purpose: they are
+brand assets, not per-deployment configuration. The card art is the exception —
+it lives on the bank's own origin, so it comes from `BANK_PUBLIC_URL` through
+`cardArtUrl` and resolves to `public/card-face.webp`, the same artwork the bank's
+own UI draws.
+
+**A rejected display is HTTP 500, not 400.** The body is
+`{"error": "invalid request: <json path>: <reason>"}` — the error *code* is
+`invalid_request` but the status is 500, so `startIssuance` maps it to
+`foundry_unavailable`. Measured 2026-08-19.
+
+**A stale foundry binary silently ignores both fields.** The local server had
+been running since before the feature landed and returned `200` for a
+deliberately invalid display, which makes a bare 200 worthless as evidence. Check
+that the offer *echoes* `credential_offer.display`, or send a known-bad payload
+and require a rejection, before believing a green result.
 
 ## Formatting
 

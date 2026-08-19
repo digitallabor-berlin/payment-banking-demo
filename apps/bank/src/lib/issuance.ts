@@ -2,8 +2,14 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { FoundryClient } from "@demo/foundry-client";
 import type { Db } from "../db/index.js";
-import { cards, credentials } from "../db/schema.js";
+import { accounts, cards, credentials } from "../db/schema.js";
 import { mintCredentialId } from "./credential-id.js";
+import {
+  buildCredentialResponseDisplay,
+  buildOfferDisplay,
+  cardArtUrl,
+} from "./display-metadata.js";
+import { env } from "../env.js";
 
 /** The credential type id configured in foundry (spec 3). */
 export const DPC_CREDENTIAL_TYPE_ID = "com.emvco.dpc.card";
@@ -27,14 +33,24 @@ export async function startIssuance(
   cardId: string,
   now: number = Date.now(),
 ): Promise<StartIssuanceResult> {
-  const card = db
-    .select()
+  // Joined to `accounts` for the IBAN alone: `card.last_four` in the DPC display
+  // metadata is the IBAN's last four digits, NOT `panLast4`.
+  //
+  // An INNER join can only narrow the result if a card outlives its account, and
+  // that is currently unreachable: `cards.accountId` is `notNull().references()`,
+  // `db/index.ts` enables `foreign_keys = ON`, and nothing declares
+  // `ON DELETE CASCADE`. Adding an account-deletion path would silently turn a
+  // working issuance into `card_not_found`.
+  const row = db
+    .select({ card: cards, iban: accounts.iban })
     .from(cards)
+    .innerJoin(accounts, eq(cards.accountId, accounts.id))
     .where(and(eq(cards.id, cardId), eq(cards.userId, userId)))
     .get();
 
   // Same answer for "no such card" and "not your card": never confirm existence.
-  if (!card) return { ok: false, reason: "card_not_found" };
+  if (!row) return { ok: false, reason: "card_not_found" };
+  const { card, iban } = row;
 
   const rowId = `cred_${randomUUID()}`;
   const credentialId = mintCredentialId();
@@ -53,6 +69,11 @@ export async function startIssuance(
     .run();
 
   try {
+    // Built inside the try on purpose: `buildCredentialResponseDisplay` throws
+    // for an IBAN whose last four characters are not digits, and that must
+    // degrade to a `failed` row exactly as a foundry rejection does rather than
+    // escape as an unhandled 500. `db/seed.test.ts` asserts the fixtures satisfy
+    // the invariant, so this is unreachable for seeded data.
     const offer = await client.createIssuanceOffer({
       credential_type_id: DPC_CREDENTIAL_TYPE_ID,
       claims: {
@@ -60,6 +81,12 @@ export async function startIssuance(
         network: card.network,
         card_id: card.id,
       },
+      offer_display: buildOfferDisplay(card),
+      credential_response_display: buildCredentialResponseDisplay({
+        card,
+        iban,
+        cardArtUrl: cardArtUrl(env.BANK_PUBLIC_URL),
+      }),
     });
 
     db.update(credentials)
@@ -77,7 +104,10 @@ export async function startIssuance(
       dcApiOffer: offer.dc_api_offer,
     };
   } catch {
-    db.update(credentials).set({ state: "failed" }).where(eq(credentials.id, rowId)).run();
+    db.update(credentials)
+      .set({ state: "failed" })
+      .where(eq(credentials.id, rowId))
+      .run();
     return { ok: false, reason: "foundry_unavailable" };
   }
 }
@@ -96,7 +126,9 @@ export async function refreshIssuanceState(
   const row = db
     .select()
     .from(credentials)
-    .where(and(eq(credentials.id, credentialRowId), eq(credentials.userId, userId)))
+    .where(
+      and(eq(credentials.id, credentialRowId), eq(credentials.userId, userId)),
+    )
     .get();
 
   if (!row) return { ok: false, reason: "not_found" };

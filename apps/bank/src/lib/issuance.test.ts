@@ -24,9 +24,15 @@ afterEach(() => {
 
 /** A FoundryClient whose HTTP layer is replaced by a scripted stub. */
 function stubClient(
-  handler: (url: string, init: RequestInit) => { status: number; body: unknown },
+  handler: (
+    url: string,
+    init: RequestInit,
+  ) => { status: number; body: unknown },
 ): FoundryClient {
-  const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+  const fetchImpl = (async (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => {
     const { status, body } = handler(String(input), init ?? {});
     return new Response(JSON.stringify(body), {
       status,
@@ -34,7 +40,11 @@ function stubClient(
     });
   }) as unknown as typeof fetch;
 
-  return new FoundryClient({ adminUrl: "http://f:9000", adminKey: "k", fetchImpl });
+  return new FoundryClient({
+    adminUrl: "http://f:9000",
+    adminKey: "k",
+    fetchImpl,
+  });
 }
 
 const offerOk = () => ({
@@ -51,7 +61,12 @@ const offerOk = () => ({
 
 describe("startIssuance", () => {
   it("creates an offered credential row and returns the offer URI", async () => {
-    const result = await startIssuance(db, stubClient(offerOk), "user_anna", "card_anna");
+    const result = await startIssuance(
+      db,
+      stubClient(offerOk),
+      "user_anna",
+      "card_anna",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -80,7 +95,7 @@ describe("startIssuance", () => {
 
     expect(sentBody).toMatchObject({
       credential_type_id: "com.emvco.dpc.card",
-      claims: { network: "VISA", card_id: "card_anna" },
+      claims: { network: "girocard", card_id: "card_anna" },
     });
   });
 
@@ -93,17 +108,80 @@ describe("startIssuance", () => {
 
     await startIssuance(db, client, "user_ben", "card_ben");
 
-    expect(sentBody).toMatchObject({ claims: { network: "Mastercard" } });
+    expect(sentBody).toMatchObject({
+      claims: { network: "girocard", card_id: "card_ben" },
+    });
+  });
+
+  it("sends both DPC display arrays, with last_four taken from the IBAN", async () => {
+    let sentBody: Record<string, unknown> = {};
+    const client = stubClient((_url, init) => {
+      sentBody = JSON.parse(String(init.body));
+      return offerOk();
+    });
+
+    await startIssuance(db, client, "user_anna", "card_anna");
+
+    const offerCard = (
+      sentBody.offer_display as Array<{ card: Record<string, unknown> }>
+    )[0]?.card;
+    const responseCard = (
+      sentBody.credential_response_display as Array<{
+        card: Record<string, unknown>;
+      }>
+    )[0]?.card;
+
+    // acc_anna's IBAN is DE02120300000000202051 — NOT panLast4, which is 4242.
+    expect(responseCard?.last_four).toBe("2051");
+    expect(responseCard?.alias).toBe("Girocard");
+    expect(responseCard?.card_art).toEqual([
+      { theme: "DEFAULT", image_url: "http://localhost:3001/card-face.webp" },
+    ]);
+
+    // The offer stage must withhold all three; foundry permits their absence
+    // there and the annex's privacy guidance requires it.
+    expect(offerCard).not.toHaveProperty("last_four");
+    expect(offerCard).not.toHaveProperty("alias");
+    expect(offerCard).not.toHaveProperty("card_art");
+  });
+
+  it("derives last_four from the second account's IBAN, not the first's", async () => {
+    let sentBody: Record<string, unknown> = {};
+    const client = stubClient((_url, init) => {
+      sentBody = JSON.parse(String(init.body));
+      return offerOk();
+    });
+
+    await startIssuance(db, client, "user_ben", "card_ben");
+
+    const responseCard = (
+      sentBody.credential_response_display as Array<{
+        card: Record<string, unknown>;
+      }>
+    )[0]?.card;
+    // acc_ben's IBAN is DE02500105170137075030; panLast4 is 8815.
+    expect(responseCard?.last_four).toBe("5030");
+    expect(responseCard?.alias).toBe("Kreditkarte");
   });
 
   it("refuses a card belonging to another user", async () => {
-    const result = await startIssuance(db, stubClient(offerOk), "user_ben", "card_anna");
+    const result = await startIssuance(
+      db,
+      stubClient(offerOk),
+      "user_ben",
+      "card_anna",
+    );
     expect(result).toEqual({ ok: false, reason: "card_not_found" });
     expect(db.select().from(credentials).all()).toHaveLength(0);
   });
 
   it("refuses an unknown card id", async () => {
-    const result = await startIssuance(db, stubClient(offerOk), "user_anna", "card_nope");
+    const result = await startIssuance(
+      db,
+      stubClient(offerOk),
+      "user_anna",
+      "card_nope",
+    );
     expect(result).toEqual({ ok: false, reason: "card_not_found" });
   });
 
@@ -127,7 +205,12 @@ describe("startIssuance", () => {
   });
 
   it("returns foundry's dc_api_offer verbatim alongside the deep-link uri", async () => {
-    const result = await startIssuance(db, stubClient(offerOk), "user_anna", "card_anna");
+    const result = await startIssuance(
+      db,
+      stubClient(offerOk),
+      "user_anna",
+      "card_anna",
+    );
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -141,9 +224,17 @@ describe("startIssuance", () => {
   it("returns an undefined dcApiOffer when foundry omits it", async () => {
     const noDcApi = () => ({
       status: 200,
-      body: { transaction_id: "tx_1", credential_offer_uri: "openid-credential-offer://?x=1" },
+      body: {
+        transaction_id: "tx_1",
+        credential_offer_uri: "openid-credential-offer://?x=1",
+      },
     });
-    const result = await startIssuance(db, stubClient(noDcApi), "user_anna", "card_anna");
+    const result = await startIssuance(
+      db,
+      stubClient(noDcApi),
+      "user_anna",
+      "card_anna",
+    );
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -153,7 +244,12 @@ describe("startIssuance", () => {
 
 describe("refreshIssuanceState", () => {
   async function seedOffered(): Promise<string> {
-    const started = await startIssuance(db, stubClient(offerOk), "user_anna", "card_anna");
+    const started = await startIssuance(
+      db,
+      stubClient(offerOk),
+      "user_anna",
+      "card_anna",
+    );
     if (!started.ok) throw new Error("setup failed");
     return started.sessionId;
   }
@@ -191,7 +287,11 @@ describe("refreshIssuanceState", () => {
       refreshIssuanceState(db, client, "user_anna", sessionId),
     ).resolves.toEqual({ ok: true, state: "active" });
 
-    const row = db.select().from(credentials).where(eq(credentials.id, sessionId)).get();
+    const row = db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.id, sessionId))
+      .get();
     expect(row?.state).toBe("active");
     expect(row?.issuedAt).toBeTypeOf("number");
   });
@@ -209,9 +309,17 @@ describe("refreshIssuanceState", () => {
     }));
 
     await refreshIssuanceState(db, client, "user_anna", sessionId);
-    const first = db.select().from(credentials).where(eq(credentials.id, sessionId)).get();
+    const first = db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.id, sessionId))
+      .get();
     await refreshIssuanceState(db, client, "user_anna", sessionId);
-    const second = db.select().from(credentials).where(eq(credentials.id, sessionId)).get();
+    const second = db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.id, sessionId))
+      .get();
 
     expect(second?.state).toBe("active");
     expect(second?.issuedAt).toBe(first?.issuedAt);
@@ -261,7 +369,11 @@ describe("refreshIssuanceState", () => {
       refreshIssuanceState(db, client, "user_anna", sessionId),
     ).resolves.toEqual({ ok: true, state: "offered" });
 
-    const row = db.select().from(credentials).where(eq(credentials.id, sessionId)).get();
+    const row = db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.id, sessionId))
+      .get();
     expect(row?.state).toBe("offered");
   });
 });

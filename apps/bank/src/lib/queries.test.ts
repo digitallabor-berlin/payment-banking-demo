@@ -44,7 +44,7 @@ describe("listCards", () => {
     expect(cards[0]?.credentialState).toBe("none");
     expect(cards[0]?.credentialRowId).toBeNull();
     expect(cards[0]?.panLast4).toBe("4242");
-    expect(cards[0]?.network).toBe("VISA");
+    expect(cards[0]?.network).toBe("girocard");
   });
 
   it("reports 'offered' while issuance is pending", () => {
@@ -143,9 +143,9 @@ describe("listTransactions", () => {
   });
 
   it("marks seeded history as not wallet-paid", () => {
-    expect(listTransactions(db, "user_anna", 20, 0).every((r) => !r.paidWithWallet)).toBe(
-      true,
-    );
+    expect(
+      listTransactions(db, "user_anna", 20, 0).every((r) => !r.paidWithWallet),
+    ).toBe(true);
   });
 
   it("marks a transaction with a credential_id as wallet-paid", () => {
