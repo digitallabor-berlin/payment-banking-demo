@@ -12,9 +12,11 @@
  * label. It appears in exactly one place: the rail down the left of a price
  * ticket.
  *
- * There are no box-shadows in this file, on purpose. Surfaces separate by
- * hairline border and by ground colour, which keeps the photography — the only
- * thing on the page with real depth — as the sole source of dimension.
+ * The shop's surfaces carry no box-shadow, on purpose. They separate by hairline
+ * border and by ground colour, which keeps the photography — the only thing on
+ * the page with real depth — as the sole source of dimension. The one exception
+ * is the EudiPay sheet at the bottom of this file, which is not one of the
+ * shop's surfaces; see the reasoning there.
  *
  * Specificity note: these component classes sit outside Tailwind's layers and
  * therefore beat its utilities. They declare appearance only, never padding or
@@ -37,6 +39,7 @@
   --font-sans: var(--font-body), system-ui, -apple-system, sans-serif;
   --font-display: var(--font-display-face), var(--font-body), system-ui, sans-serif;
   --font-mono: var(--font-mono-plex), ui-monospace, SFMono-Regular, monospace;
+  --font-eudipay: var(--font-eudipay-face), var(--font-body), system-ui, sans-serif;
 
   --radius: 0.625rem;
 }
@@ -374,10 +377,28 @@ body {
 /* -------------------------------------------------- EudiPay payment sheet ---- */
 
 /*
- * Spec §9.4/§9.5 fix this surface to the EudiPay brand, so its blue and yellow
- * are hard-coded rather than tokenised — they are not Larder's to change. Only
- * the craft (spacing, type scale, motion, focus) is ours.
+ * Spec §9.4/§9.5 fix the brand colours here — #004DD7, #FFCC00, #FFEFB4 are not
+ * Larder's to change — but the 2026-08-19 design owns everything else: layout,
+ * type, elevation, and the state choreography.
+ *
+ * Two deliberate departures from this file's own conventions, both documented so
+ * they are not "cleaned up":
+ *
+ * 1. This sheet HAS a box-shadow. The no-shadow rule at the top of this file is
+ *    a rule about the *shop's* surfaces, which separate by hairline and ground
+ *    colour so the photography owns all the depth. The sheet is not one of the
+ *    shop's surfaces — it is a third party's instrument lifted off the page, and
+ *    it has to say so. The original spec asked for elevation here and it was
+ *    silently dropped, which is a large part of why the sheet read as cheap.
+ *
+ * 2. This sheet owns its own padding and vertical rhythm. The convention that
+ *    component classes declare appearance only exists so the shop's markup can
+ *    tune spacing per instance. The sheet has exactly one instance, its rhythm
+ *    is part of the design, and splitting it between a stylesheet and a scatter
+ *    of mt-* utilities on inline-level elements is precisely what produced the
+ *    reported spacing defects.
  */
+
 .eudipay-overlay {
   position: fixed;
   inset: 0;
@@ -385,110 +406,247 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100dvh;
-  background: rgb(11 18 32 / 0.55);
-  backdrop-filter: blur(6px);
+  /* A tall sheet must scroll. `min-height: 100dvh` on a fixed, inset-0 element
+   * was redundant and prevented exactly that. */
+  overflow-y: auto;
+  padding: 1rem;
+  /* Light enough that the checkout behind stays legible — that is the whole
+   * point of opening over the page rather than on a blank route. */
+  background: rgb(11 18 32 / 0.28);
+  backdrop-filter: blur(2px);
   animation: eudipay-fade-in 0.24s ease both;
   font-family: var(--font-sans);
 }
 
-.eudipay-card {
+.eudipay-sheet {
   width: 100%;
   max-width: 25rem;
-  background: #ffffff;
-  border-radius: 1rem;
-  border-top: 5px solid #004dd7;
+  /* The instrument's ground. Already a brand shade — it is the stripe in
+   * EudiPayLogo — rather than a new invention. */
+  background: #003ba8;
+  color: #ffffff;
+  border-radius: 20px;
+  padding: 24px 26px 20px;
   text-align: center;
-  color: #16233c;
+  box-shadow: 0 26px 60px -22px rgb(0 20 70 / 0.55);
   animation: eudipay-slide-up 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both;
 }
 
-.eudipay-headline {
-  font-family: var(--font-display);
-  font-size: 1.5rem;
-  font-weight: 800;
-  letter-spacing: -0.035em;
-  color: #004dd7;
+.eudipay-mark {
+  font-family: var(--font-eudipay);
+  font-variation-settings: "wdth" 108;
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+  margin-top: 4px;
+}
+
+/* Full-bleed: the sheet's padding is declared here, so the negative margin can
+ * reference it instead of guessing a utility class's value. */
+.eudipay-rule {
+  height: 1px;
+  background: rgb(255 204 0 / 0.42);
+  margin: 14px -26px 16px;
+}
+
+.eudipay-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #ffcc00;
+}
+
+.eudipay-eyebrow.is-alarm {
+  color: #ffb3b3;
 }
 
 .eudipay-amount {
-  font-family: var(--font-display);
-  font-size: 2.25rem;
+  font-family: var(--font-eudipay);
+  font-variation-settings: "wdth" 125;
   font-weight: 700;
-  letter-spacing: -0.04em;
-  line-height: 1;
+  font-size: 3.25rem;
+  line-height: 0.92;
+  letter-spacing: -0.035em;
   font-variant-numeric: tabular-nums;
+  margin-top: 7px;
 }
 
-.eudipay-muted {
-  color: #55627a;
+/* The QR is the thing to act on when there is one, so the amount steps down. */
+.eudipay-amount.is-compact {
+  font-size: 2.25rem;
 }
 
-.eudipay-badge {
+.eudipay-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: rgb(255 255 255 / 0.16);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 16px;
+}
+
+.eudipay-cell {
+  background: #003ba8;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.eudipay-cell-k {
+  font-family: var(--font-mono);
+  font-size: 0.5625rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(255 204 0 / 0.85);
+}
+
+.eudipay-cell-v {
+  font-family: var(--font-mono);
+  font-size: 0.78125rem;
+  font-weight: 500;
+  margin-top: 3px;
+  word-break: break-all;
+}
+
+.eudipay-pill {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+  background: #ffefb4;
+  color: #5a4400;
   border-radius: 9999px;
-  background: #fff4cc;
-  color: #6b5300;
+  padding: 5px 12px;
   font-size: 0.75rem;
   font-weight: 600;
+  margin-top: 16px;
 }
 
+/* The window in the instrument. The QR must stay #004DD7 on #FFFFFF — scanner
+ * contrast is not negotiable — so this white inset is deliberate, not a seam. */
 .eudipay-qr-frame {
   display: inline-block;
   background: #ffffff;
-  border: 1px solid #dbe2ee;
-  border-radius: 0.75rem;
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 14px;
 }
 
+.eudipay-headline {
+  font-family: var(--font-eudipay);
+  font-variation-settings: "wdth" 104;
+  font-weight: 700;
+  font-size: 1.125rem;
+  margin-top: 14px;
+}
+
+.eudipay-body {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: rgb(255 255 255 / 0.72);
+  margin-top: 12px;
+}
+
+.eudipay-checks {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: rgb(255 255 255 / 0.62);
+  margin-top: 12px;
+  word-break: break-all;
+}
+
+.eudipay-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/*
+ * Block-level and full-width, with its own horizontal padding. The old rule was
+ * inline-flex with no padding-inline at all, so every label ran to its own edges
+ * and vertical spacing came from line boxes rather than from block flow.
+ */
 .eudipay-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
+  width: 100%;
+  padding: 13px 20px;
+  border: 0;
+  border-radius: 10px;
+  font-family: inherit;
   font-size: 0.9375rem;
   font-weight: 600;
-  border-radius: 0.5rem;
+  cursor: pointer;
+  transition:
+    background-color 130ms ease,
+    color 130ms ease;
+}
+
+.eudipay-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .eudipay-button-primary {
-  background: #004dd7;
-  color: #ffffff;
+  background: #ffffff;
+  color: #004dd7;
 }
 
-.eudipay-button-primary:hover {
-  background: #0040ad;
+.eudipay-button-primary:hover:not(:disabled) {
+  background: #e8eeff;
 }
 
 .eudipay-button-secondary {
-  background: transparent;
-  color: #55627a;
+  background: rgb(255 255 255 / 0.14);
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.3);
 }
 
-.eudipay-button-secondary:hover {
-  color: #16233c;
+.eudipay-button-secondary:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.22);
 }
 
-.eudipay-spinner {
-  width: 2.25rem;
-  height: 2.25rem;
-  margin: 0 auto;
-  border-radius: 50%;
-  border: 3px solid #dbe2ee;
-  border-top-color: #004dd7;
-  animation: eudipay-spin 0.8s linear infinite;
+.eudipay-cancel {
+  display: inline-block;
+  background: none;
+  border: 0;
+  margin-top: 14px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  color: rgb(255 255 255 / 0.7);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.eudipay-cancel:hover {
+  color: #ffffff;
+}
+
+/* ------------------------------------------------------ the status ring ---- */
+
+.eudipay-star {
+  fill: rgb(255 204 0 / 0.22);
+  transition: fill 220ms ease;
+}
+
+.eudipay-star-lit {
+  fill: #ffcc00;
 }
 
 /* Mobile: the sheet slides up from the bottom edge, as a payment sheet should. */
 @media (max-width: 480px) {
   .eudipay-overlay {
     align-items: flex-end;
+    padding: 0;
   }
 
-  .eudipay-card {
+  .eudipay-sheet {
     max-width: none;
-    border-radius: 1rem 1rem 0 0;
-    padding-bottom: env(safe-area-inset-bottom);
+    border-radius: 20px 20px 0 0;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
   }
 }
 
@@ -504,12 +662,6 @@ body {
   from {
     opacity: 0;
     transform: translateY(16px);
-  }
-}
-
-@keyframes eudipay-spin {
-  to {
-    transform: rotate(360deg);
   }
 }
 
@@ -532,12 +684,14 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .shelf-item,
   .eudipay-overlay,
-  .eudipay-card {
+  .eudipay-sheet {
     animation: none;
   }
 
-  .eudipay-spinner {
-    animation-duration: 2.4s;
+  /* The ring's own motion is suppressed in the component, which pins it to
+   * SheetView.litStars instead of cycling. Nothing here spins. */
+  .eudipay-star {
+    transition: none;
   }
 }
 
@@ -549,8 +703,10 @@ body {
   border-radius: 3px;
 }
 
-.eudipay-card :where(a, button, summary):focus-visible {
-  outline-color: #004dd7;
+/* #004DD7 on the #003BA8 field is very nearly invisible; the star yellow is the
+ * only value on this surface with real contrast against it. */
+.eudipay-sheet :where(a, button, summary):focus-visible {
+  outline-color: #ffcc00;
 }
 
 /* --------------------------------------------------------- age marking ---- */
