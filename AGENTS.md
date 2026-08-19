@@ -53,8 +53,13 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**253 tests** (87 bank + 131 merchant + 10 foundry-client + 25 ui), measured
+**295 tests** (87 bank + 167 merchant + 10 foundry-client + 31 ui), measured
 2026-08-19.
+
+That was **253** before the payment-sheet / 18+-marking work, which added 42.
+That plan projected 294. It was off by one for the ordinary reason: its Task 4
+specifies 15 `it()` blocks while its running total assumed 14. Every subsequent
+task's projection inherited the error. Measure.
 
 That was **218** before the named-query / age-verification work, which added 35.
 
@@ -146,6 +151,44 @@ them without reading the linked reasoning first.
 
 - **`vitest.config.ts` needs an explicit `test.env` block** in each app —
   `env.ts` validates at import time, so tests fail without it.
+
+- **A `next/font` variable must not be named after a Tailwind `@theme` token.**
+  Already true of `--font-display-face`; now also of `--font-eudipay-face`.
+  `@theme` writes its tokens to `:root`, the same element `next/font` writes to,
+  so a token defined as `var(--font-eudipay)` referring to itself resolves to
+  nothing.
+
+### The payment sheet
+
+- **The payment sheet is a modal on `/checkout`, not a route.** It used to render
+  on `/pay/[sessionId]` over an empty page, so its scrim dimmed nothing. The
+  sheet now opens without navigation, the session id is mirrored into
+  `?session=`, and `/pay/[sessionId]` survives only for deep links and reloads —
+  where it renders the order's line items as real content behind the sheet.
+
+- **The cart is cleared when a payment completes, not when the form is
+  submitted.** The basket is the content the sheet sits over, and a declined
+  payment must leave it intact so "Back to the shop" is recoverable. The
+  accepted cost is that abandoning and re-submitting creates a second `pending`
+  order.
+
+- **The sheet's rendering decision lives in `lib/sheet-state.ts`, not in JSX.**
+  Every vitest project is `environment: "node"` with
+  `include: ["src/**/*.test.ts"]`, so a `.tsx` file is never covered. Branching
+  inside the component is how a spacing defect in one state stayed invisible
+  from the others.
+
+- **`.eudipay-*` classes own their padding and vertical rhythm**, unlike every
+  other component class in `globals.css`. The sheet has one instance and its
+  rhythm is part of the design; the old split between a stylesheet and `mt-*`
+  utilities on inline-level buttons is what produced the reported spacing bugs.
+  The sheet also carries the file's only `box-shadow`, on purpose.
+
+- **The `18+` glyph is `18+`, never `+18`**, and it is drawn in Larder's palette
+  rather than EudiPay's — an age restriction is the grocer's obligation. Its
+  source of truth is `AGE_RESTRICTED_PRODUCT_IDS` in `lib/dcql.ts`, read through
+  `isAgeRestricted`, which `selectNamedQuery` also calls so the shelf tag and the
+  `dpc` → `dpc_av` escalation cannot disagree. There is no `products` column.
 
 ### Running ad hoc scripts
 
