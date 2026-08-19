@@ -38,8 +38,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: result.reason }, { status });
   }
 
+  // The sheet is built entirely from this body — see lib/sheet-state.ts. `uri`
+  // keeps its name so the existing caller is unaffected.
   return NextResponse.json(
-    { sessionId: result.sessionId, uri: result.uri },
+    {
+      sessionId: result.sessionId,
+      uri: result.uri,
+      orderId: result.orderId,
+      amountCents: result.amountCents,
+      transport: result.transport,
+      ageRequested: result.ageRequested,
+      dcApiRequest: result.dcApiRequest,
+      state: result.state,
+    },
     { status: 201 },
   );
 }
