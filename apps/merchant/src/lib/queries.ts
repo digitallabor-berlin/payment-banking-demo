@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import { products } from "../db/schema.js";
+import { isAgeRestricted } from "./dcql.js";
 
 export interface ProductDto {
   id: string;
@@ -14,6 +15,12 @@ export interface ProductDto {
   packLabel: string;
   baseQuantity: number;
   baseUnit: "kg" | "l" | "pc";
+  /**
+   * Derived, never stored. The restricted set lives in `lib/dcql.ts` beside the
+   * named-query escalation it drives; a column here would imply an editing
+   * surface that does not exist.
+   */
+  ageRestricted: boolean;
 }
 
 function toDto(row: typeof products.$inferSelect): ProductDto {
@@ -27,6 +34,7 @@ function toDto(row: typeof products.$inferSelect): ProductDto {
     packLabel: row.packLabel,
     baseQuantity: row.baseQuantity,
     baseUnit: row.baseUnit,
+    ageRestricted: isAgeRestricted(row.id),
   };
 }
 

@@ -2,8 +2,34 @@ import { describe, expect, it } from "vitest";
 import {
   AGE_RESTRICTED_PRODUCT_IDS,
   buildTransactionData,
+  isAgeRestricted,
   selectNamedQuery,
 } from "./dcql.js";
+
+describe("isAgeRestricted", () => {
+  it("is true for exactly the three restricted products", () => {
+    for (const id of ["beer", "wine", "aperitif"]) {
+      expect(isAgeRestricted(id)).toBe(true);
+    }
+  });
+
+  it("is false for every other seeded product", () => {
+    const ordinary = [
+      "tomatoes", "avocado", "berries", "sourdough", "milk", "yogurt",
+      "cheese", "pasta", "olive-oil", "chocolate", "chips", "water",
+    ];
+    for (const id of ordinary) {
+      expect(isAgeRestricted(id)).toBe(false);
+    }
+  });
+
+  it("agrees with selectNamedQuery — one source of truth", () => {
+    // The shelf tag and the dpc -> dpc_av escalation must never disagree.
+    for (const id of ["beer", "wine", "aperitif", "cheese", "water"]) {
+      expect(selectNamedQuery([id]) === "dpc_av").toBe(isAgeRestricted(id));
+    }
+  });
+});
 
 describe("selectNamedQuery", () => {
   it("asks for dpc when nothing in the basket is age-restricted", () => {
