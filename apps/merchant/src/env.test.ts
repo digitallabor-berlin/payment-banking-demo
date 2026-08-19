@@ -4,6 +4,7 @@ import { parseEnv } from "./env.js";
 const complete = {
   FOUNDRY_ADMIN_KEY: "admin-key",
   BANK_API_KEY: "bank-key",
+  MERCHANT_PAYEE_ID: "Payee-id-123",
 };
 
 describe("parseEnv", () => {
@@ -26,6 +27,19 @@ describe("parseEnv", () => {
     expect(() => parseEnv({})).toThrowError(/BANK_API_KEY/);
   });
 
+  it("requires MERCHANT_PAYEE_ID rather than defaulting it", () => {
+    // It lands in transaction_data.payload.payee.id, which the wallet shows
+    // and hashes into transaction_data_hashes. A placeholder default would
+    // ship a lie into a signed authorization, so absence has to be a boot
+    // failure exactly like a missing secret.
+    const { MERCHANT_PAYEE_ID: _omitted, ...withoutPayeeId } = complete;
+    expect(() => parseEnv(withoutPayeeId)).toThrowError(/MERCHANT_PAYEE_ID/);
+  });
+
+  it("carries MERCHANT_PAYEE_ID through verbatim", () => {
+    expect(parseEnv(complete).MERCHANT_PAYEE_ID).toBe("Payee-id-123");
+  });
+
   it("rejects a non-URL BANK_API_URL", () => {
     expect(() => parseEnv({ ...complete, BANK_API_URL: "nope" })).toThrowError(
       /BANK_API_URL/,
@@ -33,8 +47,8 @@ describe("parseEnv", () => {
   });
 
   it("allows overriding MERCHANT_NAME", () => {
-    expect(parseEnv({ ...complete, MERCHANT_NAME: "Other Shop" }).MERCHANT_NAME).toBe(
-      "Other Shop",
-    );
+    expect(
+      parseEnv({ ...complete, MERCHANT_NAME: "Other Shop" }).MERCHANT_NAME,
+    ).toBe("Other Shop");
   });
 });

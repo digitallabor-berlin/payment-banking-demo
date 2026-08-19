@@ -24,14 +24,22 @@ export async function POST(request: Request) {
     getFoundry(),
     parsed.data.orderId,
     env.MERCHANT_NAME,
+    env.MERCHANT_PAYEE_ID,
     parsed.data.dcApi ?? false,
   );
 
   if (!result.ok) {
     const status =
-      result.reason === "order_not_found" ? 404 : result.reason === "order_not_pending" ? 409 : 502;
+      result.reason === "order_not_found"
+        ? 404
+        : result.reason === "order_not_pending"
+          ? 409
+          : 502;
     return NextResponse.json({ error: result.reason }, { status });
   }
 
-  return NextResponse.json({ sessionId: result.sessionId, uri: result.uri }, { status: 201 });
+  return NextResponse.json(
+    { sessionId: result.sessionId, uri: result.uri },
+    { status: 201 },
+  );
 }

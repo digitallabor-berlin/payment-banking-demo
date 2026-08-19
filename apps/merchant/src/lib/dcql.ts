@@ -1,43 +1,79 @@
+import type { NamedQueryRef } from "../db/schema.js";
 import { centsToDecimalString } from "./format.js";
 
 /**
- * The DCQL query is fixed — this demo only ever asks for one credential type
- * and the two claims it needs to settle (spec §6.2 step 3). `credential_ids`
- * in transaction_data below must reference this query's `id: "card"`.
+ * Products a customer must prove they are old enough to buy. Ids, not names or
+ * categories: the whole `Drinks` aisle is not restricted (mineral water lives
+ * there), and a name is a display string a merchandiser may reword.
+ *
+ * Deliberately a hardcoded set rather than a `products` column. This is a demo
+ * of a payment credential, not of a compliance engine, and a column would imply
+ * an editing surface that does not exist. Promote it to the schema the moment
+ * anything other than this list needs to change it.
  */
-export function buildDcqlQuery(): unknown {
-  return {
-    credentials: [
-      {
-        id: "card",
-        format: "dc+sd-jwt",
-        meta: { vct_values: ["com.emvco.dpc.card"] },
-        claims: [{ path: ["credential_id"] }, { path: ["network"] }],
-      },
-    ],
-  };
+export const AGE_RESTRICTED_PRODUCT_IDS = ["beer", "wine", "aperitif"] as const;
+
+const RESTRICTED = new Set<string>(AGE_RESTRICTED_PRODUCT_IDS);
+
+/**
+ * Picks which foundry named query to present with (see the `named_queries`
+ * block in foundry's config): `dpc` for an ordinary basket, `dpc_av` when
+ * anything in it is age-restricted.
+ *
+ * Both queries declare a credential with id `dpc`; `dpc_av` adds a second
+ * `av` credential — an ISO mdoc EU Proof of Age (`eu.europa.ec.av.1`) whose
+ * only requested element is `age_over_18`. So the escalation asks for one extra
+ * boolean and never for a birthdate: §6 data minimisation, decided at foundry.
+ *
+ * Takes product ids rather than an order id so the decision is pure and
+ * testable; the caller reads them from `order_items`, never from the browser.
+ */
+export function selectNamedQuery(productIds: readonly string[]): NamedQueryRef {
+ return productIds.some((id) => RESTRICTED.has(id)) ? "dpc_av" : "dpc";
+}
+
+export interface PaymentTransactionData {
+ /** Uniquely identifies this authorization attempt — the payment session id. */
+ transactionId: string;
+ amountCents: number;
+ payeeName: string;
+ payeeId: string;
 }
 
 /**
- * `amount` must be a plain decimal string — confirmed against the real
- * foundry instance in Plan 1 Task 1: foundry itself performs the OpenID4VP
- * base64url-JSON encoding, so this app sends plain JSON with a string amount,
- * never a pre-encoded value and never a number (a float amount is exactly the
- * kind of silent precision bug this whole design avoids elsewhere).
+ * The single `transaction_data` entry sent with every payment presentation.
+ *
+ * Sent as plain JSON: foundry performs the OpenID4VP §8.4 base64url encoding
+ * itself, so a pre-encoded value here would be double-encoded.
+ *
+ * `credential_ids` names `dpc` for both named queries. foundry validates these
+ * against the resolved query's credential ids and rejects an unknown one, and
+ * binding the amount to the *payment* credential is the point — an age
+ * attestation is not what authorizes money to move.
+ *
+ * `transaction_data_hashes_alg` is sent explicitly even though foundry inserts
+ * its own configured value when the key is absent (it uses `or_insert_with`, so
+ * ours wins rather than conflicts). Stating it keeps the entry self-describing
+ * at the point it is constructed, instead of correct only by remote default.
+ *
+ * `amount_display` is built with `toFixed`, never `Intl`. It is hashed into
+ * `transaction_data_hashes` and compared byte-for-byte, so a thousands
+ * separator or a comma decimal mark — both of which `Intl` produces under other
+ * locales — would break the binding check on a differently-configured host.
  */
 export function buildTransactionData(
-  orderId: string,
-  amountCents: number,
-  merchantName: string,
+ payment: PaymentTransactionData,
 ): unknown[] {
-  return [
-    {
-      type: "payment",
-      credential_ids: ["card"],
-      amount: centsToDecimalString(amountCents),
-      currency: "EUR",
-      merchant: merchantName,
-      order_id: orderId,
-    },
-  ];
+ return [
+  {
+   type: "urn:eudi:sca:payment:1",
+   credential_ids: ["dpc"],
+   transaction_data_hashes_alg: ["sha-256"],
+   payload: {
+    payee: { name: payment.payeeName, id: payment.payeeId },
+    transaction_id: payment.transactionId,
+    amount_display: `€ ${centsToDecimalString(payment.amountCents)}`,
+   },
+  },
+ ];
 }

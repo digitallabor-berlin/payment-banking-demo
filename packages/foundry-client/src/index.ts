@@ -9,6 +9,7 @@ export type {
   CreateVerificationRequest,
   CreateVerificationResponse,
   IssuanceState,
+  PresentedCredential,
   VerificationResult,
   VerificationState,
   VerificationTransaction,

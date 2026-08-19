@@ -22,6 +22,13 @@
       "when": 1786091587593,
       "tag": "0002_funny_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1787138359160,
+      "tag": "0003_violet_red_skull",
+      "breakpoints": true
     }
   ]
 }

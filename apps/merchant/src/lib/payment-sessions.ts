@@ -3,17 +3,29 @@ import { eq } from "drizzle-orm";
 import type { FoundryClient } from "@demo/foundry-client";
 import { env } from "../env.js";
 import type { Db } from "../db/index.js";
-import { orders, paymentSessions, type PaymentSessionState } from "../db/schema.js";
+import {
+  orders,
+  paymentSessions,
+  type PaymentSessionState,
+} from "../db/schema.js";
 import type { BankClient } from "./bank.js";
-import { extractCredentialId, passedTransactionDataBinding } from "./checks.js";
-import { buildDcqlQuery, buildTransactionData } from "./dcql.js";
+import {
+  extractCredentialId,
+  passedAgeVerification,
+  passedTransactionDataBinding,
+} from "./checks.js";
+import { buildTransactionData, selectNamedQuery } from "./dcql.js";
+import { listOrderProductIds } from "./orders.js";
 
 /** The name shown on the bank statement. Same value the wallet authorized. */
 const MERCHANT_REFERENCE_NAME = env.MERCHANT_NAME;
 
 export type StartPaymentSessionResult =
   | { ok: true; sessionId: string; uri: string }
-  | { ok: false; reason: "order_not_found" | "order_not_pending" | "foundry_unavailable" };
+  | {
+      ok: false;
+      reason: "order_not_found" | "order_not_pending" | "foundry_unavailable";
+    };
 
 export interface PaymentSessionStatusDto {
   state: PaymentSessionState;
@@ -25,31 +37,53 @@ export interface PaymentSessionStatusDto {
  * Spec §6.2 steps 2–4. The session row is written BEFORE foundry is called, so
  * a failed verification-request creation leaves a visible `failed` row
  * rather than nothing at all — the same property Plan 1's bank issuance flow
- * relies on.
+ * relies on. `namedQueryRef` is part of that first write for the same reason:
+ * a failed row must record which query was attempted, not default to `dpc`.
+ *
+ * Which credentials are asked for is decided here, server-side, from the
+ * order's own persisted lines. The browser is not consulted about whether a
+ * basket needs an age attestation, exactly as it is not consulted about the
+ * amount.
  */
 export async function startPaymentSession(
   db: Db,
   client: FoundryClient,
   orderId: string,
   merchantName: string,
+  payeeId: string,
   useDcApi = false,
   now: number = Date.now(),
 ): Promise<StartPaymentSessionResult> {
   const order = db.select().from(orders).where(eq(orders.id, orderId)).get();
   if (!order) return { ok: false, reason: "order_not_found" };
-  if (order.status !== "pending") return { ok: false, reason: "order_not_pending" };
+  if (order.status !== "pending")
+    return { ok: false, reason: "order_not_pending" };
 
   const sessionId = `sess_${randomUUID()}`;
+  const namedQueryRef = selectNamedQuery(listOrderProductIds(db, order.id));
 
   db.insert(paymentSessions)
-    .values({ id: sessionId, orderId: order.id, state: "pending", createdAt: now })
+    .values({
+      id: sessionId,
+      orderId: order.id,
+      state: "pending",
+      namedQueryRef,
+      createdAt: now,
+    })
     .run();
 
   try {
+    // `named_query_ref` only, never alongside a `dcql_query`: foundry prefers
+    // an inline query and would silently ignore the named one.
     const response = await client.createVerificationRequest({
       transport: useDcApi ? "dc_api" : "request_uri",
-      dcql_query: buildDcqlQuery(),
-      transaction_data: buildTransactionData(order.id, order.totalCents, merchantName),
+      named_query_ref: namedQueryRef,
+      transaction_data: buildTransactionData({
+        transactionId: sessionId,
+        amountCents: order.totalCents,
+        payeeName: merchantName,
+        payeeId,
+      }),
     });
 
     // Under dc_api foundry returns neither uri — the request object is inlined
@@ -63,7 +97,8 @@ export async function startPaymentSession(
         requestUri: response.request_uri ?? null,
         transport: useDcApi ? "dc_api" : "request_uri",
         dcApiRequestJson:
-          response.dc_api_request === undefined || response.dc_api_request === null
+          response.dc_api_request === undefined ||
+          response.dc_api_request === null
             ? null
             : JSON.stringify(response.dc_api_request),
       })
@@ -85,8 +120,15 @@ export async function startPaymentSession(
  * `refreshPaymentSessionState` that polls foundry and drives the settle gate;
  * this function stays the single place both read the DB row from.
  */
-export function getPaymentSessionStatus(db: Db, sessionId: string): PaymentSessionStatusDto | null {
-  const row = db.select().from(paymentSessions).where(eq(paymentSessions.id, sessionId)).get();
+export function getPaymentSessionStatus(
+  db: Db,
+  sessionId: string,
+): PaymentSessionStatusDto | null {
+  const row = db
+    .select()
+    .from(paymentSessions)
+    .where(eq(paymentSessions.id, sessionId))
+    .get();
   if (!row) return null;
 
   return {
@@ -100,9 +142,18 @@ export type RefreshResult =
   | { ok: true; status: PaymentSessionStatusDto }
   | { ok: false; reason: "not_found" };
 
-function fail(db: Db, sessionId: string, reason: string, checksJson?: string): void {
+function fail(
+  db: Db,
+  sessionId: string,
+  reason: string,
+  checksJson?: string,
+): void {
   db.update(paymentSessions)
-    .set({ state: "failed", failureReason: reason, ...(checksJson ? { checksJson } : {}) })
+    .set({
+      state: "failed",
+      failureReason: reason,
+      ...(checksJson ? { checksJson } : {}),
+    })
     .where(eq(paymentSessions.id, sessionId))
     .run();
 }
@@ -128,7 +179,11 @@ export async function refreshPaymentSessionState(
   sessionId: string,
   _now: number = Date.now(),
 ): Promise<RefreshResult> {
-  const row = db.select().from(paymentSessions).where(eq(paymentSessions.id, sessionId)).get();
+  const row = db
+    .select()
+    .from(paymentSessions)
+    .where(eq(paymentSessions.id, sessionId))
+    .get();
   if (!row) return { ok: false, reason: "not_found" };
 
   // Terminal states need no further foundry or bank traffic.
@@ -157,20 +212,43 @@ export async function refreshPaymentSessionState(
       return { ok: true, status: getPaymentSessionStatus(db, sessionId)! };
     }
 
-    const checksJson = JSON.stringify(verdict.result?.checks ?? []);
+    // Both the cross-cutting checks and every per-credential one, flattened
+    // for display only. The gates below read the structured verdict, never
+    // this array — a check must be attributed to the credential that reported
+    // it, and flattening loses that.
+    const checksJson = JSON.stringify([
+      ...(verdict.result?.checks ?? []),
+      ...(verdict.result?.credentials ?? []).flatMap(
+        (credential) => credential.checks ?? [],
+      ),
+    ]);
 
     if (verdict.state === "failed" || verdict.result?.verified !== true) {
       fail(db, sessionId, "verification_failed", checksJson);
       return { ok: true, status: getPaymentSessionStatus(db, sessionId)! };
     }
 
-    // The gate (spec §6.2 step 8): verified === true AND binding passed.
-    if (!passedTransactionDataBinding(verdict.result.checks)) {
+    // The gate (spec §6.2 step 8): verified === true AND binding passed on the
+    // payment credential.
+    if (!passedTransactionDataBinding(verdict.result.credentials)) {
       fail(db, sessionId, "transaction_data_binding_failed", checksJson);
       return { ok: true, status: getPaymentSessionStatus(db, sessionId)! };
     }
 
-    credentialId = extractCredentialId(verdict.result.claims);
+    // Only for a session that actually asked for the attestation. Requesting
+    // `age_over_18` and then settling without it would make the escalation
+    // decorative; this is the same fail-closed argument the binding gate makes.
+    // The flag is read off the row rather than recomputed from the order, so
+    // editing the restricted set cannot change the verdict mid-session.
+    if (
+      row.namedQueryRef === "dpc_av" &&
+      !passedAgeVerification(verdict.result.credentials)
+    ) {
+      fail(db, sessionId, "age_verification_failed", checksJson);
+      return { ok: true, status: getPaymentSessionStatus(db, sessionId)! };
+    }
+
+    credentialId = extractCredentialId(verdict.result.credentials);
     if (!credentialId) {
       fail(db, sessionId, "verification_failed", checksJson);
       return { ok: true, status: getPaymentSessionStatus(db, sessionId)! };
@@ -184,16 +262,25 @@ export async function refreshPaymentSessionState(
       .set({
         state: "verified",
         checksJson,
-        disclosedClaimsJson: JSON.stringify(verdict.result.claims ?? null),
+        // The per-credential array verbatim, NOT a merged claims object:
+        // `credentials[]` is what both the resume path and the success screen
+        // parse back, and merging two credentials' claims is a correctness bug
+        // rather than a presentation choice (see foundry's PresentedCredential).
+        disclosedClaimsJson: JSON.stringify(verdict.result.credentials ?? null),
       })
       .where(eq(paymentSessions.id, sessionId))
       .run();
   } else {
     // Already 'verified' or 'settling' from an earlier poll that stopped
-    // between the gate and the debit — re-read the stored claims rather than
-    // re-polling foundry, then retry the debit. Safe because the bank keys on
-    // idempotency_key = sessionId, so a debit that did land is replayed rather
-    // than repeated.
+    // between the gate and the debit — re-read the stored credentials rather
+    // than re-polling foundry, then retry the debit. Safe because the bank keys
+    // on idempotency_key = sessionId, so a debit that did land is replayed
+    // rather than repeated.
+    //
+    // A row written before this column held `credentials[]` parses to the old
+    // merged-claims shape, yields no credential id, and fails closed. That is
+    // the right direction for a mid-flight schema change: no such row can be
+    // settled without a fresh presentation.
     credentialId = extractCredentialId(
       row.disclosedClaimsJson ? JSON.parse(row.disclosedClaimsJson) : null,
     );
@@ -203,7 +290,11 @@ export async function refreshPaymentSessionState(
     }
   }
 
-  const order = db.select().from(orders).where(eq(orders.id, row.orderId)).get();
+  const order = db
+    .select()
+    .from(orders)
+    .where(eq(orders.id, row.orderId))
+    .get();
   if (!order) {
     fail(db, sessionId, "verification_failed");
     return { ok: true, status: getPaymentSessionStatus(db, sessionId)! };
@@ -236,7 +327,10 @@ export async function refreshPaymentSessionState(
     .set({ state: "completed", bankTxId: payment.bankTxId })
     .where(eq(paymentSessions.id, sessionId))
     .run();
-  db.update(orders).set({ status: "paid" }).where(eq(orders.id, order.id)).run();
+  db.update(orders)
+    .set({ status: "paid" })
+    .where(eq(orders.id, order.id))
+    .run();
 
   return { ok: true, status: getPaymentSessionStatus(db, sessionId)! };
 }

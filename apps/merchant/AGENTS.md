@@ -8,9 +8,10 @@ the merchant.
 
 The merchant is the **verifier** and the **payment initiator**:
 
-1. Creates an order with a **server-recomputed** total.
-2. Opens a foundry verification request carrying `transaction_data` amount
-   binding.
+1. Creates an order with a **server-recomputed** total and **persisted line
+   items**.
+2. Opens a foundry verification request by **named query reference**, carrying
+   `transaction_data` amount binding.
 3. Polls foundry, applies the settle gate, then debits the bank over REST.
 4. Shows foundry's real check results on the success screen.
 
@@ -24,7 +25,7 @@ The merchant is the **verifier** and the **payment initiator**:
 ## Environment
 
 | Variable | Required | Default | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `PORT` | no | `3000` | Listen port |
 | `DATABASE_PATH` | no | `./data/merchant.db` | SQLite file; directory must be writable |
 | `MERCHANT_PUBLIC_URL` | no | `http://localhost:3000` | Own external origin |
@@ -32,14 +33,31 @@ The merchant is the **verifier** and the **payment initiator**:
 | `FOUNDRY_ADMIN_KEY` | **yes** | — | Bearer token for foundry's admin API |
 | `BANK_API_URL` | no | `http://localhost:3001` | The bank's REST API |
 | `BANK_API_KEY` | **yes** | — | Shared secret sent as `X-API-Key`; must match the bank's own `BANK_API_KEY` |
-| `MERCHANT_NAME` | no | `Demo Shop` | Shown in the wallet prompt and on the bank statement |
+| `MERCHANT_NAME` | no | `Demo Shop` | Shown in the wallet prompt and on the bank statement; also `transaction_data.payload.payee.name` |
+| `MERCHANT_PAYEE_ID` | **yes** | — | `transaction_data.payload.payee.id`. Required with no default on purpose: it is hashed into `transaction_data_hashes` and shown to the holder, so a placeholder would ship an untrue identifier inside a signed authorization |
 
 ## Schema (`src/db/schema.ts`)
 
-`products`, `orders`, `payment_sessions`. Two tables are **deliberately absent**:
+`products`, `orders`, `order_items`, `payment_sessions`. Two tables are
+**deliberately absent**:
 
 - **No `credentials` table** — the bank owns credential state entirely.
-- **No cart table** — the cart is client-side `localStorage` only.
+- **No cart table** — the cart is client-side `localStorage` only. `order_items`
+  is not one: it is written at checkout from server-side prices, never from the
+  browser's cart.
+
+`order_items` exists because the *composition* of a basket is load-bearing at
+payment time, not just its total — see "Named queries" below. `unit_price_cents`
+is a snapshot of what was charged; the age-restriction decision deliberately is
+**not** snapshotted, and is re-derived from `product_id` every time a session
+starts.
+
+`payment_sessions.named_query_ref` (`dpc` | `dpc_av`) records which foundry
+named query the session asked for. Recorded rather than recomputed, for the same
+reason `transport` is: the settle gate must know whether an age attestation was
+actually *requested* before it can treat a missing one as a failure, and
+re-deriving it at poll time would silently change the verdict if the restricted
+set were edited mid-session.
 
 State machines:
 
@@ -60,12 +78,52 @@ the permissive behaviour so a future "tidy-up" that adds the index fails loudly.
 Accepted limitation: concurrent sessions for one pending order are possible.
 Double-charging is prevented by the bank's `idempotency_key`, not by the schema.
 
+## Named queries — `src/lib/dcql.ts`
+
+The merchant sends **`named_query_ref`, never an inline `dcql_query`**. foundry
+prefers an inline query when both are present, so sending both would silently
+ignore the named one.
+
+- `dpc` — the DPC card alone (`network`, `card_id`, `credential_id`).
+- `dpc_av` — the same card **plus** an `av` credential: an ISO mdoc EU Proof of
+  Age (`eu.europa.ec.av.1`) whose only requested element is `age_over_18`. So
+  the escalation asks for one extra boolean and never a birthdate.
+
+`selectNamedQuery` escalates to `dpc_av` when the basket contains any of
+`AGE_RESTRICTED_PRODUCT_IDS` = `beer`, `wine`, `aperitif` — **ids, not
+categories**: the whole `Drinks` aisle is not restricted (mineral water lives
+there). It takes product ids rather than an order id so the decision is pure and
+testable; the caller reads them from `order_items`, never from the browser.
+
+Both queries declare a credential with `id: dpc`, so `transaction_data`'s
+`credential_ids` is `["dpc"]` in both cases — the money binds to the card, never
+to the age attestation. **foundry validates this**: verified 2026-08-19 against
+the deployed instance, `credential_ids: ["card"]` (this app's old value) is a
+hard `400 transaction_data[0] references credential id 'card' which is not
+present in the DCQL query`.
+
+Both named queries live in foundry's config, not here. They are absent from
+`../foundry/config.yaml` (which has only `over18`) and present in the deployed
+`dl-infra-k8s/foundry/foundry_config.yml`, so **the age path cannot be exercised
+against a stock local foundry.**
+
+That deployed config carries a loud warning that `dpc_av` "CANNOT be fully
+verified" because foundry accepts one credential per `vp_token`. **That warning
+is stale.** The deployed openapi serves `VerificationResult.credentials[]` and
+`verify.rs` has `select_presentations` (plural) with a test named *"several
+credential queries is the point, not an error"*.
+
 ## Money handling
 
 - `formatEuroCents` uses `Intl` (`en-IE`) — for display.
-- `centsToDecimalString` uses **`toFixed`, never `Intl`** — its output is
-  `transaction_data.amount`, which foundry machine-reads. An `Intl`-formatted
-  `"1,000.00"` would silently break the amount binding.
+- `centsToDecimalString` uses **`toFixed`, never `Intl`** — its output is the
+  numeric half of `transaction_data.payload.amount_display` (`"€ 47.98"`), which
+  is hashed into `transaction_data_hashes` and compared byte-for-byte. An
+  `Intl`-formatted `"1.000,00"` or `"1,000.00"` would silently break the amount
+  binding on a differently-configured host.
+- The symbol-first `€` form is deliberate, not German `47,98 €` — it mirrors the
+  shape of the reference `transaction_data` example and keeps the string a pure
+  `toFixed` concatenation.
 - **`OrderItemInput` structurally cannot carry a price** — it has only
   `productId` and `quantity`. There is no client-supplied number to forget to
   ignore. The zod schema on `POST /api/orders` accepts the same two fields only.
@@ -79,34 +137,68 @@ whole point:
 
 1. Terminal states short-circuit — no re-polling, no double-charge.
 2. Poll foundry.
-3. Gate: `verified === true` **AND** `transaction_data_binding` passed. Reaching
-   `verified` only means foundry finished checking.
-4. Extract `credential_id`.
-5. Write `verified`, then `settling`, then call the bank.
+3. Gate: `verified === true` **AND** `transaction_data_binding` passed on the
+   `dpc` credential. Reaching `verified` only means foundry finished checking.
+4. Age gate, **only when the row says `named_query_ref === "dpc_av"`**:
+   `age_over_18 === true` on the `av` credential, else
+   `age_verification_failed`.
+5. Extract `credential_id`.
+6. Write `verified`, then `settling`, then call the bank.
 
-`passedTransactionDataBinding` (`src/lib/checks.ts`) **fails closed when the
-check is absent**. A foundry that silently stopped enforcing amount binding
-would report every other check as passing, so absence must never read as
-success.
+**Everything in `src/lib/checks.ts` reads `result.credentials`, never
+`result.checks`.** foundry's top-level `checks` array carries cross-cutting
+checks only (`jwe_decryption`, `requested_credentials_answered`) and
+structurally cannot contain `transaction_data_binding`, which lives on the
+credential it was bound to. An earlier version of this app searched the
+top-level array and would have failed every payment closed.
+
+Every read is scoped to a `query_id`. That is load-bearing: foundry holds claims
+and checks per credential and never merges them, because merging is a
+correctness bug rather than a presentation choice — two credentials disclosing
+the same claim name collide, and a check reported for one would appear to vouch
+for another. Searching the whole verdict for a passing check reintroduces
+exactly that.
+
+`passedTransactionDataBinding` and `passedAgeVerification` both **fail closed
+when the check or claim is absent**. A foundry that silently stopped enforcing
+amount binding would report every other check as passing; and requesting
+`age_over_18` then settling without it would make the escalation decorative.
+
+`age_over_18` is read at `claims["eu.europa.ec.av.1"]["age_over_18"]`, not
+flat: an mdoc DCQL claim path is `[namespace, element]` and foundry nests
+disclosed mdoc elements under the namespace verbatim (the
+`disclosed_claims.insert(ns, ...)` loop in `verify.rs`). Comparison is strict
+`=== true`, never truthiness — `"false"` is a truthy string.
+
+`checks_json` stores the cross-cutting checks **and** every per-credential one,
+flattened, for display only. The gates read the structured verdict.
 
 `verified` and `settling` are distinct states so that a crash between them is
 diagnosable: `verified` means nothing was sent to the bank, `settling` means a
-debit may be in flight. The resume path re-reads the stored claims instead of
-re-polling foundry, so it stays correct even if foundry's record has expired.
+debit may be in flight. The resume path re-reads the stored credentials instead
+of re-polling foundry, so it stays correct even if foundry's record has expired.
+
+`disclosed_claims_json` holds foundry's **`credentials[]` array verbatim**, not
+a merged claims object — the column name predates the shape. A row written
+before that change parses to the old shape, yields no credential id, and fails
+closed, which is the right direction for a mid-flight schema change.
 
 `idempotencyKey` is always the **session id**.
 
 On any failure only the *session* becomes terminal — the order stays `pending`
 for retry.
 
-### Open question
+### Resolved: the disclosed-claims shape
 
-`extractCredentialId` handles **both** a claims shape nested under the DCQL query
-id (`{ card: { credential_id } }`) and a flat one. Which is real has never been
-observed — issuance was confirmed against live foundry, verification claims were
-not. Both branches are kept deliberately. When a real wallet presentation
-happens, dump `disclosed_claims_json`, delete the dead branch, and drop the
-corresponding test.
+`extractCredentialId` used to keep two plausible branches because the response
+had never been observed. That is settled: the deployed foundry's openapi and
+`verify.rs` both pin it. Nesting is by `query_id` in `credentials[]`; SD-JWT
+claims sit **flat** inside that credential's own `claims` object. The dead
+branch is gone.
+
+Still unobserved — and this is the part a wallet is needed for: no real
+presentation has ever been verified, so the *values* have never been seen, only
+the schema. In particular an `av` credential has never actually been returned.
 
 ## The payment screen — `/pay/{sessionId}`
 
@@ -180,7 +272,7 @@ bank's transaction list.
 Six products, `prod_1` … `prod_6`, across Electronics / Home / Accessories:
 
 | id | name | cents |
-|---|---|---|
+| --- | --- | --- |
 | `prod_1` | Wireless Headphones | `12999` |
 | `prod_2` | Mechanical Keyboard | `8999` |
 | `prod_3` | Ceramic Pour-Over Set | `4499` |
@@ -193,7 +285,9 @@ data, and re-seeding mid-demo must not erase an in-progress order.
 
 ## Testing
 
-`pnpm test` → **71 tests**. `pnpm typecheck` must also be clean.
+`pnpm test` → **131 tests**, measured 2026-08-19. `pnpm typecheck` must also be
+clean. (The `71` that stood here was stale by 60 — measure, never trust a number
+in a doc.)
 
 `useCart` is not unit-tested (no DOM in this vitest environment) — it is verified
 in a real browser via `tools/cdp/cdp.mjs`, as are the cart, checkout, payment,

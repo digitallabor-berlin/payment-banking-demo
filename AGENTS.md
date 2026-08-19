@@ -45,7 +45,7 @@ Copy the design, not the architecture.
 Run from the repo root. `pnpm`, never `npm`.
 
 | Command | Effect |
-|---|---|
+| --- | --- |
 | `pnpm dev` | Both apps in parallel, prefixed output |
 | `pnpm check` | `typecheck && test` across all 4 projects — **the gate** |
 | `pnpm migrate` | Apply migrations to both databases |
@@ -53,7 +53,10 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**218 tests** (87 bank + 97 merchant + 9 foundry-client + 25 ui), measured.
+**253 tests** (87 bank + 131 merchant + 10 foundry-client + 25 ui), measured
+2026-08-19.
+
+That was **218** before the named-query / age-verification work, which added 35.
 
 That was **186** before the DC API transport work, which added 32. The plan for
 that work projected 210 and was simply wrong — its per-task arithmetic did not
@@ -284,4 +287,25 @@ Not in this repo. Run it from `../foundry`:
 - `config.yaml` is gitignored there; it needs the `com.emvco.dpc.card`
   credential type. Validate with `foundry config validate`.
 - **Send `transaction_data` as plain JSON.** foundry performs the OpenID4VP
-  base64url encoding itself and adds `transaction_data_hashes_alg`.
+  base64url encoding itself and adds `transaction_data_hashes_alg` when the key
+  is absent (`or_insert_with`, so an explicitly sent value wins rather than
+  conflicts).
+- **foundry validates `transaction_data[].credential_ids` against the resolved
+  query's credential ids.** An id no query declares is a hard 400, not a
+  `verified: false` verdict. Verified 2026-08-19 against the deployed instance.
+- **`VerificationResult` is `{ verified, checks, credentials[] }`.** There is no
+  top-level `claims`, and top-level `checks` is cross-cutting only
+  (`jwe_decryption`, `requested_credentials_answered`).
+  `transaction_data_binding` lives in `credentials[i].checks`, and claims are
+  held per credential and never merged. See `apps/merchant/AGENTS.md`.
+- **The local and deployed foundry configs differ in their named queries.**
+  `../foundry/config.yaml` has only `over18`; the deployed
+  `dl-infra-k8s/foundry/foundry_config.yml` has `dpc`, `dpc_av`, `av`,
+  `dpc_discovery`, `dpc_by_network`. The merchant needs `dpc` and `dpc_av`, so
+  its payment flow **cannot** be exercised against a stock local foundry.
+- **foundry now verifies several credentials per `vp_token`.** The deployed
+  config's warning that `dpc_av` "CANNOT be fully verified" is stale — the
+  openapi serves `credentials[]` and `verify.rs` has `select_presentations`
+  (plural). Do not reason from that comment.
+- **The deployed admin key is not `dev-admin-key`.** Read it with
+  `kubectl -n foundry get secret foundry-admin -o jsonpath='{.data.admin-api-key}' | base64 -d`.

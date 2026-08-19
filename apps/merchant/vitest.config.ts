@@ -11,6 +11,7 @@ export default defineConfig({
       BANK_API_URL: "http://127.0.0.1:3001",
       BANK_API_KEY: "test-bank-key",
       MERCHANT_NAME: "Demo Shop",
+      MERCHANT_PAYEE_ID: "Payee-id-123",
     },
   },
   resolve: {
