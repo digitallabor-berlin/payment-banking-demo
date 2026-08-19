@@ -33,8 +33,16 @@ RUN pnpm install --frozen-lockfile
 
 # `next build` must not require real secrets, but env.ts validates at import
 # time. These placeholders never reach the runtime stage.
+#
+# EVERY no-default variable in EITHER app's env.ts must be listed here.
+# `**/.env.local` is dockerignored, so this block is the only thing satisfying
+# them during the build — and the failure is remote from its cause: page-data
+# collection imports env.ts transitively, so a missing entry surfaces as
+# `Failed to collect configuration for /success` with the real reason buried in
+# `[cause]`, not as an env error at the top of the log.
 ENV FOUNDRY_ADMIN_KEY=build-only \
     BANK_API_KEY=build-only \
+    MERCHANT_PAYEE_ID=build-only \
     SESSION_SECRET=build-only-secret-0123456789012345678901234567890123
 RUN pnpm --filter @demo/bank run build \
   && pnpm --filter @demo/merchant run build

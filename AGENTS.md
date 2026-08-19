@@ -95,6 +95,18 @@ them without reading the linked reasoning first.
   `/repo/node_modules` drops them and `next build` cannot resolve `@demo/ui`.
   Do not "optimise" this back into a separate deps stage.
 
+- **Adding a no-default env var means editing the Dockerfile's build-stage
+  `ENV` block too.** `env.ts` validates at import time and `**/.env.local` is
+  dockerignored, so that block is the only thing satisfying required variables
+  during `next build`. Miss one and the build fails *remotely from its cause* —
+  `MERCHANT_PAYEE_ID` surfaced as `Failed to collect configuration for
+  /success` / `Failed to collect page data for /api/payment-sessions`, with the
+  real reason only inside `[cause]`. It is not a `build-job.yml` problem and no
+  build arg is involved. Measured: the placeholders stay confined to the build
+  stage and are absent from the runtime image's config, so the deployment
+  manifest must supply the real value separately — a pod missing it exits 1 at
+  boot (`CrashLoopBackOff`), it does not degrade to 500s.
+
 - **`.dockerignore` must be at the repo root.** Builds use the root as context,
   and Docker only honours `<context>/.dockerignore`. Two per-app `.dockerignore`
   files previously sat at paths Docker never reads and were silently inert,
