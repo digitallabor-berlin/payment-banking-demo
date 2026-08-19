@@ -36,7 +36,15 @@ export default async function DashboardPage() {
           <h2 className="eyebrow">Karten</h2>
           <div className="mt-3 space-y-4">
             {cards.map((card) => (
-              <CardTile key={card.id} card={card} holder={session.displayName} />
+              <CardTile
+                key={card.id}
+                card={card}
+                holder={session.displayName}
+                iban={
+                  accounts.find((account) => account.id === card.accountId)
+                    ?.iban
+                }
+              />
             ))}
           </div>
         </section>

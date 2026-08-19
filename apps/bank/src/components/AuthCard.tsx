@@ -8,12 +8,17 @@ export interface AuthCardProps {
   children: ReactNode;
 }
 
-export function AuthCard({ title, subtitle, tagline, children }: AuthCardProps) {
+export function AuthCard({
+  title,
+  subtitle,
+  tagline,
+  children,
+}: AuthCardProps) {
   return (
     <div className="auth-overlay p-6">
       <div className="auth-card">
         <div className="auth-card-header flex items-center gap-3.5 px-6 py-6">
-          <SparkasseLogo className="h-10 w-10 shrink-0" />
+          <SparkasseLogo className="h-10 w-auto shrink-0" />
           <div className="leading-tight">
             <div className="text-xl tracking-tight">
               <span className="font-bold">{title}</span>{" "}

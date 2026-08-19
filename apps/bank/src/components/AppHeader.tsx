@@ -29,8 +29,12 @@ export function AppHeader({ displayName, active }: AppHeaderProps) {
   return (
     <header className="app-header header-rule">
       <div className="mx-auto flex max-w-5xl items-center gap-4 px-4 py-3.5">
-        <Link href="/" className="flex items-center gap-2.5" aria-label="Zur Übersicht">
-          <SparkasseLogo className="h-8 w-8 shrink-0" />
+        <Link
+          href="/"
+          className="flex items-center gap-2.5"
+          aria-label="Zur Übersicht"
+        >
+          <SparkasseLogo className="h-8 w-auto shrink-0" />
           <span className="text-[1.0625rem] tracking-tight">
             <span className="font-bold">Sparkasse</span>{" "}
             <span className="font-light">Musterstadt</span>
@@ -91,7 +95,11 @@ export function AppHeader({ displayName, active }: AppHeaderProps) {
               {item.label}
             </Link>
           ))}
-          <button type="button" onClick={logout} className="py-2 text-sm font-medium">
+          <button
+            type="button"
+            onClick={logout}
+            className="py-2 text-sm font-medium"
+          >
             Abmelden
           </button>
         </div>

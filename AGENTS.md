@@ -53,8 +53,11 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**295 tests** (87 bank + 167 merchant + 10 foundry-client + 31 ui), measured
+**305 tests** (97 bank + 167 merchant + 10 foundry-client + 31 ui), measured
 2026-08-19.
+
+That was **295** before the card-artwork / session-scoped-issuing work, which
+added 10 (all in `apps/bank/src/lib/card-state.test.ts`).
 
 That was **253** before the payment-sheet / 18+-marking work, which added 42.
 That plan projected 294. It was off by one for the ordinary reason: its Task 4
@@ -189,6 +192,33 @@ them without reading the linked reasoning first.
   source of truth is `AGE_RESTRICTED_PRODUCT_IDS` in `lib/dcql.ts`, read through
   `isAgeRestricted`, which `selectNamedQuery` also calls so the shelf tag and the
   `dpc` → `dpc_av` escalation cannot disagree. There is no `products` column.
+
+### The bank's card face
+
+- **The card face is the real artwork, `apps/bank/public/card-face.webp`.** It
+  already contains the logo, wordmark, chip, contactless mark and network mark,
+  so `.card-chip`, `.card-network` and the on-card `SparkasseLogo` were deleted
+  rather than layered over it. Only the IBAN and the holder are drawn on top.
+  `background-color: var(--color-primary)` sits behind it deliberately, so a
+  missing asset degrades to Sparkasse red instead of a hole.
+
+- **`next build`'s standalone output does NOT include `public/`.** The bank had
+  no `public/` at all until this work, so the Dockerfile only copied the
+  merchant's; the bank's needs its own `COPY` line or the artwork 404s in every
+  container and the card silently falls back to that flat red.
+
+- **`SparkasseLogo` is portrait (354.126 / 460.684 = 0.769), not square.** Call
+  sites must set height only (`h-8 w-auto`); `h-8 w-8` stretches the glyph
+  horizontally by ~30%. Measured 25×32 px in the header.
+
+- **"Wird hinzugefügt…" is session-scoped, never read back from the database.**
+  Nothing in this project ever clears an `offered` credential row — there is no
+  revocation and expiry does not change the row — so a single abandoned attempt
+  used to pin the badge and the infinite `card-sheen` animation on forever. The
+  decision lives in `lib/card-state.ts` (`cardFaceState`), not in JSX, because
+  vitest is `environment: "node"` with `include: ["src/**/*.test.ts"]` and a
+  `.tsx` file is never covered. The accepted cost: a genuinely open offer
+  becomes invisible after a reload.
 
 ### Running ad hoc scripts
 

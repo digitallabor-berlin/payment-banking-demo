@@ -64,6 +64,10 @@ WORKDIR /app
 COPY --from=build /repo/apps/bank/.next/standalone      /app/bank/
 COPY --from=build /repo/apps/bank/.next/static          /app/bank/apps/bank/.next/static
 COPY --from=build /repo/apps/bank/drizzle               /app/bank/apps/bank/drizzle
+# The bank serves the card artwork from public/. `next build`'s standalone
+# output does NOT include public/ -- it must be copied explicitly, or the card
+# face silently degrades to the flat --color-primary background behind it.
+COPY --from=build /repo/apps/bank/public                 /app/bank/apps/bank/public
 
 COPY --from=build /repo/apps/merchant/.next/standalone   /app/merchant/
 COPY --from=build /repo/apps/merchant/.next/static       /app/merchant/apps/merchant/.next/static
