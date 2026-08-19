@@ -1,3 +1,5 @@
+import { isAgeRestricted } from "./dcql.js";
+
 export interface CartItem {
   productId: string;
   name: string;
@@ -45,4 +47,13 @@ export function cartTotalCents(items: CartItem[]): number {
 
 export function cartItemCount(items: CartItem[]): number {
   return items.reduce((sum, row) => sum + row.quantity, 0);
+}
+
+/**
+ * Whether this basket will be presented with the `dpc_av` named query. Derived
+ * from `productId` against the same set `selectNamedQuery` uses, so the
+ * checkout's promise and the actual presentation cannot drift apart.
+ */
+export function cartHasAgeRestricted(items: CartItem[]): boolean {
+  return items.some((row) => isAgeRestricted(row.productId));
 }

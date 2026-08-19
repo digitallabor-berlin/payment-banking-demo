@@ -200,16 +200,39 @@ Still unobserved — and this is the part a wallet is needed for: no real
 presentation has ever been verified, so the *values* have never been seen, only
 the schema. In particular an `av` credential has never actually been returned.
 
-## The payment screen — `/pay/{sessionId}`
+## The payment sheet — a modal on `/checkout`, plus `/pay/{sessionId}`
 
 The reference implementation was a separate Vite app in a fullscreen iframe
-talking `postMessage`. Here it is **one route in this app**; the three message
+talking `postMessage`. Here it is **a modal inside this app**; the three message
 types collapse into local state, and `EUDIPAY_REDIRECT` becomes a plain
 `window.location.href` navigation (there is no parent frame to message).
 
+- **The sheet opens over `/checkout` and does not navigate.** `CheckoutPanel`
+  owns both the form and the sheet, marks the page behind it `inert`, and
+  mirrors the session id into `?session=` with `replace` — so a wallet round
+  trip that leaves the tab can rebuild the sheet from the URL alone.
+  `/pay/{sessionId}` remains for deep links, reloads and shared URLs, which have
+  no client cart; there it renders the order's own line items behind the sheet
+  so the scrim has something real to dim.
+- **`loadCheckoutSession` is the single place the sheet's props are assembled.**
+  Both `/checkout` and `/pay/[sessionId]` call it. Adding a second assembler is
+  exactly how the two routes drift — the standalone route used to build the
+  props itself and had already fallen behind by one prop.
+- **The rendering decision is `lib/sheet-state.ts`, not JSX.** `selectSheetView`
+  maps state + transport + poll outcome onto one `SheetView`, and
+  `PaymentScreen` only renders it. Every vitest project is `environment:
+  "node"` with `include: ["src/**/*.test.ts"]`, so a `.tsx` file is never
+  covered; keeping the branching in a `.ts` module is the only way these six
+  states are testable at all.
+- **The cart is cleared on completion, in `PaymentScreen`** — not when the form
+  is submitted. The basket is what the sheet sits over, and a declined payment
+  has to leave it intact.
 - `app/pay/[sessionId]/page.tsx` is a **server component and the only place the
   presentation URI leaves the database**. The polled status endpoint must never
   carry it, so a bystander who guesses a session id cannot hijack the request.
+  Being a server component is also why it passes no `onClose`: it cannot hand a
+  function across the boundary, so the sheet falls back to navigating home,
+  which is right — there is no page underneath to return to.
 - `.eudipay-*` classes in `globals.css` use **literal hex values, not theme
   tokens** — this screen is EudiPay-branded, not merchant-branded, and must not
   drift when the shop palette changes. Brand blue `#004DD7` (also the QR's dark
@@ -232,7 +255,17 @@ types collapse into local state, and `EUDIPAY_REDIRECT` becomes a plain
   `dc_api`, since the session existing at all proves the browser supports it.
 - **No countdown timer or progress bar.** The 10-minute cap lives in
   `useStatusPoll` and surfaces only if reached.
-- `EudiPayLogo.tsx` is inline SVG — no binary asset.
+- **The status indicator is `EudiPayRing`, inline SVG — no binary asset.** It
+  draws the EU twelve stars and a centre glyph, and replaced both `EudiPayLogo`
+  and `StatusMark` (deleted 2026-08-19; the **bank** keeps its own separate
+  `StatusMark.tsx`). A spinner cannot express "eleven of twelve, the last one
+  belongs to the bank", and cannot express "declined" at all.
+- **The `18+` chip is `18+`, never `+18`**, and it uses Larder's palette rather
+  than EudiPay's — an age restriction is the grocer's obligation, not the
+  payment brand's. `AGE_RESTRICTED_PRODUCT_IDS` in `lib/dcql.ts` is the single
+  source of truth, read through `isAgeRestricted`, which `selectNamedQuery` also
+  calls — so the shelf tag and the `dpc` → `dpc_av` escalation cannot disagree.
+  There is no `products` column for this.
 
 ## API surface
 

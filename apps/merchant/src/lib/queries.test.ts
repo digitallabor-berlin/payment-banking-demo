@@ -29,6 +29,7 @@ describe("listProducts", () => {
     // pack fields carry the EU-mandated unit price (Directive 98/6/EC).
     const [first] = listProducts(db);
     expect(Object.keys(first ?? {}).sort()).toEqual([
+      "ageRestricted",
       "baseQuantity",
       "baseUnit",
       "category",
@@ -52,6 +53,14 @@ describe("listProducts", () => {
       expect(product.baseQuantity).toBeGreaterThan(0);
       expect(["kg", "l", "pc"]).toContain(product.baseUnit);
     }
+  });
+
+  it("marks exactly the three age-restricted products", () => {
+    const restricted = listProducts(db)
+      .filter((product) => product.ageRestricted)
+      .map((product) => product.id)
+      .sort();
+    expect(restricted).toEqual(["aperitif", "beer", "wine"]);
   });
 });
 

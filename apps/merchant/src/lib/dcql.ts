@@ -16,6 +16,15 @@ export const AGE_RESTRICTED_PRODUCT_IDS = ["beer", "wine", "aperitif"] as const;
 const RESTRICTED = new Set<string>(AGE_RESTRICTED_PRODUCT_IDS);
 
 /**
+ * Whether buying this product requires proving an age. The storefront renders a
+ * tag from this and `selectNamedQuery` escalates from it, so the shelf can never
+ * promise a check the presentation does not ask for.
+ */
+export function isAgeRestricted(productId: string): boolean {
+ return RESTRICTED.has(productId);
+}
+
+/**
  * Picks which foundry named query to present with (see the `named_queries`
  * block in foundry's config): `dpc` for an ordinary basket, `dpc_av` when
  * anything in it is age-restricted.
@@ -29,7 +38,7 @@ const RESTRICTED = new Set<string>(AGE_RESTRICTED_PRODUCT_IDS);
  * testable; the caller reads them from `order_items`, never from the browser.
  */
 export function selectNamedQuery(productIds: readonly string[]): NamedQueryRef {
- return productIds.some((id) => RESTRICTED.has(id)) ? "dpc_av" : "dpc";
+ return productIds.some(isAgeRestricted) ? "dpc_av" : "dpc";
 }
 
 export interface PaymentTransactionData {

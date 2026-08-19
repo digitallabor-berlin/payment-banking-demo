@@ -113,6 +113,12 @@ describe("startPaymentSession", () => {
       ok: true,
       sessionId: expect.any(String),
       uri: "openid4vp://?x=1",
+      orderId: "ord_1",
+      amountCents: 4_798,
+      transport: "request_uri",
+      ageRequested: false,
+      dcApiRequest: null,
+      state: "pending",
     });
 
     const row = db.select().from(paymentSessions).get();
@@ -272,10 +278,19 @@ describe("startPaymentSession", () => {
       true,
     );
 
+    // `uri` is null rather than "" under dc_api: foundry returns neither
+    // openid4vp_uri nor request_uri, and null says "there is no URI" where an
+    // empty string only says "the URI is blank".
     expect(result).toEqual({
       ok: true,
       sessionId: expect.any(String),
-      uri: "",
+      uri: null,
+      orderId: "ord_1",
+      amountCents: 4_798,
+      transport: "dc_api",
+      ageRequested: false,
+      dcApiRequest: { client_id: "x509_hash:abc", nonce: "n1" },
+      state: "pending",
     });
 
     const row = db.select().from(paymentSessions).get();
@@ -326,6 +341,88 @@ describe("startPaymentSession", () => {
     // issuance flow (Plan 1 Task 11) — the failure stays visible in the DB.
     expect(row?.state).toBe("failed");
     expect(row?.failureReason).toBe("foundry_unavailable");
+  });
+});
+
+describe("startPaymentSession — the result the sheet is built from", () => {
+  it("reports the amount from the order row, not from the caller", async () => {
+    // The sheet shows this number and it must be the one bound into
+    // transaction_data, so it can only come from the order.
+    stockOrder("cheese");
+    const result = await startPaymentSession(
+      db,
+      stubClient(verificationOk),
+      "ord_1",
+      "Larder",
+      "PAYEE-1",
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.amountCents).toBe(4_798);
+    expect(result.orderId).toBe("ord_1");
+    expect(result.state).toBe("pending");
+  });
+
+  it("reports a request_uri session with no dc_api payload", async () => {
+    stockOrder("cheese");
+    const result = await startPaymentSession(
+      db,
+      stubClient(verificationOk),
+      "ord_1",
+      "Larder",
+      "PAYEE-1",
+      false,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.transport).toBe("request_uri");
+    expect(result.dcApiRequest).toBeNull();
+    expect(typeof result.uri).toBe("string");
+  });
+
+  it("reports a dc_api session with no uri", async () => {
+    stockOrder("cheese");
+    const result = await startPaymentSession(
+      db,
+      stubClient(dcApiOk),
+      "ord_1",
+      "Larder",
+      "PAYEE-1",
+      true,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.transport).toBe("dc_api");
+    expect(result.uri).toBeNull();
+    expect(result.dcApiRequest).not.toBeNull();
+  });
+
+  it("reports ageRequested for an age-restricted basket", async () => {
+    stockOrder("cheese", "wine");
+    const result = await startPaymentSession(
+      db,
+      stubClient(verificationOk),
+      "ord_1",
+      "Larder",
+      "PAYEE-1",
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.ageRequested).toBe(true);
+  });
+
+  it("reports ageRequested false for an ordinary basket", async () => {
+    stockOrder("cheese");
+    const result = await startPaymentSession(
+      db,
+      stubClient(verificationOk),
+      "ord_1",
+      "Larder",
+      "PAYEE-1",
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.ageRequested).toBe(false);
   });
 });
 

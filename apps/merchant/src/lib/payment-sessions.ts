@@ -20,8 +20,28 @@ import { listOrderProductIds } from "./orders.js";
 /** The name shown on the bank statement. Same value the wallet authorized. */
 const MERCHANT_REFERENCE_NAME = env.MERCHANT_NAME;
 
+/**
+ * Everything the payment sheet renders, returned from here rather than
+ * re-fetched. The sheet must hold the DC API request object as a prop before
+ * any click: Chrome consumes a click's transient activation, so no `await` may
+ * run between the handler starting and navigator.credentials.get().
+ */
 export type StartPaymentSessionResult =
-  | { ok: true; sessionId: string; uri: string }
+  | {
+      ok: true;
+      sessionId: string;
+      /** Null under dc_api — foundry inlines the request object instead. */
+      uri: string | null;
+      orderId: string;
+      /** From the order row. Never from the browser. */
+      amountCents: number;
+      transport: "request_uri" | "dc_api";
+      /** True when this session presents the `dpc_av` named query. */
+      ageRequested: boolean;
+      /** foundry's inline unsigned request object. Null under request_uri. */
+      dcApiRequest: unknown;
+      state: "pending";
+    }
   | {
       ok: false;
       reason: "order_not_found" | "order_not_pending" | "foundry_unavailable";
@@ -88,7 +108,11 @@ export async function startPaymentSession(
 
     // Under dc_api foundry returns neither uri — the request object is inlined
     // and unsigned because response_mode is dc_api.jwt.
-    const uri = response.openid4vp_uri ?? response.request_uri ?? "";
+    const uri = response.openid4vp_uri ?? response.request_uri ?? null;
+    const dcApiRequest =
+      response.dc_api_request === undefined || response.dc_api_request === null
+        ? null
+        : response.dc_api_request;
 
     db.update(paymentSessions)
       .set({
@@ -96,16 +120,22 @@ export async function startPaymentSession(
         openid4vpUri: response.openid4vp_uri ?? null,
         requestUri: response.request_uri ?? null,
         transport: useDcApi ? "dc_api" : "request_uri",
-        dcApiRequestJson:
-          response.dc_api_request === undefined ||
-          response.dc_api_request === null
-            ? null
-            : JSON.stringify(response.dc_api_request),
+        dcApiRequestJson: dcApiRequest === null ? null : JSON.stringify(dcApiRequest),
       })
       .where(eq(paymentSessions.id, sessionId))
       .run();
 
-    return { ok: true, sessionId, uri };
+    return {
+      ok: true,
+      sessionId,
+      uri,
+      orderId: order.id,
+      amountCents: order.totalCents,
+      transport: useDcApi ? "dc_api" : "request_uri",
+      ageRequested: namedQueryRef === "dpc_av",
+      dcApiRequest,
+      state: "pending",
+    };
   } catch {
     db.update(paymentSessions)
       .set({ state: "failed", failureReason: "foundry_unavailable" })

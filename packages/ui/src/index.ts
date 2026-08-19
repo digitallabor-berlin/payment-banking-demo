@@ -1,4 +1,6 @@
 export { cn } from "./cn.js";
+export { ringPoints, starPath } from "./euStars.js";
+export type { RingPoint } from "./euStars.js";
 export { pollUntilTerminal } from "./poll.js";
 export type { PollOptions, PollOutcome } from "./poll.js";
 export { useStatusPoll } from "./useStatusPoll.js";

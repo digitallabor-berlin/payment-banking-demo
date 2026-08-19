@@ -637,12 +637,21 @@ Font `Inter`; card radius 16px; shadows `0 10px 24px rgba(20,40,30,0.06)` and
 ### 9.4 Merchant — screens
 
 - **`/`** — sticky header with wordmark and cart badge; gradient hero
-  (`brand/10 → accent/10`); six-product grid; footer.
+  (`brand/10 → accent/10`); six-product grid; footer. Age-restricted products
+  carry an `18+` chip on the shelf ticket.
 - **`/cart`** — line items with quantity steppers, running total, checkout CTA.
-- **`/checkout`** — two columns: order summary and a name/email form, then the
-  primary CTA "Pay with EUDI Wallet" in EudiPay blue `#004DD7` — the one place
-  the merchant palette yields to the payment brand.
-- **`/pay/{sessionId}`** — see §9.5.
+- **`/checkout`** — two columns: a name/email form and the order summary, then
+  the primary CTA "Pay with EUDI Wallet" in EudiPay blue `#004DD7` — the one
+  place the merchant palette yields to the payment brand. When the basket holds
+  an age-restricted product, a consequence line above the CTA states that the
+  wallet will confirm the customer is over 18 and will not share a date of
+  birth. **The payment sheet opens here, as a modal over this page**, with the
+  form and basket still legible behind it; the session id is mirrored into
+  `?session=` so a wallet round trip can re-open it. See
+  `2026-08-19-payment-sheet-and-age-marking-design.md` §5.
+- **`/pay/{sessionId}`** — the standalone fallback for deep links, reloads and
+  shared URLs, which have no client cart to render behind the sheet. It
+  server-renders the order's line items as that content. See §9.5.
 - **`/success`** — green check, order number, total, and an expandable
   "Verification details" block listing `foundry`'s actual checks
   (`sd_jwt_vc_signature_and_kb_jwt`, `dcql_match`, `status_check`,
@@ -657,32 +666,21 @@ all three `postMessage` message types collapse into local state transitions; the
 `sessionId` and `gatewayUrl` query parameters become a route parameter plus
 server-side configuration.
 
-Visual contract, preserved from the original:
+**The visual contract below was superseded on 2026-08-19.** See
+`2026-08-19-payment-sheet-and-age-marking-design.md` §3 for the current design —
+a saturated `#003BA8` field whose status indicator is the EU twelve-star ring,
+with Archivo for the amount and IBM Plex Mono for machine values.
 
-```css
-overlay:       rgba(17, 24, 39, 0.5) + backdrop-filter: blur(4px)
-card:          #ffffff, max-width 400px, padding 2.5rem,
-               border-radius 1.5rem, border-top 6px solid #004DD7,
-               box-shadow 0 25px 50px -12px rgba(0,0,0,0.25)
-brand blue:    #004DD7      (logo, headline, spinner, QR dark modules)
-brand yellow:  #FFCC00
-light yellow:  #FFEFB4      (status badge background, QR frame border)
-text:          #1f2937      muted: #4b5563
-font:          'Inter', system-ui, -apple-system, sans-serif
-headline:      1.75rem / 800
-buttons:       0.95rem / 600, radius 0.75rem
-animations:    fadeIn 0.3s, slideUp 0.4s, spin 1s infinite
-```
+What that redesign **retained** from this section: `#004DD7`, `#FFCC00` and
+`#FFEFB4`; `max-width` 400px; the ≤480px bottom-sheet behaviour with
+`safe-area-inset-bottom`; `window.location.href = openid4vpUri` on coarse
+pointers; `matchMedia("(pointer: coarse)")` for touch detection; no countdown
+timer or progress bar; the auto-advance to `/success` after 1.5s.
 
-Vertical order: `eudi-wallet.svg` (100px) → "EudiPay" headline → **amount and
-merchant/order line** → status badge → 240px QR (dark modules `#004DD7`, light
-`#ffffff`, margin 1) inside a 2px `#FFEFB4` frame with 1rem padding →
-instruction text → Cancel button.
-
-Full-viewport centered overlay using `min-height: 100dvh`. At ≤480px the card
-slides up from the bottom with top-only rounded corners and
-`safe-area-inset-bottom` respected. No countdown timer or progress bar; a
-spinner only during the mobile redirect state.
+What it **dropped**: Inter, the 1.5rem radius, the 6px top border, the 240px QR,
+the 1.75rem/800 headline, the fullscreen `min-height: 100dvh` centring, and the
+spinner. The `box-shadow` this section asked for had been silently dropped in
+implementation and is restored.
 
 States: awaiting-wallet (QR) · redirecting (spinner, touch devices) · success
 (EU flag, "Payment Successful", auto-advance after 1.5s) · error (warning glyph,
