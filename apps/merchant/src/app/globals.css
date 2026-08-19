@@ -159,7 +159,8 @@ body {
   flex: 1;
 }
 
-/* The yellow rail of a supermarket shelf label — the page's only warm colour. */
+/* The yellow rail of a supermarket shelf label. The shop's only warm colour,
+ * used twice: here, and as the ink of the 18+ chip. */
 .ticket::before {
   content: "";
   position: absolute;
@@ -550,4 +551,46 @@ body {
 
 .eudipay-card :where(a, button, summary):focus-visible {
   outline-color: #004dd7;
+}
+
+/* --------------------------------------------------------- age marking ---- */
+
+/*
+ * The 18+ chip. Deliberately in Larder's palette rather than EudiPay's: an age
+ * restriction is the grocer's legal obligation and belongs to the shop's voice.
+ * The payment sheet mentions the check in running copy and never wears this
+ * chip.
+ *
+ * `18+`, not `+18` — that is the form printed on European shelf edges.
+ */
+.age-chip {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  background: var(--color-ink);
+  color: var(--color-ticket);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+/*
+ * The consequence line above the checkout button. It says what will happen and
+ * then what will not, which is the claim this whole demo exists to make.
+ */
+.age-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-ticket);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-muted-foreground);
 }

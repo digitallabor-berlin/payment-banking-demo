@@ -4,8 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { DC_API_PRESENTATION_PROTOCOL, useDcApiSupport } from "@demo/ui";
+import { cartHasAgeRestricted } from "@/lib/cart.js";
+import { isAgeRestricted } from "@/lib/dcql.js";
 import { formatEuroCents } from "@/lib/format.js";
 import { selectTransport } from "@/lib/transport.js";
+import { AgeChip } from "./AgeChip.js";
 import { useCart } from "@/lib/useCart.js";
 
 export function CheckoutForm() {
@@ -117,6 +120,16 @@ export function CheckoutForm() {
           </p>
         ) : null}
 
+        {cartHasAgeRestricted(items) ? (
+          <div className="age-note px-3.5 py-3">
+            <AgeChip />
+            <span>
+              Your wallet will confirm you&rsquo;re over 18. It won&rsquo;t share your
+              date of birth.
+            </span>
+          </div>
+        ) : null}
+
         <button
           type="submit"
           disabled={pending}
@@ -140,6 +153,7 @@ export function CheckoutForm() {
                   {item.quantity}×
                 </span>
                 {item.name}
+                {isAgeRestricted(item.productId) ? <AgeChip className="ml-1.5" /> : null}
               </span>
               <span className="shrink-0 tabular-nums">
                 {formatEuroCents(item.priceCents * item.quantity)}

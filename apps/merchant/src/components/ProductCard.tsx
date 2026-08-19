@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import type { ProductDto } from "@/lib/queries.js";
 import { formatEuroCents, formatUnitPrice } from "@/lib/format.js";
 import { AddToCartButton } from "./AddToCartButton.js";
+import { AgeChip } from "./AgeChip.js";
 
 /**
  * A shelf-edge ticket under a photograph.
@@ -37,7 +38,10 @@ export function ProductCard({ product, index = 0 }: { product: ProductDto; index
       />
 
       <div className="ticket py-3.5 pl-5 pr-4">
-        <h3 className="ticket-name">{product.name}</h3>
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="ticket-name">{product.name}</h3>
+          {product.ageRestricted ? <AgeChip className="mt-0.5" /> : null}
+        </div>
         <p className="mt-1 text-xs leading-snug text-[var(--color-muted-foreground)]">
           {product.description}
         </p>

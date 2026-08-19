@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { AgeChip } from "@/components/AgeChip.js";
 import { SiteHeader } from "@/components/SiteHeader.js";
+import { isAgeRestricted } from "@/lib/dcql.js";
 import { formatEuroCents } from "@/lib/format.js";
 import { useCart } from "@/lib/useCart.js";
 
@@ -44,7 +46,10 @@ export default function CartPage() {
                   )}
 
                   <div className="min-w-0">
-                    <p className="font-semibold">{item.name}</p>
+                    <p className="flex items-center gap-2 font-semibold">
+                      {item.name}
+                      {isAgeRestricted(item.productId) ? <AgeChip /> : null}
+                    </p>
                     <p className="data mt-0.5 text-[var(--color-muted-foreground)]">
                       {item.packLabel ? `${item.packLabel} · ` : ""}
                       {formatEuroCents(item.priceCents)} each

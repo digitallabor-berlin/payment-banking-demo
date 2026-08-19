@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addItem,
+  cartHasAgeRestricted,
   cartItemCount,
   cartTotalCents,
   removeItem,
@@ -90,5 +91,22 @@ describe("cartItemCount", () => {
       { ...berries, quantity: 3 },
     ];
     expect(cartItemCount(cart)).toBe(5);
+  });
+});
+
+describe("cartHasAgeRestricted", () => {
+  const ordinary = { productId: "cheese", name: "Aged Gouda", priceCents: 449, quantity: 1 };
+  const restricted = { productId: "wine", name: "Riesling, Trocken", priceCents: 899, quantity: 1 };
+
+  it("is true when a restricted product is in the basket", () => {
+    expect(cartHasAgeRestricted([ordinary, restricted])).toBe(true);
+  });
+
+  it("is false for an all-ordinary basket", () => {
+    expect(cartHasAgeRestricted([ordinary])).toBe(false);
+  });
+
+  it("is false for an empty basket", () => {
+    expect(cartHasAgeRestricted([])).toBe(false);
   });
 });
