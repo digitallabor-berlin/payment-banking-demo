@@ -86,7 +86,18 @@ describe("listCards", () => {
     expect(listCards(db, "user_anna")[0]?.credentialState).toBe("active");
   });
 
-  it("prefers the newest credential when a card has several", () => {
+  /*
+   * This used to assert the opposite -- newest non-failed row wins, full stop --
+   * and that was only safe while the UI forbade a second issuance. Once an "add
+   * again" button exists, one abandoned re-issue writes an `offered` row that
+   * outranks the `active` one forever (nothing in this project ever clears an
+   * offered row), and the card then claims "Not in wallet" while the credential
+   * is demonstrably in the wallet. Observed in a real browser, not theorised.
+   *
+   * An issued credential is a fact; an offer is an intention. A re-issue only
+   * supersedes its predecessor once it becomes active itself.
+   */
+  it("does not let a newer offer mask a credential already in the wallet", () => {
     db.insert(credentials)
       .values({
         id: "cred_old",
@@ -110,8 +121,50 @@ describe("listCards", () => {
       })
       .run();
     const card = listCards(db, "user_anna")[0];
-    expect(card?.credentialRowId).toBe("cred_new");
+    expect(card?.credentialState).toBe("active");
+    expect(card?.credentialRowId).toBe("cred_old");
+  });
+
+  it("prefers the newest credential among several in the wallet", () => {
+    for (const [id, createdAt] of [
+      ["cred_first", 10],
+      ["cred_second", 20],
+    ] as const) {
+      db.insert(credentials)
+        .values({
+          id,
+          userId: "user_anna",
+          cardId: "card_anna",
+          credentialId: `dpc_${id}`,
+          state: "active",
+          issuedAt: createdAt,
+          createdAt,
+        })
+        .run();
+    }
+    expect(listCards(db, "user_anna")[0]?.credentialRowId).toBe("cred_second");
+  });
+
+  it("prefers the newest offer when nothing is in the wallet yet", () => {
+    for (const [id, createdAt] of [
+      ["cred_o1", 10],
+      ["cred_o2", 20],
+    ] as const) {
+      db.insert(credentials)
+        .values({
+          id,
+          userId: "user_anna",
+          cardId: "card_anna",
+          credentialId: `dpc_${id}`,
+          state: "offered",
+          issuedAt: null,
+          createdAt,
+        })
+        .run();
+    }
+    const card = listCards(db, "user_anna")[0];
     expect(card?.credentialState).toBe("offered");
+    expect(card?.credentialRowId).toBe("cred_o2");
   });
 
   it("ignores 'failed' credentials so a failed attempt shows as 'none'", () => {
@@ -223,10 +276,23 @@ describe("getAgeCredentialState", () => {
     });
   });
 
-  it("prefers the newest non-failed row, so a re-issue supersedes its predecessor", () => {
+  // Same correction as listCards, for the same reason: an abandoned re-issue
+  // must not make an issued age credential look absent.
+  it("does not let a newer offer mask a credential already in the wallet", () => {
     insertAv("av_old", "active", 10);
     insertAv("av_new", "offered", 20);
-    expect(getAgeCredentialState(db, "user_anna").credentialRowId).toBe("av_new");
+    expect(getAgeCredentialState(db, "user_anna")).toEqual({
+      state: "active",
+      credentialRowId: "av_old",
+    });
+  });
+
+  it("prefers the newest row within one state, so a re-issue does supersede", () => {
+    insertAv("av_first", "active", 10);
+    insertAv("av_second", "active", 20);
+    expect(getAgeCredentialState(db, "user_anna").credentialRowId).toBe(
+      "av_second",
+    );
   });
 
   it("ignores failed rows", () => {

@@ -53,8 +53,17 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**397 tests** (188 bank + 167 merchant + 11 foundry-client + 31 ui), measured
+**405 tests** (196 bank + 167 merchant + 11 foundry-client + 31 ui), measured
 2026-08-20.
+
+That was **397** before the re-issuance work, which added 8, all in `apps/bank`:
+5 in `credential-copy.test.ts` (4 for the new `walletActionLabel`, 1 asserting
+the active-state `explain` invites a re-add) and 3 in `queries.test.ts` (2 for
+`listCards`, 1 for `getAgeCredentialState`). Two existing tests changed rather
+than being added: the verbatim English active-`explain` assertion in
+`card-state.test.ts`, and — in both query suites — the "prefers the newest
+non-failed row" tests, which asserted exactly the behaviour that produced the
+second defect. No plan; the work was a reported bug.
 
 That was **357** before the bank i18n work, which added 40, all in `apps/bank`:
 12 in the new `src/lib/i18n/locale.test.ts`, 7 in the new
@@ -122,6 +131,26 @@ them without reading the linked reasoning first.
 - **`credential_type_id` for age verification is `av`.** Not
   `eu.europa.ec.av.1` — that is the mdoc docType configured on foundry's side,
   not the id the admin API takes.
+
+- **Issuance is repeatable, and an `active` row outranks a newer `offered`
+  one.** Nothing behind the UI ever forbade a second issuance — neither route
+  guards on state, and both `startIssuance` and `startAvIssuance` just insert
+  another row — so the bank offers "add again" on a credential that is already
+  in the wallet. `pickLiveCredential` in `lib/queries.ts` is what makes that
+  safe: the plain "newest non-failed row wins" rule it replaced meant one
+  abandoned re-issue wrote an `offered` row that outranked the `active` one
+  *forever* (nothing in this project clears an offered row), and the tile then
+  read "Not in wallet" for a credential demonstrably in the wallet. Observed in
+  a real browser. Newest still wins within a state, so a completed re-issue
+  does supersede its predecessor.
+
+- **The button label is a decision, so it lives in `.ts`.**
+  `walletActionLabel` (`lib/credential-copy.ts`) chooses between "add",
+  "add again" and "preparing"; `AddToWalletButton` takes a resolved `label`
+  string and has no locale. Same reason as `cardFaceState`: vitest is
+  `environment: "node"` with `include: ["src/**/*.test.ts"]`, so a ternary in a
+  `.tsx` file is untested. It also means the card tile and the age tile cannot
+  disagree about the wording.
 
 - **No foundry config declares an `av` credential type**, so the bank's
   age-credential happy path has never run. Verified 2026-08-20 against a

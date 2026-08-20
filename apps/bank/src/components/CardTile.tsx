@@ -3,7 +3,11 @@
 import { useState } from "react";
 import type { CardDto } from "@/lib/queries.js";
 import { cardFaceState, stateCopy } from "@/lib/card-state.js";
-import { BADGE_CLASS, dialogCopy } from "@/lib/credential-copy.js";
+import {
+  BADGE_CLASS,
+  dialogCopy,
+  walletActionLabel,
+} from "@/lib/credential-copy.js";
 import { DPC_CREDENTIAL_TYPE_ID } from "@/lib/credential-types.js";
 import { formatIban } from "@/lib/format.js";
 import type { Locale } from "@/lib/i18n/locale.js";
@@ -121,8 +125,7 @@ export function CardTile({
             onStart={start}
             pending={pending}
             error={error}
-            locale={locale}
-            disabled={card.credentialState === "active"}
+            label={walletActionLabel(locale, faceState, pending)}
           />
         </div>
       </div>

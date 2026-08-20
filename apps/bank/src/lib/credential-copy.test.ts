@@ -5,11 +5,13 @@ import {
   FACE_COPY,
   dialogCopy,
   faceCopy,
+  walletActionLabel,
 } from "./credential-copy.js";
 import {
   AV_CREDENTIAL_TYPE_ID,
   DPC_CREDENTIAL_TYPE_ID,
 } from "./credential-types.js";
+import { MESSAGES } from "./i18n/messages.js";
 
 describe("FACE_COPY", () => {
   it("covers every face state for both credential types", () => {
@@ -72,6 +74,22 @@ describe("FACE_COPY", () => {
     expect(faceCopy("en", AV_CREDENTIAL_TYPE_ID, "offered").explain).toBe(
       shared,
     );
+  });
+
+  /*
+   * The reported defect. An issued credential said "In wallet" and nothing
+   * else, and the button beside it was disabled outright, so the state read as
+   * terminal -- there was no way to learn that the demo can be run again. The
+   * badge stays the state's name; the explanation carries the news.
+   */
+  it("tells the user an active credential can still be added again", () => {
+    for (const typeId of [
+      DPC_CREDENTIAL_TYPE_ID,
+      AV_CREDENTIAL_TYPE_ID,
+    ] as const) {
+      expect(faceCopy("en", typeId, "active").explain).toMatch(/again/i);
+      expect(faceCopy("de", typeId, "active").explain).toMatch(/erneut/i);
+    }
   });
 
   it("keeps the card's own copy verbatim", () => {
@@ -174,6 +192,44 @@ describe("English credential copy", () => {
         expect(en[key]).not.toMatch(/[äöüßÄÖÜ]/);
       }
     }
+  });
+});
+
+describe("walletActionLabel", () => {
+  it("offers to add a credential that is not in the wallet", () => {
+    expect(walletActionLabel("en", "none", false)).toBe(
+      MESSAGES.en.issuance.addToWallet,
+    );
+  });
+
+  /*
+   * The action half of the reported defect. Re-issuance was always supported
+   * by the server -- `startIssuance` has no "already active" guard and
+   * `listCards` documents that the newest non-failed row wins -- so the only
+   * thing forbidding a second run was a disabled button in the tile. The
+   * button now stays live and says what pressing it will do.
+   */
+  it("offers to add it again once it is already in the wallet", () => {
+    expect(walletActionLabel("en", "active", false)).toBe(
+      MESSAGES.en.issuance.addAgain,
+    );
+    expect(walletActionLabel("en", "active", false)).not.toBe(
+      MESSAGES.en.issuance.addToWallet,
+    );
+  });
+
+  it("reports progress while a request is in flight, whatever the face shows", () => {
+    for (const state of ["none", "offered", "active"] as const) {
+      expect(walletActionLabel("de", state, true)).toBe(
+        MESSAGES.de.issuance.preparing,
+      );
+    }
+  });
+
+  it("localises the re-add label", () => {
+    expect(walletActionLabel("de", "active", false)).toBe(
+      "Erneut zum EUDI Wallet hinzufügen",
+    );
   });
 });
 

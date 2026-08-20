@@ -51,23 +51,50 @@ export function listAccounts(db: Db, userId: string): AccountDto[] {
     .all();
 }
 
+/**
+ * Which of a subject's non-failed credential rows the UI should describe.
+ *
+ * An `active` row outranks an `offered` one; within one state the newest wins.
+ *
+ * The plain "newest wins" rule this replaces was safe only while the UI
+ * forbade a second issuance. The bank now offers "add again" — nothing behind
+ * the UI ever objected — and since no code path in this project clears an
+ * `offered` row, one abandoned re-issue would otherwise outrank the live
+ * credential forever and the tile would report "Not in wallet" for a
+ * credential that is demonstrably in the wallet.
+ *
+ * A credential in the wallet is a fact; an offer is an intention. A re-issue
+ * supersedes its predecessor when it becomes active itself, which is what the
+ * within-state ordering preserves.
+ *
+ * Callers must pass rows already filtered to `offered | active` and ordered
+ * newest-first, which is why this takes rows rather than querying: the two
+ * call sites differ in how they scope the query (by card, by user and type)
+ * but must not differ in this rule.
+ */
+function pickLiveCredential<T extends { state: string }>(
+  newestFirst: T[],
+): T | undefined {
+  return newestFirst.find((row) => row.state === "active") ?? newestFirst[0];
+}
+
 export function listCards(db: Db, userId: string): CardDto[] {
   const rows = db.select().from(cards).where(eq(cards.userId, userId)).all();
 
   return rows.map((card) => {
-    // Newest non-failed credential wins: a re-issue supersedes its predecessor.
-    const credential = db
-      .select()
-      .from(credentials)
-      .where(
-        and(
-          eq(credentials.cardId, card.id),
-          inArray(credentials.state, ["offered", "active"]),
-        ),
-      )
-      .orderBy(desc(credentials.createdAt))
-      .limit(1)
-      .get();
+    const credential = pickLiveCredential(
+      db
+        .select()
+        .from(credentials)
+        .where(
+          and(
+            eq(credentials.cardId, card.id),
+            inArray(credentials.state, ["offered", "active"]),
+          ),
+        )
+        .orderBy(desc(credentials.createdAt))
+        .all(),
+    );
 
     // The where(inArray(..., ["offered", "active"])) clause above guarantees
     // credential.state is never "failed" here, but Drizzle's inferred column
@@ -92,23 +119,28 @@ export function listCards(db: Db, userId: string): CardDto[] {
  * The user's age-verification credential, if any. One per user: there is no
  * per-card scoping because there is no card behind it.
  *
- * Same rule as `listCards` — newest non-failed row wins, because a re-issue
- * supersedes its predecessor and a failed attempt is not a credential.
+ * Same rule as `listCards`, through the same helper: a live credential
+ * outranks an open offer, the newest wins within a state, and a failed attempt
+ * is not a credential.
  */
-export function getAgeCredentialState(db: Db, userId: string): AgeCredentialDto {
-  const credential = db
-    .select()
-    .from(credentials)
-    .where(
-      and(
-        eq(credentials.userId, userId),
-        eq(credentials.credentialTypeId, AV_CREDENTIAL_TYPE_ID),
-        inArray(credentials.state, ["offered", "active"]),
-      ),
-    )
-    .orderBy(desc(credentials.createdAt))
-    .limit(1)
-    .get();
+export function getAgeCredentialState(
+  db: Db,
+  userId: string,
+): AgeCredentialDto {
+  const credential = pickLiveCredential(
+    db
+      .select()
+      .from(credentials)
+      .where(
+        and(
+          eq(credentials.userId, userId),
+          eq(credentials.credentialTypeId, AV_CREDENTIAL_TYPE_ID),
+          inArray(credentials.state, ["offered", "active"]),
+        ),
+      )
+      .orderBy(desc(credentials.createdAt))
+      .all(),
+  );
 
   // The inArray predicate above guarantees the state is never "failed", but
   // Drizzle's inferred column type is still the full union — TS cannot see

@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { cardFaceState } from "@/lib/card-state.js";
-import { BADGE_CLASS, dialogCopy, faceCopy } from "@/lib/credential-copy.js";
+import {
+  BADGE_CLASS,
+  dialogCopy,
+  faceCopy,
+  walletActionLabel,
+} from "@/lib/credential-copy.js";
 import { AV_CREDENTIAL_TYPE_ID } from "@/lib/credential-types.js";
 import type { Locale } from "@/lib/i18n/locale.js";
 import { MESSAGES } from "@/lib/i18n/messages.js";
@@ -98,8 +103,7 @@ export function AgeCredentialTile({
             onStart={start}
             pending={pending}
             error={error}
-            locale={locale}
-            disabled={credentialState === "active"}
+            label={walletActionLabel(locale, faceState, pending)}
           />
         </div>
       </div>

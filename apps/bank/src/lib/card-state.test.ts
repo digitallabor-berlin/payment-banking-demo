@@ -60,7 +60,7 @@ describe("stateCopy", () => {
 
   it("returns English face copy for the card", () => {
     expect(stateCopy("en", "active").explain).toBe(
-      "This card is in your EUDI Wallet and ready for payments.",
+      "This card is in your EUDI Wallet and ready for payments. You can add it again at any time.",
     );
   });
 });

@@ -47,6 +47,7 @@ export const de: Messages = {
   },
   issuance: {
     addToWallet: "Zum EUDI Wallet hinzufügen",
+    addAgain: "Erneut zum EUDI Wallet hinzufügen",
     preparing: "Wird vorbereitet…",
     confirmInApp: "Bestätigen Sie das Angebot in Ihrer EUDI Wallet App.",
     openInWallet: "Im Wallet öffnen",

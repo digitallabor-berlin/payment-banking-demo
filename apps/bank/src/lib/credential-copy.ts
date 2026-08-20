@@ -5,6 +5,7 @@ import {
   type CredentialTypeId,
 } from "./credential-types.js";
 import type { Locale } from "./i18n/locale.js";
+import { MESSAGES } from "./i18n/messages.js";
 
 /**
  * Every string the two credentials show, in both languages, in one place,
@@ -55,7 +56,8 @@ export const FACE_COPY: Record<
       },
       active: {
         badge: "In wallet",
-        explain: "This card is in your EUDI Wallet and ready for payments.",
+        explain:
+          "This card is in your EUDI Wallet and ready for payments. You can add it again at any time.",
       },
     },
     [AV_CREDENTIAL_TYPE_ID]: {
@@ -71,7 +73,7 @@ export const FACE_COPY: Record<
       active: {
         badge: "In wallet",
         explain:
-          "Your age verification is in your EUDI Wallet and ready to use.",
+          "Your age verification is in your EUDI Wallet and ready to use. You can add it again at any time.",
       },
     },
   },
@@ -89,7 +91,7 @@ export const FACE_COPY: Record<
       active: {
         badge: "Im Wallet",
         explain:
-          "Diese Karte ist in Ihrem EUDI Wallet und für Zahlungen bereit.",
+          "Diese Karte ist in Ihrem EUDI Wallet und für Zahlungen bereit. Sie können sie jederzeit erneut hinzufügen.",
       },
     },
     [AV_CREDENTIAL_TYPE_ID]: {
@@ -105,7 +107,7 @@ export const FACE_COPY: Record<
       active: {
         badge: "Im Wallet",
         explain:
-          "Ihr Altersnachweis ist in Ihrem EUDI Wallet und einsatzbereit.",
+          "Ihr Altersnachweis ist in Ihrem EUDI Wallet und einsatzbereit. Sie können ihn jederzeit erneut hinzufügen.",
       },
     },
   },
@@ -164,4 +166,34 @@ export function dialogCopy(
   typeId: CredentialTypeId,
 ): IssuanceCopy {
   return DIALOG_COPY[locale][typeId];
+}
+
+/**
+ * The label on the one button beside a credential.
+ *
+ * Credential-type independent — "Add to EUDI Wallet" says nothing about what is
+ * being added, because the tile's heading and face already do — so this reads
+ * the shared catalog rather than FACE_COPY.
+ *
+ * It exists as a function here, rather than a ternary in the tiles' JSX, for
+ * the reason that governs every decision in this app: vitest runs
+ * `environment: "node"` with `include: ["src/**\/*.test.ts"]`, so a branch
+ * taken inside a `.tsx` file is never covered by a test. Two tiles read it, so
+ * they also cannot disagree.
+ *
+ * `active` gets its own label instead of a disabled button. Re-issuance was
+ * always supported by everything behind the UI — neither issuance route nor
+ * `startIssuance`/`startAvIssuance` has an "already active" guard, and
+ * `listCards`/`getAgeCredentialState` resolve the newest non-failed row on
+ * purpose so a re-issue supersedes its predecessor — and this is a demo whose
+ * whole point is being run repeatedly.
+ */
+export function walletActionLabel(
+  locale: Locale,
+  state: CardFaceState,
+  pending: boolean,
+): string {
+  const copy = MESSAGES[locale].issuance;
+  if (pending) return copy.preparing;
+  return state === "active" ? copy.addAgain : copy.addToWallet;
 }
