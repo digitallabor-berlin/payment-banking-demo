@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "../db/index.js";
 import { credentials, transactions } from "../db/schema.js";
 import { seed } from "../db/seed.js";
-import { listAccounts, listCards, listTransactions } from "./queries.js";
+import {
+  getAgeCredentialState,
+  listAccounts,
+  listCards,
+  listTransactions,
+} from "./queries.js";
 
 let dir: string;
 let db: Db;
@@ -170,5 +175,89 @@ describe("listTransactions", () => {
   it("never returns another user's transactions", () => {
     const ids = listTransactions(db, "user_ben", 50, 0).map((r) => r.id);
     expect(ids.every((id) => id.startsWith("tx_user_ben"))).toBe(true);
+  });
+});
+
+describe("getAgeCredentialState", () => {
+  /** Inserts an age-credential row; `state` and `createdAt` are what vary. */
+  function insertAv(
+    id: string,
+    state: "offered" | "active" | "failed",
+    createdAt: number,
+    userId = "user_anna",
+  ) {
+    db.insert(credentials)
+      .values({
+        id,
+        userId,
+        cardId: null,
+        credentialTypeId: "av",
+        credentialId: null,
+        state,
+        issuedAt: state === "active" ? createdAt : null,
+        createdAt,
+      })
+      .run();
+  }
+
+  it("reports 'none' when the user has no age credential", () => {
+    expect(getAgeCredentialState(db, "user_anna")).toEqual({
+      state: "none",
+      credentialRowId: null,
+    });
+  });
+
+  it("reports 'offered' for an open offer", () => {
+    insertAv("av_1", "offered", 10);
+    expect(getAgeCredentialState(db, "user_anna")).toEqual({
+      state: "offered",
+      credentialRowId: "av_1",
+    });
+  });
+
+  it("reports 'active' once the credential is issued", () => {
+    insertAv("av_1", "active", 10);
+    expect(getAgeCredentialState(db, "user_anna")).toEqual({
+      state: "active",
+      credentialRowId: "av_1",
+    });
+  });
+
+  it("prefers the newest non-failed row, so a re-issue supersedes its predecessor", () => {
+    insertAv("av_old", "active", 10);
+    insertAv("av_new", "offered", 20);
+    expect(getAgeCredentialState(db, "user_anna").credentialRowId).toBe("av_new");
+  });
+
+  it("ignores failed rows", () => {
+    insertAv("av_failed", "failed", 30);
+    expect(getAgeCredentialState(db, "user_anna")).toEqual({
+      state: "none",
+      credentialRowId: null,
+    });
+  });
+
+  it("ignores payment credentials, however active they are", () => {
+    db.insert(credentials)
+      .values({
+        id: "cred_dpc",
+        userId: "user_anna",
+        cardId: "card_anna",
+        credentialId: "dpc_active_1",
+        state: "active",
+        issuedAt: 1,
+        createdAt: 99,
+      })
+      .run();
+    expect(getAgeCredentialState(db, "user_anna")).toEqual({
+      state: "none",
+      credentialRowId: null,
+    });
+  });
+
+  it("never reports another user's age credential", () => {
+    insertAv("av_ben", "active", 10, "user_ben");
+    expect(getAgeCredentialState(db, "user_anna").state).toBe("none");
+    expect(getAgeCredentialState(db, "user_ben").state).toBe("active");
   });
 });
