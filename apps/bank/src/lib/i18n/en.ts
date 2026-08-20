@@ -1,0 +1,68 @@
+import type { Messages } from "./messages.js";
+
+export const en: Messages = {
+  meta: {
+    description: "Online banking demo with EUDI Wallet",
+  },
+  nav: {
+    overview: "Overview",
+    transactions: "Transactions",
+    signOut: "Sign out",
+    menu: "Menu",
+    toOverview: "To overview",
+    language: "Language",
+  },
+  login: {
+    tagline: "Your reliable partner",
+    walletFooter: "Payments via EUDI Wallet",
+    username: "Username",
+    password: "Password",
+    submit: "Sign in",
+    submitPending: "Signing in…",
+    demoLogins: "Demo logins",
+    failed: "Sign-in failed. Please check your credentials.",
+  },
+  dashboard: {
+    greeting: (name) => `Good day, ${name}`,
+    cards: "Cards",
+    credentials: "Credentials",
+    recentTransactions: "Recent transactions",
+    showAll: "Show all",
+  },
+  transactions: {
+    title: "Transactions",
+    page: (page) => `Page ${page}`,
+    empty: "No transactions.",
+    emptyMore: "No further transactions.",
+    pagination: "Pagination",
+    newer: "← Newer",
+    older: "Older →",
+  },
+  account: {
+    type: "Current account",
+    available: "Available balance",
+  },
+  credential: {
+    ageTitle: "Age verification",
+  },
+  issuance: {
+    addToWallet: "Add to EUDI Wallet",
+    preparing: "Preparing…",
+    confirmInApp: "Confirm the offer in your EUDI Wallet app.",
+    openInWallet: "Open in wallet",
+    scanCode: "Scan the code with your EUDI Wallet app.",
+    qrAlt: "QR code for the credential offer",
+    waiting: "Waiting for wallet",
+    cancel: "Cancel",
+    close: "Close",
+    failedTitle: "Failed",
+  },
+  errors: {
+    offerNotCreated: "The offer could not be created.",
+    connectionFailed: "Connection to the server failed.",
+    expired: "The request has expired. Please try again.",
+    connectionLost: "Lost connection to the server.",
+    dcApiUnsupported: "This browser does not support the Digital Credentials API.",
+    dcApiCancelled: "The wallet handover was cancelled.",
+  },
+};
