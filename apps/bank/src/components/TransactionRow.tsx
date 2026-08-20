@@ -1,8 +1,15 @@
 import type { TransactionDto } from "@/lib/queries.js";
 import { formatEuroCents } from "@/lib/format.js";
+import type { Locale } from "@/lib/i18n/locale.js";
 import { EuStars } from "./EuStars.js";
 
-export function TransactionRow({ transaction }: { transaction: TransactionDto }) {
+export function TransactionRow({
+  transaction,
+  locale,
+}: {
+  transaction: TransactionDto;
+  locale: Locale;
+}) {
   const isDebit = transaction.amountCents < 0;
 
   return (
@@ -24,7 +31,7 @@ export function TransactionRow({ transaction }: { transaction: TransactionDto })
       </div>
 
       <span className="ledger-amount" data-direction={isDebit ? "debit" : "credit"}>
-        {formatEuroCents(transaction.amountCents)}
+        {formatEuroCents(transaction.amountCents, locale)}
       </span>
     </li>
   );

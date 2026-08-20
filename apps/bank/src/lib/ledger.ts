@@ -1,9 +1,10 @@
 import { formatDayLabel } from "./format.js";
+import type { Locale } from "./i18n/locale.js";
 
 export interface DayGroup<T> {
   /** Stable React key: the UTC calendar day, e.g. "2025-08-01". */
   key: string;
-  /** Human label for the day rail, e.g. "Fr, 01.08.2025". */
+  /** Human label for the day rail, e.g. "Fr, 01.08.2025" or "Fri, 01/08/2025". */
   label: string;
   entries: T[];
 }
@@ -26,6 +27,7 @@ function utcDayKey(ms: number): string {
  */
 export function groupByBookingDay<T extends { bookedAt: number }>(
   rows: readonly T[],
+  locale: Locale,
 ): Array<DayGroup<T>> {
   const groups: Array<DayGroup<T>> = [];
 
@@ -35,7 +37,11 @@ export function groupByBookingDay<T extends { bookedAt: number }>(
     if (current && current.key === key) {
       current.entries.push(row);
     } else {
-      groups.push({ key, label: formatDayLabel(row.bookedAt), entries: [row] });
+      groups.push({
+        key,
+        label: formatDayLabel(row.bookedAt, locale),
+        entries: [row],
+      });
     }
   }
 

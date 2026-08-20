@@ -6,6 +6,7 @@ import { AppHeader } from "@/components/AppHeader.js";
 import { CardTile } from "@/components/CardTile.js";
 import { TransactionLedger } from "@/components/TransactionLedger.js";
 import { getDb } from "@/db/index.js";
+import { getLocale } from "@/lib/i18n/server.js";
 import {
   getAgeCredentialState,
   listAccounts,
@@ -20,6 +21,7 @@ export default async function DashboardPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
+  const locale = await getLocale();
   const db = getDb();
   const accounts = listAccounts(db, session.userId);
   const cards = listCards(db, session.userId);
@@ -35,7 +37,7 @@ export default async function DashboardPage() {
 
         <section className="grid gap-4 sm:grid-cols-2">
           {accounts.map((account) => (
-            <AccountPanel key={account.id} account={account} />
+            <AccountPanel key={account.id} account={account} locale={locale} />
           ))}
         </section>
 
@@ -74,7 +76,7 @@ export default async function DashboardPage() {
             </Link>
           </div>
 
-          <TransactionLedger transactions={recent} />
+          <TransactionLedger transactions={recent} locale={locale} />
         </section>
       </main>
     </>

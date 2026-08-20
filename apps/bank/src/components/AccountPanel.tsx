@@ -1,8 +1,15 @@
 import type { AccountDto } from "@/lib/queries.js";
 import { formatIban, splitEuroCents } from "@/lib/format.js";
+import type { Locale } from "@/lib/i18n/locale.js";
 
-export function AccountPanel({ account }: { account: AccountDto }) {
-  const { sign, major, minor } = splitEuroCents(account.balanceCents);
+export function AccountPanel({
+  account,
+  locale,
+}: {
+  account: AccountDto;
+  locale: Locale;
+}) {
+  const { sign, major, minor } = splitEuroCents(account.balanceCents, locale);
 
   return (
     <section className="panel p-6">

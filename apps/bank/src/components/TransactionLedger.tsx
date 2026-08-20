@@ -1,4 +1,5 @@
 import type { TransactionDto } from "@/lib/queries.js";
+import type { Locale } from "@/lib/i18n/locale.js";
 import { groupByBookingDay } from "@/lib/ledger.js";
 import { TransactionRow } from "./TransactionRow.js";
 
@@ -12,9 +13,11 @@ import { TransactionRow } from "./TransactionRow.js";
  */
 export function TransactionLedger({
   transactions,
+  locale,
   emptyLabel = "Keine Umsätze vorhanden.",
 }: {
   transactions: TransactionDto[];
+  locale: Locale;
   emptyLabel?: string;
 }) {
   if (transactions.length === 0) {
@@ -25,12 +28,16 @@ export function TransactionLedger({
 
   return (
     <div className="space-y-5">
-      {groupByBookingDay(transactions).map((day) => (
+      {groupByBookingDay(transactions, locale).map((day) => (
         <section key={day.key}>
           <h3 className="ledger-day pb-1.5">{day.label}</h3>
           <ul>
             {day.entries.map((transaction) => (
-              <TransactionRow key={transaction.id} transaction={transaction} />
+              <TransactionRow
+                key={transaction.id}
+                transaction={transaction}
+                locale={locale}
+              />
             ))}
           </ul>
         </section>
