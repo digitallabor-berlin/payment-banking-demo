@@ -240,7 +240,8 @@ day-first anyway.
 
 ### `ledger.ts`
 
-`groupByDay` calls `formatDayLabel`, so it takes a trailing `locale`.
+`groupByBookingDay` calls `formatDayLabel`, so it takes a trailing `locale`.
+Its `DayGroup.label` doc comment (`"Fr, 01.08.2025"`) gains the English form.
 
 ### `layout.tsx`
 
