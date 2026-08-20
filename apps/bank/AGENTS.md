@@ -20,7 +20,9 @@ table and never persists one — it only forwards a `credential_id` string.
 
 ## Identity
 
-- Port **3001**. German UI, Sparkasse-styled.
+- Port **3001**. **English by default, German via a one-click switcher**;
+  Sparkasse-styled in both. English is the default because this app is
+  demonstrated to audiences who do not read German. See **i18n** below.
 - Package `@demo/bank`.
 - The only app with a login, so the only one with `jose` and `SESSION_SECRET`.
 
@@ -142,11 +144,31 @@ and require a rejection, before believing a green result.
 
 ## Formatting
 
-`src/lib/format.ts` — `formatEuroCents`, `formatIban`, `formatBookedAt`.
+`src/lib/format.ts` — `formatEuroCents`, `formatIban`, `formatBookedAt`,
+`formatDayLabel`, `splitEuroCents`.
 
-`formatEuroCents` uses **`Intl.NumberFormat("de-DE")`** → `3.487,12 €`. The
-merchant's same-named function uses `"en-IE"` → `€3,487.12`. Do not copy one
-over the other; the two apps are intentionally different locales.
+**Every one of those except `formatIban` takes a trailing `locale: Locale`, and
+it is required rather than defaulted** — a default would let a missed call site
+keep silently rendering German, which `pnpm typecheck` now catches instead. Each
+`Intl` singleton became a `Record<Locale, …>` built once at module scope.
+`groupByBookingDay` in `ledger.ts` gained the same trailing parameter.
+
+`de` → **`de-DE`** (`3.487,12 €`), `en` → **`en-IE`** (`€3,487.12`). `en-IE`
+rather than `en-US`/`en-GB` because it is the euro-native English locale *and*
+it is day-month-first like German, so switching language cannot silently
+reinterpret `01/08` as the eighth of January.
+
+This does **not** contradict the old warning about de-DE vs en-IE. That warning
+was against *replacing* the bank's de-DE with the merchant's en-IE. Here de-DE
+remains and en-IE sits beside it.
+
+`formatIban` is deliberately locale-independent: blocks of four is an IBAN
+convention, not a national one.
+
+**A currency assertion must be normalised.** `de-DE` separates the amount from
+the `€` with **U+00A0**, not a plain space, which is why `format.test.ts` has a
+`normalise()` helper. A raw `toBe("3.487,12 €")` fails. `en-IE` has no space at
+all and is unaffected.
 
 ## Auth
 
@@ -207,10 +229,15 @@ the same `idempotency_key` returns the identical `bank_tx_id`.
 - A human testing this needs
   `chrome://flags/#web-identity-digital-credentials-creation` enabled. No
   origin-trial token is embedded in the markup, by design.
-- **DC API diagnostic strings are English; all other copy stays German.** A
-  browser-capability failure is a technical signal, not customer copy. The two
-  strings are `"This browser does not support the Digital Credentials API."`
-  and `"The wallet handover was cancelled."`.
+- **The DC API diagnostics are now catalogued like any other copy**
+  (`errors.dcApiUnsupported`, `errors.dcApiCancelled`). This **supersedes** the
+  previous rule that they stay English on the grounds that a browser-capability
+  failure is a technical signal rather than customer copy. That reasoning
+  stopped holding the moment a German customer could meet those strings inside
+  an otherwise fully German UI.
+- Reading `MESSAGES[locale]` is synchronous, so it does **not** endanger the
+  transient-activation rule: no `await` runs between the click handler starting
+  and `navigator.credentials.create()`.
 
 ## Age-verification credential
 
@@ -260,22 +287,32 @@ A second credential type, issued to the *person* rather than to a card.
 
 ### Copy (`src/lib/credential-copy.ts`)
 
-`FACE_COPY[type][faceState]` and `DIALOG_COPY[type]`, both keyed by credential
-type id, both in `.ts` because every vitest project is `environment: "node"`
-with `include: ["src/**/*.test.ts"]` — a string decided in a `.tsx` file is
-never covered.
+`FACE_COPY[locale][type][faceState]` and `DIALOG_COPY[locale][type]` — **locale
+is the outermost key** — reached through the `faceCopy(locale, type, state)` and
+`dialogCopy(locale, type)` accessors. Both live in `.ts` because every vitest
+project is `environment: "node"` with `include: ["src/**/*.test.ts"]` — a string
+decided in a `.tsx` file is never covered.
+
+**`badgeClass` is NOT part of `CardFaceCopy`.** It was extracted to a
+locale-independent `BADGE_CLASS: Record<CardFaceState, string>` in
+`credential-copy.ts`: a CSS class has no language, and keeping it inside the
+locale-keyed record stored every value twice and let the two locales drift on a
+non-linguistic value.
 
 `IssuanceDialog` takes a `copy: IssuanceCopy` prop rather than a noun to
 substitute: German gender differs (`die Karte` against `der Altersnachweis`), so
 the article and possessive change with the noun, not just the noun.
-`card-state.ts` still exports `STATE_COPY`, now as an alias of
-`FACE_COPY[DPC_CREDENTIAL_TYPE_ID]`, so `CardTile` and its tests are untouched.
+`card-state.ts` no longer exports the `STATE_COPY` constant. It exports
+**`stateCopy(locale, state)`**, which reads
+`FACE_COPY[locale][DPC_CREDENTIAL_TYPE_ID][state]` — still by identity, not a
+parallel copy, and a test asserts that identity so the two cannot drift.
 
 The `offered` explanation is **deliberately identical** for both types
-(`Bestätigen Sie das Angebot in Ihrer Wallet-App.`) — the instruction genuinely
-does not depend on what is being offered. A test pins it, because the plan's
-original assertion that all three states differ was unsatisfiable against the
-plan's own copy table.
+(`Bestätigen Sie das Angebot in Ihrer Wallet-App.` / `Confirm the offer in your
+wallet app.`) — the instruction genuinely does not depend on what is being
+offered. A test pins it **in each language independently**, so neither
+language's sharing can drift unnoticed. The plan's original assertion that all
+three states differ was unsatisfiable against the plan's own copy table.
 
 The AV face is `.card-object-av`, overriding only `background-image` and
 `background-color`. The fallback is `#ff0000`, the artwork's own red, *not*
@@ -283,12 +320,60 @@ Sparkasse `--color-primary` (`#EA0016`). Nothing is drawn over it and it gets no
 `EuStars`: `.card-stars` is positioned top-right, exactly where the artwork
 prints its wordmark.
 
+## i18n
+
+A hand-rolled catalog under `src/lib/i18n/`. No library, no middleware, no URL
+segment. Every load-bearing constraint below was a decision, not an accident:
+
+- **`resolveLocale` accepts `"de"` and `"DE"` and `" de "` but NOT `"de-DE"`.**
+  Normalisation is deliberately shallow — only our own switcher writes this
+  cookie, so a language-tag-shaped value can only be tampering or staleness, and
+  falling back to English is the safe answer. Two locales do not justify a
+  BCP-47 parser.
+- **The `bank_locale` cookie is deliberately NOT `HttpOnly`**, unlike
+  `bank_session`. It carries no authority, and making it HttpOnly would force a
+  round trip through a route handler just to change a display preference.
+- **The switcher works by `document.cookie` + `router.refresh()`, which only
+  works because every page is `force-dynamic`.** Making a bank page static would
+  silently freeze its language. There is no client-side mirror of the locale
+  precisely so a second source of truth cannot disagree with the cookie.
+- **Interpolated catalog entries are functions**, not `"{name}"` placeholders,
+  so arity and parameter types are checked. The consequence: a catalog entry is
+  not serialisable, which is why components receive `locale` and index
+  `MESSAGES` themselves rather than being handed resolved copy.
+- Both catalogs are declared against one `Messages` interface, so a missing key
+  is a **compile** error. `messages.test.ts` adds what the compiler cannot see:
+  no empty leaf, no German orthography in the English catalog, and no leaf
+  identical across locales. `IDENTICAL_BY_DESIGN` is empty and should stay that
+  way — proper nouns are hardcoded in components for exactly that reason.
+- **`src/lib/display-metadata.ts` does NOT follow the switch.** Its `LOCALE`
+  stays `"en-US"`. It is machine-read by foundry; a wrong value there is a
+  `400 invalid_request` and a `failed` issuance row.
+- **Reading `cookies()` in the root layout made `/_not-found` dynamic.**
+  Measured: it was `○` (static) before this work and is `ƒ` after. No bank route
+  is statically prerendered now, which is what keeps a cookie-dependent
+  `generateMetadata()` correct.
+- **The umlaut grep is not a sufficient check for leftover German.** It cannot
+  see `Anmelden`, `Karten`, `Girokonto` or `Im Wallet`, and it *does* match the
+  three deliberate umlaut-bearing comments (`layout.tsx`'s Fira Sans rationale,
+  and the `CardTile`/`AgeCredentialTile` notes on session-scoped
+  `Wird hinzugefügt…`). Exclude comment lines and enumerate capitalised literals
+  separately:
+  `grep -rn '[äöüßÄÖÜ]' src --include=*.tsx | grep -vE ':[0-9]+:[[:space:]]*(\*|//|/\*)'`
+
+Strings that stay untranslated in both catalogs, and are therefore hardcoded in
+components rather than catalogued: `Sparkasse`, `Musterstadt`, `IBAN`,
+`EUDI Wallet`, and `anna / demo1234 · ben / demo1234` (that last one is data to
+type, not copy).
+
 ## Testing
 
-`pnpm test` → **148 tests**. `pnpm typecheck` must also be clean. (This line
-read `87` before the age-credential work, which added 61 — 5 schema, 2 payment
-guards, 7 queries, 7 av-issuance, 7 copy, and 33 that had accumulated
-uncounted before it. Measure rather than trusting it; it has been wrong twice.)
+`pnpm test` → **188 tests**. `pnpm typecheck` must also be clean. (This line
+read `148` before the i18n work, which added 40: 12 in the new
+`src/lib/i18n/locale.test.ts`, 7 in the new `src/lib/i18n/messages.test.ts`,
++10 in `format.test.ts`, +8 in `credential-copy.test.ts`, +2 in
+`ledger.test.ts` and +1 in `card-state.test.ts`. It read `87` before the
+age-credential work. Measure rather than trusting it; it has been wrong twice.)
 
 `vitest.config.ts` carries an explicit `test.env` block; `env.ts` validates at
 import time, so tests fail without it. `apiKey.test.ts` uses

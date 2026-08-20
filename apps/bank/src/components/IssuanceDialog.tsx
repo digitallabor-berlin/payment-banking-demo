@@ -13,6 +13,8 @@ import {
   useStatusPoll,
 } from "@demo/ui";
 import type { IssuanceCopy } from "@/lib/credential-copy.js";
+import type { Locale } from "@/lib/i18n/locale.js";
+import { MESSAGES } from "@/lib/i18n/messages.js";
 import { AlertMark, CheckMark } from "./StatusMark.js";
 
 /** Sparkasse red, matching --color-primary, for the QR's dark modules. */
@@ -25,6 +27,7 @@ export interface IssuanceDialogProps {
   offerUri: string;
   dcApiOffer: unknown;
   copy: IssuanceCopy;
+  locale: Locale;
   onClose: () => void;
 }
 
@@ -33,9 +36,11 @@ export function IssuanceDialog({
   offerUri,
   dcApiOffer,
   copy,
+  locale,
   onClose,
 }: IssuanceDialogProps) {
   const router = useRouter();
+  const t = MESSAGES[locale];
   const isTouch = useIsTouch();
   const dcSupported = useDcApiSupport("create", DC_API_ISSUANCE_PROTOCOL);
   const [dcFailed, setDcFailed] = useState(false);
@@ -76,9 +81,9 @@ export function IssuanceDialog({
 
   const errorMessage =
     outcome?.status === "timeout"
-      ? "Die Anfrage ist abgelaufen. Bitte erneut versuchen."
+      ? t.errors.expired
       : outcome?.status === "failed"
-        ? "Verbindung zum Server verloren."
+        ? t.errors.connectionLost
         : copy.failureBody;
 
   // No `await` may execute before invokeDcCreate — Chrome consumes the click's
@@ -86,14 +91,18 @@ export function IssuanceDialog({
   // needs fetching here.
   async function addViaDcApi() {
     try {
-      await invokeDcCreate(prepareDcApiRequest(dcApiOffer, DC_API_ISSUANCE_PROTOCOL));
+      await invokeDcCreate(
+        prepareDcApiRequest(dcApiOffer, DC_API_ISSUANCE_PROTOCOL),
+      );
     } catch (err) {
-      // English on purpose (spec D5): a browser-capability failure is a
-      // technical signal, not customer copy.
+      // Now catalogued like any other copy. These used to be hardcoded English
+      // on the grounds that a browser-capability failure is a technical signal
+      // rather than customer copy — which stopped holding once a German
+      // customer could meet them inside an otherwise fully German UI.
       setDcMessage(
         isDcApiNotSupportedError(err)
-          ? "This browser does not support the Digital Credentials API."
-          : "The wallet handover was cancelled.",
+          ? t.errors.dcApiUnsupported
+          : t.errors.dcApiCancelled,
       );
       setDcFailed(true);
     }
@@ -115,7 +124,7 @@ export function IssuanceDialog({
               /* "Not yet known" is NOT "unavailable". Rendering the QR here
                  would flash it on Android before it disappears. */
               <p className="mt-6 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
-                Wird vorbereitet…
+                {t.issuance.preparing}
               </p>
             ) : dcSupported && !dcFailed ? (
               <>
@@ -124,19 +133,19 @@ export function IssuanceDialog({
                   onClick={addViaDcApi}
                   className="btn btn-primary mt-6 px-5 py-3"
                 >
-                  Zum EUDI Wallet hinzufügen
+                  {t.issuance.addToWallet}
                 </button>
                 <p className="mt-4 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
-                  Bestätigen Sie das Angebot in Ihrer EUDI Wallet App.
+                  {t.issuance.confirmInApp}
                 </p>
               </>
             ) : isTouch ? (
               <>
                 <a href={offerUri} className="btn btn-primary mt-6 px-5 py-3">
-                  Im Wallet öffnen
+                  {t.issuance.openInWallet}
                 </a>
                 <p className="mt-4 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
-                  Bestätigen Sie das Angebot in Ihrer EUDI Wallet App.
+                  {t.issuance.confirmInApp}
                 </p>
               </>
             ) : (
@@ -146,27 +155,36 @@ export function IssuanceDialog({
                     value={offerUri}
                     size={220}
                     darkColor={QR_DARK}
-                    ariaLabel="QR-Code für das Credential-Angebot"
+                    ariaLabel={t.issuance.qrAlt}
                   />
                 </div>
                 <p className="mt-4 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
-                  Scannen Sie den Code mit Ihrer EUDI Wallet App.
+                  {t.issuance.scanCode}
                 </p>
               </>
             )}
 
             {dcMessage ? (
-              <p role="alert" className="mt-3 text-xs font-medium text-[var(--color-destructive)]">
+              <p
+                role="alert"
+                className="mt-3 text-xs font-medium text-[var(--color-destructive)]"
+              >
                 {dcMessage}
               </p>
             ) : null}
 
             <p className="eyebrow mt-4">
-              {value === "offered" || value === null ? "Warte auf Wallet" : value}
+              {value === "offered" || value === null
+                ? t.issuance.waiting
+                : value}
             </p>
 
-            <button type="button" onClick={onClose} className="btn btn-quiet mt-5 px-3 py-2">
-              Abbrechen
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn btn-quiet mt-5 px-3 py-2"
+            >
+              {t.issuance.cancel}
             </button>
           </>
         ) : null}
@@ -186,12 +204,16 @@ export function IssuanceDialog({
         {phase === "error" ? (
           <>
             <AlertMark className="mx-auto h-12 w-12 text-[var(--color-destructive)]" />
-            <h2 className="panel-title mt-4">Fehlgeschlagen</h2>
+            <h2 className="panel-title mt-4">{t.issuance.failedTitle}</h2>
             <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
               {errorMessage}
             </p>
-            <button type="button" onClick={onClose} className="btn btn-primary mt-6 px-5 py-2.5">
-              Schließen
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn btn-primary mt-6 px-5 py-2.5"
+            >
+              {t.issuance.close}
             </button>
           </>
         ) : null}

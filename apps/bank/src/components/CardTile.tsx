@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import type { CardDto } from "@/lib/queries.js";
-import { STATE_COPY, cardFaceState } from "@/lib/card-state.js";
-import { DIALOG_COPY } from "@/lib/credential-copy.js";
+import { cardFaceState, stateCopy } from "@/lib/card-state.js";
+import { BADGE_CLASS, dialogCopy } from "@/lib/credential-copy.js";
 import { DPC_CREDENTIAL_TYPE_ID } from "@/lib/credential-types.js";
 import { formatIban } from "@/lib/format.js";
+import type { Locale } from "@/lib/i18n/locale.js";
+import { MESSAGES } from "@/lib/i18n/messages.js";
 import { AddToWalletButton } from "./AddToWalletButton.js";
 import { EuStars } from "./EuStars.js";
 import { IssuanceDialog } from "./IssuanceDialog.js";
@@ -36,11 +38,14 @@ export function CardTile({
   card,
   holder,
   iban,
+  locale,
 }: {
   card: CardDto;
   holder?: string;
   iban?: string;
+  locale: Locale;
 }) {
+  const t = MESSAGES[locale];
   const [session, setSession] = useState<IssuanceSession | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +55,7 @@ export function CardTile({
   // later.
   const issuing = pending || session !== null;
   const faceState = cardFaceState(card.credentialState, issuing);
-  const copy = STATE_COPY[faceState];
+  const copy = stateCopy(locale, faceState);
 
   async function start() {
     setPending(true);
@@ -60,7 +65,7 @@ export function CardTile({
         method: "POST",
       });
       if (!response.ok) {
-        setError("Angebot konnte nicht erstellt werden.");
+        setError(t.errors.offerNotCreated);
         return;
       }
       const body = (await response.json()) as IssuanceSession;
@@ -70,7 +75,7 @@ export function CardTile({
         dcApiOffer: body.dcApiOffer,
       });
     } catch {
-      setError("Verbindung zum Server fehlgeschlagen.");
+      setError(t.errors.connectionFailed);
     } finally {
       setPending(false);
     }
@@ -101,7 +106,7 @@ export function CardTile({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2.5">
           <h3 className="panel-title">{card.cardAlias}</h3>
-          <span className={`badge ${copy.badgeClass} px-2.5 py-1`}>
+          <span className={`badge ${BADGE_CLASS[faceState]} px-2.5 py-1`}>
             {faceState === "active" ? <EuStars className="h-3 w-3" /> : null}
             {copy.badge}
           </span>
@@ -116,6 +121,7 @@ export function CardTile({
             onStart={start}
             pending={pending}
             error={error}
+            locale={locale}
             disabled={card.credentialState === "active"}
           />
         </div>
@@ -126,7 +132,8 @@ export function CardTile({
           sessionId={session.sessionId}
           offerUri={session.offerUri}
           dcApiOffer={session.dcApiOffer}
-          copy={DIALOG_COPY[DPC_CREDENTIAL_TYPE_ID]}
+          copy={dialogCopy(locale, DPC_CREDENTIAL_TYPE_ID)}
+          locale={locale}
           onClose={() => setSession(null)}
         />
       ) : null}

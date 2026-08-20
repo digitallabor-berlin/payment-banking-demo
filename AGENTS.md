@@ -24,7 +24,7 @@ owner** of credential state — the merchant never persists it.
 Dockerfile          ONE image containing BOTH apps (see below)
 docker-entrypoint.sh  Takes `bank` or `merchant`; anything else exits 64
 .dockerignore       Must live here, at the build-context root
-apps/bank/          Next.js 15, port 3001, German UI
+apps/bank/          Next.js 15, port 3001, English by default + German switcher
 apps/merchant/      Next.js 15, port 3000, English UI
 packages/foundry-client/   Typed client for foundry's admin API
 packages/ui/        Shared hooks + QrCanvas (NOT shared design tokens)
@@ -53,8 +53,16 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**357 tests** (148 bank + 167 merchant + 11 foundry-client + 31 ui), measured
+**397 tests** (188 bank + 167 merchant + 11 foundry-client + 31 ui), measured
 2026-08-20.
+
+That was **357** before the bank i18n work, which added 40, all in `apps/bank`:
+12 in the new `src/lib/i18n/locale.test.ts`, 7 in the new
+`src/lib/i18n/messages.test.ts`, and — because the existing suites gained a
+second locale rather than new files — +10 in `format.test.ts`, +8 in
+`credential-copy.test.ts`, +2 in `ledger.test.ts` and +1 in
+`card-state.test.ts`. Its plan never projected a total, only per-task running
+subtotals for Tasks 1-2; the rest was measured.
 
 That was **329** before the age-verification-credential work, which added 28,
 all in `apps/bank`: 5 in `src/db/schema.test.ts`, 2 in `payments.test.ts`, 7 in
@@ -344,8 +352,11 @@ them without reading the linked reasoning first.
 - **No hardcoded URLs or secrets.** Everything comes from zod-validated env. A
   missing secret crashes the process at boot with a named error.
 - **Design tokens are deliberately NOT shared** between the apps. The bank is
-  Sparkasse-styled and German; the merchant is its own brand and English. Only
-  behaviour (`packages/ui`) is shared.
+  Sparkasse-styled and **bilingual** (English by default, German via a
+  switcher); the merchant is its own brand and English-only. Only behaviour
+  (`packages/ui`) is shared. The bank's locale machinery is likewise **not**
+  shared — it lives in `apps/bank/src/lib/i18n/`, because the merchant has no
+  second language to switch to.
 - **No revocation anywhere.** foundry exposes no revoke endpoint; credentials
   expire on their 12-hour lifetime.
 - **TDD.** Write the failing test, run it, confirm it fails for the right

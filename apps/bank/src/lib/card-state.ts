@@ -1,5 +1,6 @@
 import { FACE_COPY } from "./credential-copy.js";
 import { DPC_CREDENTIAL_TYPE_ID } from "./credential-types.js";
+import type { Locale } from "./i18n/locale.js";
 import type { CardCredentialState } from "./queries.js";
 
 /**
@@ -12,17 +13,17 @@ export type CardFaceState = "none" | "offered" | "active";
 
 export interface CardFaceCopy {
  badge: string;
- badgeClass: string;
  explain: string;
 }
 
 /**
- * The card's own face copy. Re-exported from `credential-copy.ts`, where it
- * sits beside the age credential's, so a second credential type did not mean a
- * second convention. `CardTile` and its tests consume this name unchanged.
+ * The card's own face copy for a locale. Sourced from `credential-copy.ts`,
+ * where it sits beside the age credential's, so a second credential type did
+ * not mean a second convention.
  */
-export const STATE_COPY: Record<CardFaceState, CardFaceCopy> =
- FACE_COPY[DPC_CREDENTIAL_TYPE_ID];
+export function stateCopy(locale: Locale, state: CardFaceState): CardFaceCopy {
+ return FACE_COPY[locale][DPC_CREDENTIAL_TYPE_ID][state];
+}
 
 /**
  * Collapse the persisted credential state and the live browser session into

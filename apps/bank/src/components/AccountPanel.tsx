@@ -1,19 +1,29 @@
 import type { AccountDto } from "@/lib/queries.js";
 import { formatIban, splitEuroCents } from "@/lib/format.js";
+import type { Locale } from "@/lib/i18n/locale.js";
+import { MESSAGES } from "@/lib/i18n/messages.js";
 
-export function AccountPanel({ account }: { account: AccountDto }) {
-  const { sign, major, minor } = splitEuroCents(account.balanceCents);
+export function AccountPanel({
+  account,
+  locale,
+}: {
+  account: AccountDto;
+  locale: Locale;
+}) {
+  const { sign, major, minor } = splitEuroCents(account.balanceCents, locale);
 
   return (
     <section className="panel p-6">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="eyebrow">Girokonto</h2>
+          <h2 className="eyebrow">{MESSAGES[locale].account.type}</h2>
           <p className="mono mt-1.5 text-xs text-[var(--color-muted-foreground)]">
             {formatIban(account.iban)}
           </p>
         </div>
-        <span className="badge badge-neutral shrink-0 px-2 py-1">{account.currency}</span>
+        <span className="badge badge-neutral shrink-0 px-2 py-1">
+          {account.currency}
+        </span>
       </div>
 
       {/*
@@ -30,7 +40,7 @@ export function AccountPanel({ account }: { account: AccountDto }) {
         <span className="figure-currency">€</span>
       </p>
 
-      <p className="eyebrow mt-3">Verfügbarer Betrag</p>
+      <p className="eyebrow mt-3">{MESSAGES[locale].account.available}</p>
     </section>
   );
 }
