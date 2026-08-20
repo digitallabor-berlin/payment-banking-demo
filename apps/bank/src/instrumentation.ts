@@ -39,44 +39,44 @@
  * with no request sent at all.
  */
 export async function register() {
-  // Next compiles this file for the edge runtime too (see next.config.ts),
-  // where the db imports below are deliberately replaced with empty stubs and
-  // no route ever runs. Bail out before touching them.
-  //
-  // The test is deliberately positive — `=== "edge"`, not `!== "nodejs"`. The
-  // negative form would silently skip env validation and seeding entirely if
-  // NEXT_RUNTIME were ever unset, which is precisely the failure mode this
-  // whole file exists to prevent. Unknown means "do the work".
-  if (process.env.NEXT_RUNTIME === "edge") return;
+ // Next compiles this file for the edge runtime too (see next.config.ts),
+ // where the db imports below are deliberately replaced with empty stubs and
+ // no route ever runs. Bail out before touching them.
+ //
+ // The test is deliberately positive — `=== "edge"`, not `!== "nodejs"`. The
+ // negative form would silently skip env validation and seeding entirely if
+ // NEXT_RUNTIME were ever unset, which is precisely the failure mode this
+ // whole file exists to prevent. Unknown means "do the work".
+ if (process.env.NEXT_RUNTIME === "edge") return;
 
-  try {
-    await import("./env.js");
-  } catch (error) {
-    console.error(
-      "[bank] Fatal: invalid environment configuration — refusing to serve requests.",
-      error,
-    );
-    process.exit(1);
-  }
+ try {
+  await import("./env.js");
+ } catch (error) {
+  console.error(
+   "[bank] Fatal: invalid environment configuration — refusing to serve requests.",
+   error,
+  );
+  process.exit(1);
+ }
 
-  // Seed a fresh deployment so it is immediately demoable. Both imports must
-  // stay dynamic and inside this function: a static top-level import of
-  // ./db/index.js would transitively evaluate ./env.js at module load, before
-  // the try/catch above, undoing the fix this file's header describes.
-  try {
-    const { getDb } = await import("./db/index.js");
-    const { seedIfEmpty } = await import("./db/seed.js");
-    const seeded = seedIfEmpty(getDb());
-    console.log(
-      seeded
-        ? "[bank] Seeded an empty database with the demo fixtures."
-        : "[bank] Database already populated — left untouched.",
-    );
-  } catch (error) {
-    console.error(
-      "[bank] Fatal: could not open or seed the database — refusing to serve requests.",
-      error,
-    );
-    process.exit(1);
-  }
+ // Seed a fresh deployment so it is immediately demoable. Both imports must
+ // stay dynamic and inside this function: a static top-level import of
+ // ./db/index.js would transitively evaluate ./env.js at module load, before
+ // the try/catch above, undoing the fix this file's header describes.
+ try {
+  const { getDb } = await import("./db/index.js");
+  const { seedIfEmpty } = await import("./db/seed.js");
+  const seeded = seedIfEmpty(getDb());
+  console.log(
+   seeded
+    ? "[bank] Seeded an empty database with the demo fixtures."
+    : "[bank] Database already populated — left untouched.",
+  );
+ } catch (error) {
+  console.error(
+   "[bank] Fatal: could not open or seed the database — refusing to serve requests.",
+   error,
+  );
+  process.exit(1);
+ }
 }
