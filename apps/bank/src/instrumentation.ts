@@ -39,6 +39,16 @@
  * with no request sent at all.
  */
 export async function register() {
+  // Next compiles this file for the edge runtime too (see next.config.ts),
+  // where the db imports below are deliberately replaced with empty stubs and
+  // no route ever runs. Bail out before touching them.
+  //
+  // The test is deliberately positive — `=== "edge"`, not `!== "nodejs"`. The
+  // negative form would silently skip env validation and seeding entirely if
+  // NEXT_RUNTIME were ever unset, which is precisely the failure mode this
+  // whole file exists to prevent. Unknown means "do the work".
+  if (process.env.NEXT_RUNTIME === "edge") return;
+
   try {
     await import("./env.js");
   } catch (error) {

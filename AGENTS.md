@@ -132,11 +132,34 @@ them without reading the linked reasoning first.
 ### Build and tooling
 
 - **Every Next app's `next.config.ts` must set**
-  `webpack(config) { config.resolve.extensionAlias = { ".js": [".ts", ".tsx", ".js"] }; return config; }`.
-  Local imports are written `./foo.js` for a `./foo.ts` file (correct Node ESM
-  form, needed so vitest and tsc agree). Turbopack resolves that natively;
-  `next build`'s webpack resolver does not, and every such import fails with
-  "Module not found" without it.
+  `config.resolve.extensionAlias = { ".js": [".ts", ".tsx", ".js"] }` in its
+  `webpack()` hook. Local imports are written `./foo.js` for a `./foo.ts` file
+  (correct Node ESM form, needed so vitest and tsc agree). Next's webpack
+  resolver does not handle that, and every such import fails with "Module not
+  found" without it.
+
+- **Turbopack does NOT resolve that mapping natively.** This file claimed it did
+  until 2026-08-20; the claim was false. `next dev --turbopack` compiles both
+  instrumentation targets cleanly and then dies at *runtime* with `Cannot find
+  module './env.js'` from instrumentation's dynamic import, hitting the
+  `process.exit(1)` path — `extensionAlias` is webpack-only and has no
+  Turbopack equivalent configured here. Measured on Next 15.5.22. Do not reach
+  for `--turbopack` as a workaround for anything.
+
+- **Next compiles `src/instrumentation.ts` for the EDGE runtime too**, always,
+  even though neither app has middleware or an edge route, so that bundle is
+  never executed. Its build failure is not harmless: in dev a stored compiler
+  error is served for **every** route, which is what made `pnpm dev` answer 500
+  everywhere while the node server had in fact booted and seeded fine. Each
+  `next.config.ts` therefore cuts the edge graph at our own db boundary:
+  `if (nextRuntime === "edge")` push a
+  `webpack.IgnorePlugin({ resourceRegExp: /^\.\/db\/(index|seed)\.js$/ })`
+  (the `webpack` instance comes from the hook's second argument — do not add a
+  bare `import webpack`, it is not a declared dependency). Stubbing the node
+  builtins underneath instead is unbounded whack-a-mole: hiding `fs` merely
+  promotes `node:crypto` (via `src/lib/password.ts` ← `src/db/seed.ts`) to the
+  next failure. `register()` pairs this with an `=== "edge"` early return so
+  nothing calls into the empty stubs.
 
 - **`better-sqlite3` must be `^13.0.3`.** The `^11.x` line fails to compile
   against current Node's V8 (`GetPrototype`, `Context::GetIsolate`,
@@ -290,16 +313,18 @@ them without reading the linked reasoning first.
 
 ### Environment notes
 
-- **`pnpm dev` is currently broken — use `pnpm build` then `pnpm --filter
-  @demo/<app> start`.** Both apps return HTTP 500 with `Module not found: Can't
-  resolve 'fs'`, trace `better-sqlite3 → src/db/index.ts → src/instrumentation.ts`.
-  Next compiles `instrumentation.ts` for the **edge** runtime as well as node,
-  and `serverExternalPackages: ["better-sqlite3"]` does not apply to the edge
-  bundle. A `process.env.NEXT_RUNTIME !== "nodejs"` early return does **not**
-  fix it — measured, the dynamic `await import("./db/index.js")` is still pulled
-  into the edge graph. This reproduces on a clean `main`; it is not caused by
-  any feature branch. `next build` and `next start` are unaffected, so ad hoc
-  browser verification should go through a production server.
+- **`pnpm dev` works again as of 2026-08-20.** It used to return HTTP 500 on
+  every route with `Module not found: Can't resolve 'fs'`, trace
+  `better-sqlite3 → src/db/index.ts → src/instrumentation.ts`. The diagnosis
+  recorded here was partly wrong: the node runtime was never broken — it booted,
+  seeded, and reached `✓ Ready`. The 500s came from the *edge* compilation of
+  the same file, whose error dev serves for every route. See the edge-runtime
+  bullet under "Build and tooling" for the fix. An early return alone genuinely
+  does not fix it (webpack still traces the dynamic import); it needs the
+  `IgnorePlugin` cut as well. Verified: both dev servers answer
+  `/api/health` 200, bank `/login` 200, bank `/` 307, merchant `/` and
+  `/checkout` 200 with real rendered markup, seeding still runs at boot, and
+  `pnpm build` plus `pnpm check` (357) stay green.
 - **Use `podman`, not `docker`** — docker is not installed here. Same Dockerfile
   syntax. Container-to-host is `host.containers.internal` (podman) vs
   `host.docker.internal` (docker).

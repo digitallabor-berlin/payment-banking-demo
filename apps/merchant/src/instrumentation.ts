@@ -10,6 +10,13 @@
  * from Plan 1 Task 13, verified against a real podman container.
  */
 export async function register() {
+  // Next compiles this file for the edge runtime too (see next.config.ts),
+  // where the db imports below are deliberately replaced with empty stubs and
+  // no route ever runs. Bail out before touching them. The test is positive —
+  // `=== "edge"`, not `!== "nodejs"` — so an unset NEXT_RUNTIME still
+  // validates env and seeds rather than silently skipping both.
+  if (process.env.NEXT_RUNTIME === "edge") return;
+
   try {
     await import("./env.js");
   } catch (error) {
