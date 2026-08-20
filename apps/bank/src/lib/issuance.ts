@@ -4,6 +4,7 @@ import type { FoundryClient } from "@demo/foundry-client";
 import type { Db } from "../db/index.js";
 import { accounts, cards, credentials } from "../db/schema.js";
 import { mintCredentialId } from "./credential-id.js";
+import { DPC_CREDENTIAL_TYPE_ID } from "./credential-types.js";
 import {
   buildCredentialResponseDisplay,
   buildOfferDisplay,
@@ -11,8 +12,7 @@ import {
 } from "./display-metadata.js";
 import { env } from "../env.js";
 
-/** The credential type id configured in foundry (spec 3). */
-export const DPC_CREDENTIAL_TYPE_ID = "com.emvco.dpc.card";
+export { DPC_CREDENTIAL_TYPE_ID } from "./credential-types.js";
 
 export type StartIssuanceResult =
   | { ok: true; sessionId: string; offerUri: string; dcApiOffer: unknown }
@@ -60,6 +60,7 @@ export async function startIssuance(
       id: rowId,
       userId,
       cardId: card.id,
+      credentialTypeId: DPC_CREDENTIAL_TYPE_ID,
       credentialId,
       foundryTxId: null,
       state: "offered",

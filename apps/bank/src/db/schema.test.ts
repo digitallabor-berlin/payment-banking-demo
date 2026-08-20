@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "./index.js";
@@ -102,5 +103,153 @@ describe("transactions.idempotency_key", () => {
       })
       .run();
     expect(db.select().from(transactions).all()).toHaveLength(21);
+  });
+});
+
+const MIGRATIONS_FOLDER = path.join(process.cwd(), "drizzle");
+
+/** The project's migration tags, in the order drizzle's journal applies them. */
+function migrationTags(): string[] {
+  const journal = JSON.parse(
+    readFileSync(path.join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf8"),
+  ) as { entries: { tag: string }[] };
+  return journal.entries.map((entry) => entry.tag);
+}
+
+/**
+ * Applies exactly the named migrations to a raw better-sqlite3 handle.
+ *
+ * Takes an explicit tag list rather than an "all" / "all but the last" flag so
+ * a test can stop, write a row, and then apply only what remains — re-running
+ * an already-applied migration fails on `table accounts already exists`.
+ *
+ * Drizzle separates statements with `--> statement-breakpoint`, which
+ * better-sqlite3's exec() does not understand, so they are split and run
+ * individually.
+ */
+function applyMigrations(sqlite: Database.Database, tags: string[]): void {
+  for (const tag of tags) {
+    const file = readFileSync(
+      path.join(MIGRATIONS_FOLDER, `${tag}.sql`),
+      "utf8",
+    );
+    for (const statement of file.split("--> statement-breakpoint")) {
+      const trimmed = statement.trim();
+      if (trimmed) sqlite.exec(trimmed);
+    }
+  }
+}
+
+describe("credentials shape", () => {
+  it("carries an existing row through the newest migration, defaulting its type", () => {
+    // The point of this test: 0001 relaxes two NOT NULLs, which SQLite can only
+    // do by rebuilding the table. A rebuild that drops rows, or that leaves
+    // credential_type_id empty, would be silent.
+    const sqlite = new Database(path.join(dir, "migrate.db"));
+    const tags = migrationTags();
+    expect(tags.length).toBeGreaterThan(1);
+    applyMigrations(sqlite, tags.slice(0, -1));
+
+    sqlite.exec(`
+      INSERT INTO users (id, username, password_hash, display_name)
+        VALUES ('u1', 'u1', 'h', 'U One');
+      INSERT INTO accounts (id, user_id, iban, currency, balance_cents)
+        VALUES ('a1', 'u1', 'DE02120300000000202051', 'EUR', 1000);
+      INSERT INTO cards (id, user_id, account_id, pan_last4, network, card_alias, created_at)
+        VALUES ('c1', 'u1', 'a1', '4242', 'girocard', 'girocard', 1);
+      INSERT INTO credentials (id, user_id, card_id, credential_id, foundry_tx_id, state, issued_at, created_at)
+        VALUES ('cr1', 'u1', 'c1', 'dpc_legacy_1', 'tx1', 'active', 2, 1);
+    `);
+
+    applyMigrations(sqlite, tags.slice(-1));
+
+    const row = sqlite
+      .prepare(`SELECT * FROM credentials WHERE id = 'cr1'`)
+      .get() as Record<string, unknown>;
+    expect(row.credential_id).toBe("dpc_legacy_1");
+    expect(row.state).toBe("active");
+    expect(row.credential_type_id).toBe("com.emvco.dpc.card");
+    sqlite.close();
+  });
+
+  it("defaults credentialTypeId to the payment credential", () => {
+    seed(db);
+    db.insert(credentials)
+      .values({
+        id: "cred_default",
+        userId: "user_anna",
+        cardId: "card_anna",
+        credentialId: "dpc_default_1",
+        state: "offered",
+        createdAt: 1,
+      })
+      .run();
+    const row = db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.id, "cred_default"))
+      .get();
+    expect(row?.credentialTypeId).toBe("com.emvco.dpc.card");
+  });
+
+  it("accepts an age credential with no card and no credential id", () => {
+    seed(db);
+    db.insert(credentials)
+      .values({
+        id: "cred_av",
+        userId: "user_anna",
+        cardId: null,
+        credentialTypeId: "av",
+        credentialId: null,
+        state: "offered",
+        createdAt: 1,
+      })
+      .run();
+    const row = db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.id, "cred_av"))
+      .get();
+    expect(row?.cardId).toBeNull();
+    expect(row?.credentialId).toBeNull();
+    expect(row?.credentialTypeId).toBe("av");
+  });
+
+  it("permits several rows with a null credential id", () => {
+    // SQLite treats NULLs as distinct under a UNIQUE index. Two age credentials
+    // must coexist even though neither has a join key.
+    seed(db);
+    for (const id of ["cred_av_1", "cred_av_2"]) {
+      db.insert(credentials)
+        .values({
+          id,
+          userId: "user_anna",
+          cardId: null,
+          credentialTypeId: "av",
+          credentialId: null,
+          state: "offered",
+          createdAt: 1,
+        })
+        .run();
+    }
+    expect(db.select().from(credentials).all()).toHaveLength(2);
+  });
+
+  it("still rejects a duplicate credential id", () => {
+    seed(db);
+    const insert = (id: string) =>
+      db
+        .insert(credentials)
+        .values({
+          id,
+          userId: "user_anna",
+          cardId: "card_anna",
+          credentialId: "dpc_dupe",
+          state: "offered",
+          createdAt: 1,
+        })
+        .run();
+    insert("cred_a");
+    expect(() => insert("cred_b")).toThrow();
   });
 });

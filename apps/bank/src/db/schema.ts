@@ -32,19 +32,37 @@ export const cards = sqliteTable("cards", {
 });
 
 /**
- * A digital credential instance derived from a card. One card may yield several
- * rows over time (re-issue after expiry); there is no `revoked` state (spec 2).
+ * A digital credential instance issued into the user's wallet. One card may
+ * yield several rows over time (re-issue after expiry); there is no `revoked`
+ * state (spec 2). Not every credential has a card behind it — the age
+ * attestation is issued to the person.
  */
 export const credentials = sqliteTable("credentials", {
   id: text("id").primaryKey(),
   userId: text("user_id")
     .notNull()
     .references(() => users.id),
-  cardId: text("card_id")
+  /** NULL for a credential with no payment instrument behind it. */
+  cardId: text("card_id").references(() => cards.id),
+  /**
+   * Which credential type foundry issued. Defaulted to the payment credential
+   * because that is the only thing this bank issued before age verification
+   * existed, which also makes the 0001 migration's backfill automatic. An
+   * insert that means something else must say so: `startAvIssuance` does.
+   */
+  credentialTypeId: text("credential_type_id", {
+    enum: ["com.emvco.dpc.card", "av"],
+  })
     .notNull()
-    .references(() => cards.id),
-  /** The opaque value carried in the DPC credential — the loop's join key. */
-  credentialId: text("credential_id").notNull().unique(),
+    .default("com.emvco.dpc.card"),
+  /**
+   * The opaque value carried in the DPC credential — the loop's join key with
+   * the merchant. NULL for an age credential, which has no payment join key and
+   * discloses no identifier at all. SQLite treats NULLs as distinct under a
+   * UNIQUE index, so the DPC uniqueness invariant is untouched, and
+   * `processPayment`'s `credential_id = ?` lookup can never match a NULL row.
+   */
+  credentialId: text("credential_id").unique(),
   foundryTxId: text("foundry_tx_id"),
   state: text("state", { enum: ["offered", "active", "failed"] }).notNull(),
   issuedAt: integer("issued_at"),
