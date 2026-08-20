@@ -9,7 +9,9 @@ The bank is the **credential issuer** and the **money mover**:
 
 1. Issues a `com.emvco.dpc.card` credential into the user's wallet
    (`POST /api/cards/{id}/credential`, polled via
-   `GET /api/credentials/{id}/status`).
+   `GET /api/credentials/{id}/status`). It also issues an age-verification
+   attestation (`POST /api/credentials/av`) — see **Age-verification
+   credential** below; that path's happy case has never run.
 2. Debits the account when the merchant presents a verified `credential_id`
    (`POST /api/payments`).
 
@@ -40,8 +42,32 @@ table and never persists one — it only forwards a `credential_id` string.
 
 `users`, `accounts`, `cards`, `credentials`, `transactions`.
 
+- `credentials.credentialTypeId` is the type discriminator:
+  `com.emvco.dpc.card | av`, **defaulting to the DPC**. The default is what made
+  migration `0001`'s backfill automatic and kept the eight pre-existing
+  `insert(credentials)` sites compiling. The cost is real: an insert that
+  *forgets* the field silently becomes a payment credential, so `startAvIssuance`
+  names `av` explicitly and a test asserts it. Constants live in
+  `src/lib/credential-types.ts`, bound to the schema enum with `satisfies`, in
+  their own module so `payments.ts` can name the DPC type without importing the
+  issuance path (which would drag in the foundry client, `env`, and the display
+  builders).
+- `credentials.cardId` and `credentials.credentialId` are both **nullable**. An
+  age credential has neither: it attests a property of the person, and it
+  discloses no join key at all. SQLite treats NULLs as distinct under a UNIQUE
+  index, so the DPC uniqueness invariant survives.
 - `credentials.credentialId` is **UNIQUE** — the loop's join key. States:
   `offered | active | failed`.
+- **Three independent reasons an age credential cannot move money.**
+  `processPayment` rejects a non-DPC `credentialTypeId`, rejects a null `cardId`
+  (compiler-forced by the nullable column), and its lookup is
+  `where credential_id = <string>`, which SQL never matches against NULL.
+- **`drizzle-kit generate` emitted a broken `0001`.** The table rebuild's
+  `INSERT … SELECT` listed `credential_type_id` on *both* sides, selecting a
+  column the old table does not have (`no such column: "credential_type_id"`),
+  which made the migration unrunnable and failed every test in
+  `schema.test.ts`. The committed SQL is hand-edited to omit it so the column
+  DEFAULT backfills. **Read generated migration SQL; do not assume it runs.**
 - `transactions.idempotencyKey` is nullable with a **UNIQUE index**. Nullable so
   seeded history rows can leave it empty (SQLite permits many NULLs under a
   unique index); unique so a replayed settle call cannot double-debit.
@@ -186,10 +212,83 @@ the same `idempotency_key` returns the identical `bank_tx_id`.
   strings are `"This browser does not support the Digital Credentials API."`
   and `"The wallet handover was cancelled."`.
 
+## Age-verification credential
+
+A second credential type, issued to the *person* rather than to a card.
+
+- `src/lib/av-issuance.ts` — `startAvIssuance`, a deliberate **sibling** of
+  `startIssuance`, not a branch inside it. The DPC path joins `accounts` for an
+  IBAN, derives `card.last_four`, builds two display arrays and can fail
+  `card_not_found`; none of that exists here.
+- The request is exactly `{"credential_type_id": "av", "claims":
+  {"age_over_16": true, "age_over_18": true}}`. Booleans. No birthdate, no name,
+  no `credential_id` — an age attestation carrying a birthdate defeats its own
+  purpose.
+- **`credential_type_id` is `av`, never `eu.europa.ec.av.1`.** That second
+  string is the mdoc docType configured on foundry's side.
+- **Never send `offer_display` or `credential_response_display` for a non-DPC
+  type.** `foundry-issuer/src/create_offer.rs` gates both on
+  `ct.vct == "com.emvco.dpc.card"` and rejects them outright, so sending them
+  would turn every AV issuance into a `failed` row. Consequence: the wallet's
+  rendering of this credential comes entirely from foundry's static `display:`
+  config, and `public/av-face.svg` is the bank's *own* UI artwork that the
+  wallet never sees.
+- `POST /api/credentials/av` uses `withSession` (no dynamic segment, so the
+  wrapper's missing `context` forwarding does not bite). The status poll,
+  `GET /api/credentials/[id]/status`, and `refreshIssuanceState` are reused
+  **verbatim** — they read only `foundryTxId` and `state`, so they were already
+  type-agnostic.
+- `getAgeCredentialState` (`src/lib/queries.ts`) mirrors `listCards`'
+  newest-non-failed-wins rule, scoped to the user. `listCards` needed no change:
+  its inner lookup is `eq(credentials.cardId, card.id)`, a NULL comparison for
+  every AV row.
+- **The happy path has never run.** No foundry config declares an `av`
+  credential type — the local `../foundry/config.yaml` has only `pid` and
+  `com.emvco.dpc.card`, though its *named queries* already reference `av`.
+  Adding it is the operator's task. Verified 2026-08-20 against a freshly
+  restarted local foundry: a real `POST` answers **HTTP 400**
+  `{"error":"unknown credential_type_id 'av'"}`, `startAvIssuance` returns
+  `foundry_unavailable`, and the row lands `failed` with a null card and a null
+  join key. That rejection is the whole of what has been exercised.
+- **The AV issuance dialog's copy is unverified in a browser, and cannot be
+  reached here.** `IssuanceDialog` only mounts once a `session` exists, i.e.
+  after a 2xx offer. Its `failureBody` covers a *polling* failure after a
+  successful offer — not an offer rejection. On a 502 the tile shows its own
+  inline `Angebot konnte nicht erstellt werden.` and no dialog appears. The
+  plan for this work expected the dialog's failure panel here; that expectation
+  was unreachable by construction.
+
+### Copy (`src/lib/credential-copy.ts`)
+
+`FACE_COPY[type][faceState]` and `DIALOG_COPY[type]`, both keyed by credential
+type id, both in `.ts` because every vitest project is `environment: "node"`
+with `include: ["src/**/*.test.ts"]` — a string decided in a `.tsx` file is
+never covered.
+
+`IssuanceDialog` takes a `copy: IssuanceCopy` prop rather than a noun to
+substitute: German gender differs (`die Karte` against `der Altersnachweis`), so
+the article and possessive change with the noun, not just the noun.
+`card-state.ts` still exports `STATE_COPY`, now as an alias of
+`FACE_COPY[DPC_CREDENTIAL_TYPE_ID]`, so `CardTile` and its tests are untouched.
+
+The `offered` explanation is **deliberately identical** for both types
+(`Bestätigen Sie das Angebot in Ihrer Wallet-App.`) — the instruction genuinely
+does not depend on what is being offered. A test pins it, because the plan's
+original assertion that all three states differ was unsatisfiable against the
+plan's own copy table.
+
+The AV face is `.card-object-av`, overriding only `background-image` and
+`background-color`. The fallback is `#ff0000`, the artwork's own red, *not*
+Sparkasse `--color-primary` (`#EA0016`). Nothing is drawn over it and it gets no
+`EuStars`: `.card-stars` is positioned top-right, exactly where the artwork
+prints its wordmark.
+
 ## Testing
 
-`pnpm test` → **87 tests**. `pnpm typecheck` must also be clean. (This line read
-`77` while the real count was higher; measure rather than trusting it.)
+`pnpm test` → **148 tests**. `pnpm typecheck` must also be clean. (This line
+read `87` before the age-credential work, which added 61 — 5 schema, 2 payment
+guards, 7 queries, 7 av-issuance, 7 copy, and 33 that had accumulated
+uncounted before it. Measure rather than trusting it; it has been wrong twice.)
 
 `vitest.config.ts` carries an explicit `test.env` block; `env.ts` validates at
 import time, so tests fail without it. `apiKey.test.ts` uses

@@ -53,8 +53,17 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**329 tests** (120 bank + 167 merchant + 11 foundry-client + 31 ui), measured
-2026-08-19.
+**357 tests** (148 bank + 167 merchant + 11 foundry-client + 31 ui), measured
+2026-08-20.
+
+That was **329** before the age-verification-credential work, which added 28,
+all in `apps/bank`: 5 in `src/db/schema.test.ts`, 2 in `payments.test.ts`, 7 in
+`queries.test.ts`, 7 in the new `av-issuance.test.ts`, and 7 in the new
+`credential-copy.test.ts`. Its plan projected 356 and was off by one — its
+Task 6 specified a test asserting the two credentials' `explain` string differs
+in all three face states, which was unsatisfiable against the plan's own copy
+table (both types share the `offered` string deliberately), so that one test
+became two. Measure.
 
 That was **305** before the DPC display-metadata work, which added 24: 19 in
 `apps/bank/src/lib/display-metadata.test.ts`, 2 seed-invariant tests, 2 issuance
@@ -84,6 +93,41 @@ yours, measure — do not trust a number written in a plan.
 
 Every item below was discovered by something breaking. Do not "clean up" any of
 them without reading the linked reasoning first.
+
+### Credentials and credential types
+
+- **Display metadata is DPC-only.** `foundry-issuer/src/create_offer.rs` gates
+  both `offer_display` and `credential_response_display` on
+  `ct.vct == "com.emvco.dpc.card"` and *rejects* them for every other credential
+  type. A non-DPC credential's wallet appearance can therefore come only from
+  foundry's static `display:` config — the issuer cannot influence it. Sending
+  the bank's card display metadata on an `av` offer would turn every issuance
+  into a `failed` row.
+
+- **A `credentials` row needs neither a card nor a `credential_id`.**
+  `credentialTypeId` (`com.emvco.dpc.card | av`) is the discriminator and
+  defaults to the DPC type, so an insert that forgets it silently becomes a
+  payment credential. `processPayment` refuses anything that is not a DPC row
+  with a card — three independent ways, one of which is that SQL never matches
+  `credential_id = <string>` against NULL.
+
+- **`credential_type_id` for age verification is `av`.** Not
+  `eu.europa.ec.av.1` — that is the mdoc docType configured on foundry's side,
+  not the id the admin API takes.
+
+- **No foundry config declares an `av` credential type**, so the bank's
+  age-credential happy path has never run. Verified 2026-08-20 against a
+  freshly restarted local foundry: HTTP **400**,
+  `{"error":"unknown credential_type_id 'av'"}`. Adding the type is the
+  operator's task. Note the local config's *named queries* already reference
+  `av`, which makes the omission easy to misread as present.
+
+- **Read `drizzle-kit generate`'s output before committing it.** For the `0001`
+  migration it emitted a table rebuild whose `INSERT … SELECT` listed the
+  newly-added `credential_type_id` on both sides, selecting a column the old
+  table does not have. That is unrunnable (`no such column`) and broke every
+  test in `schema.test.ts`, not just the new ones. The committed SQL is
+  hand-edited to omit it so the column DEFAULT backfills.
 
 ### Build and tooling
 

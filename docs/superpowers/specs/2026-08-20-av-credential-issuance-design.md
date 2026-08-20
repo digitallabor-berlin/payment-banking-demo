@@ -258,7 +258,14 @@ disabled once the state is `active`, matching `CardTile`.
 ## 9. Testing
 
 TDD throughout. Baseline measured 2026-08-20: **329** (120 bank + 167 merchant +
-11 foundry-client + 31 ui). The plan's per-task arithmetic adds **27**, all in
+11 foundry-client + 31 ui). **Executed result: 357** (148 bank + 167 + 11 + 31),
+28 added rather than the projected 27 — the plan's Task 6 specified a test
+asserting the two credentials' `explain` string differs in all three face
+states, which contradicted this document's own §6.1 copy table (both types share
+the `offered` string), so it became two tests. The projection was off by one for
+the usual reason. The original note follows, and it was right:
+
+> The plan's per-task arithmetic adds **27**, all in
 `apps/bank`, projecting 356. Measure the real number; do not restate the
 projection — two earlier plans in this repo got theirs wrong.
 
