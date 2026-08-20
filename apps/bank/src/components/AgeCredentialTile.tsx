@@ -5,6 +5,7 @@ import { cardFaceState } from "@/lib/card-state.js";
 import { BADGE_CLASS, dialogCopy, faceCopy } from "@/lib/credential-copy.js";
 import { AV_CREDENTIAL_TYPE_ID } from "@/lib/credential-types.js";
 import type { Locale } from "@/lib/i18n/locale.js";
+import { MESSAGES } from "@/lib/i18n/messages.js";
 import type { CardCredentialState } from "@/lib/queries.js";
 import { AddToWalletButton } from "./AddToWalletButton.js";
 import { IssuanceDialog } from "./IssuanceDialog.js";
@@ -36,6 +37,7 @@ export function AgeCredentialTile({
   credentialState: CardCredentialState;
   locale: Locale;
 }) {
+  const t = MESSAGES[locale];
   const [session, setSession] = useState<IssuanceSession | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +52,7 @@ export function AgeCredentialTile({
     try {
       const response = await fetch("/api/credentials/av", { method: "POST" });
       if (!response.ok) {
-        setError("Angebot konnte nicht erstellt werden.");
+        setError(t.errors.offerNotCreated);
         return;
       }
       const body = (await response.json()) as IssuanceSession;
@@ -60,7 +62,7 @@ export function AgeCredentialTile({
         dcApiOffer: body.dcApiOffer,
       });
     } catch {
-      setError("Verbindung zum Server fehlgeschlagen.");
+      setError(t.errors.connectionFailed);
     } finally {
       setPending(false);
     }
@@ -81,7 +83,7 @@ export function AgeCredentialTile({
           {/* The face says this too, but .card-object is a CSS background with
               no alt text, so this heading is the credential's only accessible
               name. */}
-          <h3 className="panel-title">Altersnachweis</h3>
+          <h3 className="panel-title">{t.credential.ageTitle}</h3>
           <span className={`badge ${BADGE_CLASS[faceState]} px-2.5 py-1`}>
             {copy.badge}
           </span>
@@ -96,6 +98,7 @@ export function AgeCredentialTile({
             onStart={start}
             pending={pending}
             error={error}
+            locale={locale}
             disabled={credentialState === "active"}
           />
         </div>
@@ -107,6 +110,7 @@ export function AgeCredentialTile({
           offerUri={session.offerUri}
           dcApiOffer={session.dcApiOffer}
           copy={dialogCopy(locale, AV_CREDENTIAL_TYPE_ID)}
+          locale={locale}
           onClose={() => setSession(null)}
         />
       ) : null}

@@ -7,6 +7,7 @@ import { BADGE_CLASS, dialogCopy } from "@/lib/credential-copy.js";
 import { DPC_CREDENTIAL_TYPE_ID } from "@/lib/credential-types.js";
 import { formatIban } from "@/lib/format.js";
 import type { Locale } from "@/lib/i18n/locale.js";
+import { MESSAGES } from "@/lib/i18n/messages.js";
 import { AddToWalletButton } from "./AddToWalletButton.js";
 import { EuStars } from "./EuStars.js";
 import { IssuanceDialog } from "./IssuanceDialog.js";
@@ -44,6 +45,7 @@ export function CardTile({
   iban?: string;
   locale: Locale;
 }) {
+  const t = MESSAGES[locale];
   const [session, setSession] = useState<IssuanceSession | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +65,7 @@ export function CardTile({
         method: "POST",
       });
       if (!response.ok) {
-        setError("Angebot konnte nicht erstellt werden.");
+        setError(t.errors.offerNotCreated);
         return;
       }
       const body = (await response.json()) as IssuanceSession;
@@ -73,7 +75,7 @@ export function CardTile({
         dcApiOffer: body.dcApiOffer,
       });
     } catch {
-      setError("Verbindung zum Server fehlgeschlagen.");
+      setError(t.errors.connectionFailed);
     } finally {
       setPending(false);
     }
@@ -119,6 +121,7 @@ export function CardTile({
             onStart={start}
             pending={pending}
             error={error}
+            locale={locale}
             disabled={card.credentialState === "active"}
           />
         </div>
@@ -130,6 +133,7 @@ export function CardTile({
           offerUri={session.offerUri}
           dcApiOffer={session.dcApiOffer}
           copy={dialogCopy(locale, DPC_CREDENTIAL_TYPE_ID)}
+          locale={locale}
           onClose={() => setSession(null)}
         />
       ) : null}

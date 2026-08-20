@@ -1,5 +1,6 @@
 import type { TransactionDto } from "@/lib/queries.js";
 import type { Locale } from "@/lib/i18n/locale.js";
+import { MESSAGES } from "@/lib/i18n/messages.js";
 import { groupByBookingDay } from "@/lib/ledger.js";
 import { TransactionRow } from "./TransactionRow.js";
 
@@ -14,15 +15,19 @@ import { TransactionRow } from "./TransactionRow.js";
 export function TransactionLedger({
   transactions,
   locale,
-  emptyLabel = "Keine Umsätze vorhanden.",
+  emptyLabel,
 }: {
   transactions: TransactionDto[];
   locale: Locale;
   emptyLabel?: string;
 }) {
   if (transactions.length === 0) {
+    // The fallback lives in the body rather than as a default parameter value:
+    // a default cannot reference another parameter's catalog entry.
     return (
-      <p className="py-6 text-sm text-[var(--color-muted-foreground)]">{emptyLabel}</p>
+      <p className="py-6 text-sm text-[var(--color-muted-foreground)]">
+        {emptyLabel ?? MESSAGES[locale].transactions.empty}
+      </p>
     );
   }
 

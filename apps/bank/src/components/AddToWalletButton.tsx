@@ -1,5 +1,8 @@
 "use client";
 
+import type { Locale } from "@/lib/i18n/locale.js";
+import { MESSAGES } from "@/lib/i18n/messages.js";
+
 /**
  * Presentational only. The issuance session it starts belongs to CardTile,
  * because the card face has to reflect an offer in flight and two owners of
@@ -9,11 +12,13 @@ export function AddToWalletButton({
   onStart,
   pending,
   error,
+  locale,
   disabled = false,
 }: {
   onStart: () => void;
   pending: boolean;
   error: string | null;
+  locale: Locale;
   disabled?: boolean;
 }) {
   return (
@@ -24,7 +29,9 @@ export function AddToWalletButton({
         disabled={disabled || pending}
         className="btn btn-primary px-4 py-2.5"
       >
-        {pending ? "Wird vorbereitet…" : "Zum EUDI Wallet hinzufügen"}
+        {pending
+          ? MESSAGES[locale].issuance.preparing
+          : MESSAGES[locale].issuance.addToWallet}
       </button>
       {error ? (
         <span
