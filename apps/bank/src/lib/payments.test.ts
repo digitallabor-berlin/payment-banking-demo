@@ -105,4 +105,65 @@ describe("processPayment", () => {
     processPayment(db, baseInput({ idempotencyKey: "sess_2" }));
     expect(db.select().from(transactions).all()).toHaveLength(22);
   });
+
+  it("refuses to settle against an age credential", () => {
+    // Deliberately given a non-null credential_id: nothing in the schema
+    // forbids one, so this isolates the credential-type guard rather than
+    // passing by accident on a NULL that could never have matched.
+    db.insert(credentials)
+      .values({
+        id: "cred_av_active",
+        userId: "user_anna",
+        cardId: null,
+        credentialTypeId: "av",
+        credentialId: "av_pretending_to_be_a_card",
+        state: "active",
+        issuedAt: 1,
+        createdAt: 1,
+      })
+      .run();
+
+    const result = processPayment(db, {
+      credentialId: "av_pretending_to_be_a_card",
+      amountCents: 100,
+      currency: "EUR",
+      merchant: "Larder",
+      reference: "order_1",
+      idempotencyKey: "idem_av_1",
+    });
+
+    expect(result).toEqual({ ok: false, reason: "unknown_credential" });
+    expect(
+      db
+        .select()
+        .from(transactions)
+        .where(eq(transactions.idempotencyKey, "idem_av_1"))
+        .get(),
+    ).toBeUndefined();
+  });
+
+  it("refuses to settle a payment credential that has no card", () => {
+    db.insert(credentials)
+      .values({
+        id: "cred_orphan",
+        userId: "user_anna",
+        cardId: null,
+        credentialId: "dpc_orphan_1",
+        state: "active",
+        issuedAt: 1,
+        createdAt: 1,
+      })
+      .run();
+
+    const result = processPayment(db, {
+      credentialId: "dpc_orphan_1",
+      amountCents: 100,
+      currency: "EUR",
+      merchant: "Larder",
+      reference: "order_2",
+      idempotencyKey: "idem_orphan_1",
+    });
+
+    expect(result).toEqual({ ok: false, reason: "unknown_credential" });
+  });
 });

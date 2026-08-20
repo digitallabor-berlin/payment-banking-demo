@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import { accounts, cards, credentials, transactions } from "../db/schema.js";
+import { DPC_CREDENTIAL_TYPE_ID } from "./credential-types.js";
 
 export interface ProcessPaymentInput {
   credentialId: string;
@@ -43,7 +44,21 @@ export function processPayment(
     .where(eq(credentials.credentialId, input.credentialId))
     .get();
   if (!credential) return { ok: false, reason: "unknown_credential" };
+
+  // An age attestation is not a payment instrument. Reported as
+  // unknown_credential rather than as a distinct reason: this is a
+  // server-to-server call behind a shared secret, and the merchant maps every
+  // credential problem to one user-facing message anyway.
+  if (credential.credentialTypeId !== DPC_CREDENTIAL_TYPE_ID) {
+    return { ok: false, reason: "unknown_credential" };
+  }
+
   if (credential.state !== "active") return { ok: false, reason: "credential_not_active" };
+
+  // cardId is nullable since the age credential landed. The narrowing is what
+  // the next line needs, and closing the same hole twice is deliberate: this
+  // one is enforced by the compiler, the one above by the type id.
+  if (!credential.cardId) return { ok: false, reason: "unknown_credential" };
 
   const card = db.select().from(cards).where(eq(cards.id, credential.cardId)).get();
   if (!card) return { ok: false, reason: "unknown_credential" };
