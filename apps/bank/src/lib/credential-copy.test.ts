@@ -13,7 +13,10 @@ import {
 
 describe("FACE_COPY", () => {
   it("covers every face state for both credential types", () => {
-    for (const type of [DPC_CREDENTIAL_TYPE_ID, AV_CREDENTIAL_TYPE_ID] as const) {
+    for (const type of [
+      DPC_CREDENTIAL_TYPE_ID,
+      AV_CREDENTIAL_TYPE_ID,
+    ] as const) {
       for (const state of ["none", "offered", "active"] as const) {
         const copy = faceCopy("de", type, state);
         expect(copy.badge.length).toBeGreaterThan(0);
@@ -51,23 +54,33 @@ describe("FACE_COPY", () => {
     // wallet app regardless of what is being offered. Pinned rather than
     // dropped so a future edit to one type's string has to justify itself here.
     const shared = "Bestätigen Sie das Angebot in Ihrer Wallet-App.";
-    expect(faceCopy("de", DPC_CREDENTIAL_TYPE_ID, "offered").explain).toBe(shared);
-    expect(faceCopy("de", AV_CREDENTIAL_TYPE_ID, "offered").explain).toBe(shared);
+    expect(faceCopy("de", DPC_CREDENTIAL_TYPE_ID, "offered").explain).toBe(
+      shared,
+    );
+    expect(faceCopy("de", AV_CREDENTIAL_TYPE_ID, "offered").explain).toBe(
+      shared,
+    );
   });
 
   // The same property in English. Checked independently rather than by
   // comparing the two locales, so neither language's sharing can drift.
   it("shares the offered instruction in English too", () => {
     const shared = "Confirm the offer in your wallet app.";
-    expect(faceCopy("en", DPC_CREDENTIAL_TYPE_ID, "offered").explain).toBe(shared);
-    expect(faceCopy("en", AV_CREDENTIAL_TYPE_ID, "offered").explain).toBe(shared);
+    expect(faceCopy("en", DPC_CREDENTIAL_TYPE_ID, "offered").explain).toBe(
+      shared,
+    );
+    expect(faceCopy("en", AV_CREDENTIAL_TYPE_ID, "offered").explain).toBe(
+      shared,
+    );
   });
 
   it("keeps the card's own copy verbatim", () => {
     expect(faceCopy("de", DPC_CREDENTIAL_TYPE_ID, "none").explain).toBe(
       "Fügen Sie diese Karte Ihrem EUDI Wallet hinzu, um online zu bezahlen.",
     );
-    expect(faceCopy("de", DPC_CREDENTIAL_TYPE_ID, "active").badge).toBe("Im Wallet");
+    expect(faceCopy("de", DPC_CREDENTIAL_TYPE_ID, "active").badge).toBe(
+      "Im Wallet",
+    );
   });
 });
 
@@ -129,7 +142,10 @@ describe("English credential copy", () => {
   // The same half-finished-translation guard messages.test.ts applies to the
   // catalog. credential-copy is not part of that catalog, so it needs its own.
   it("translates every face string away from the German", () => {
-    for (const typeId of [DPC_CREDENTIAL_TYPE_ID, AV_CREDENTIAL_TYPE_ID] as const) {
+    for (const typeId of [
+      DPC_CREDENTIAL_TYPE_ID,
+      AV_CREDENTIAL_TYPE_ID,
+    ] as const) {
       for (const state of ["none", "offered", "active"] as const) {
         const en = faceCopy("en", typeId, state);
         const de = faceCopy("de", typeId, state);
@@ -142,10 +158,18 @@ describe("English credential copy", () => {
   });
 
   it("translates every dialog string away from the German", () => {
-    for (const typeId of [DPC_CREDENTIAL_TYPE_ID, AV_CREDENTIAL_TYPE_ID] as const) {
+    for (const typeId of [
+      DPC_CREDENTIAL_TYPE_ID,
+      AV_CREDENTIAL_TYPE_ID,
+    ] as const) {
       const en = dialogCopy("en", typeId);
       const de = dialogCopy("de", typeId);
-      for (const key of ["title", "successTitle", "successBody", "failureBody"] as const) {
+      for (const key of [
+        "title",
+        "successTitle",
+        "successBody",
+        "failureBody",
+      ] as const) {
         expect(en[key]).not.toBe(de[key]);
         expect(en[key]).not.toMatch(/[äöüßÄÖÜ]/);
       }

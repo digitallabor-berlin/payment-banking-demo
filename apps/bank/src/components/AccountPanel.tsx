@@ -21,7 +21,9 @@ export function AccountPanel({
             {formatIban(account.iban)}
           </p>
         </div>
-        <span className="badge badge-neutral shrink-0 px-2 py-1">{account.currency}</span>
+        <span className="badge badge-neutral shrink-0 px-2 py-1">
+          {account.currency}
+        </span>
       </div>
 
       {/*

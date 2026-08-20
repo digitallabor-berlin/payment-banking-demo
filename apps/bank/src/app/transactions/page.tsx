@@ -58,14 +58,20 @@ export default async function TransactionsPage({
           aria-label={t.transactions.pagination}
         >
           {page > 1 ? (
-            <Link href={`/transactions?page=${page - 1}`} className="btn btn-outline px-4 py-2">
+            <Link
+              href={`/transactions?page=${page - 1}`}
+              className="btn btn-outline px-4 py-2"
+            >
               {t.transactions.newer}
             </Link>
           ) : (
             <span />
           )}
           {hasNext ? (
-            <Link href={`/transactions?page=${page + 1}`} className="btn btn-outline px-4 py-2">
+            <Link
+              href={`/transactions?page=${page + 1}`}
+              className="btn btn-outline px-4 py-2"
+            >
               {t.transactions.older}
             </Link>
           ) : (

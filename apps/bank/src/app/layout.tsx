@@ -15,17 +15,17 @@ import "./globals.css";
  * runtime request to Google, and no layout shift.
  */
 const sans = Fira_Sans({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
-  variable: "--font-fira-sans",
-  display: "swap",
+ subsets: ["latin"],
+ weight: ["300", "400", "500", "600", "700"],
+ variable: "--font-fira-sans",
+ display: "swap",
 });
 
 const mono = Fira_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "700"],
-  variable: "--font-fira-mono",
-  display: "swap",
+ subsets: ["latin"],
+ weight: ["400", "500", "700"],
+ variable: "--font-fira-mono",
+ display: "swap",
 });
 
 /**
@@ -34,22 +34,22 @@ const mono = Fira_Mono({
  * which is why every page in this app is already force-dynamic.
  */
 export async function generateMetadata(): Promise<Metadata> {
-  const locale = await getLocale();
-  return {
-    title: "Sparkasse Musterstadt",
-    description: MESSAGES[locale].meta.description,
-  };
+ const locale = await getLocale();
+ return {
+  title: "Sparkasse Musterstadt",
+  description: MESSAGES[locale].meta.description,
+ };
 }
 
 export default async function RootLayout({
-  children,
+ children,
 }: {
-  children: React.ReactNode;
+ children: React.ReactNode;
 }) {
-  const locale = await getLocale();
-  return (
-    <html lang={locale} className={`${sans.variable} ${mono.variable}`}>
-      <body className="min-h-dvh antialiased">{children}</body>
-    </html>
-  );
+ const locale = await getLocale();
+ return (
+  <html lang={locale} className={`${sans.variable} ${mono.variable}`}>
+   <body className="min-h-dvh antialiased">{children}</body>
+  </html>
+ );
 }

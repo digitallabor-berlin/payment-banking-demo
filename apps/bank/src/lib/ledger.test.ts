@@ -59,7 +59,11 @@ describe("groupByBookingDay", () => {
       "de",
     );
 
-    expect(groups.map((g) => g.key)).toEqual(["2025-08-01", "2025-07-31", "2025-08-01"]);
+    expect(groups.map((g) => g.key)).toEqual([
+      "2025-08-01",
+      "2025-07-31",
+      "2025-08-01",
+    ]);
   });
 
   it("labels a group with its weekday and date", () => {

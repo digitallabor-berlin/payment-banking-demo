@@ -91,7 +91,9 @@ export function IssuanceDialog({
   // needs fetching here.
   async function addViaDcApi() {
     try {
-      await invokeDcCreate(prepareDcApiRequest(dcApiOffer, DC_API_ISSUANCE_PROTOCOL));
+      await invokeDcCreate(
+        prepareDcApiRequest(dcApiOffer, DC_API_ISSUANCE_PROTOCOL),
+      );
     } catch (err) {
       // Now catalogued like any other copy. These used to be hardcoded English
       // on the grounds that a browser-capability failure is a technical signal
@@ -163,16 +165,25 @@ export function IssuanceDialog({
             )}
 
             {dcMessage ? (
-              <p role="alert" className="mt-3 text-xs font-medium text-[var(--color-destructive)]">
+              <p
+                role="alert"
+                className="mt-3 text-xs font-medium text-[var(--color-destructive)]"
+              >
                 {dcMessage}
               </p>
             ) : null}
 
             <p className="eyebrow mt-4">
-              {value === "offered" || value === null ? t.issuance.waiting : value}
+              {value === "offered" || value === null
+                ? t.issuance.waiting
+                : value}
             </p>
 
-            <button type="button" onClick={onClose} className="btn btn-quiet mt-5 px-3 py-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn btn-quiet mt-5 px-3 py-2"
+            >
               {t.issuance.cancel}
             </button>
           </>
@@ -197,7 +208,11 @@ export function IssuanceDialog({
             <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
               {errorMessage}
             </p>
-            <button type="button" onClick={onClose} className="btn btn-primary mt-6 px-5 py-2.5">
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn btn-primary mt-6 px-5 py-2.5"
+            >
               {t.issuance.close}
             </button>
           </>

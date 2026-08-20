@@ -15,7 +15,9 @@ export function TransactionRow({
   return (
     <li className="ledger-row py-3">
       <div className="min-w-0">
-        <p className="ledger-counterparty truncate">{transaction.counterparty}</p>
+        <p className="ledger-counterparty truncate">
+          {transaction.counterparty}
+        </p>
         <p className="ledger-meta mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="truncate">{transaction.reference}</span>
           {transaction.paidWithWallet ? (
@@ -30,7 +32,10 @@ export function TransactionRow({
         </p>
       </div>
 
-      <span className="ledger-amount" data-direction={isDebit ? "debit" : "credit"}>
+      <span
+        className="ledger-amount"
+        data-direction={isDebit ? "debit" : "credit"}
+      >
         {formatEuroCents(transaction.amountCents, locale)}
       </span>
     </li>

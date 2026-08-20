@@ -70,7 +70,8 @@ export const FACE_COPY: Record<
       },
       active: {
         badge: "In wallet",
-        explain: "Your age verification is in your EUDI Wallet and ready to use.",
+        explain:
+          "Your age verification is in your EUDI Wallet and ready to use.",
       },
     },
   },
@@ -87,7 +88,8 @@ export const FACE_COPY: Record<
       },
       active: {
         badge: "Im Wallet",
-        explain: "Diese Karte ist in Ihrem EUDI Wallet und für Zahlungen bereit.",
+        explain:
+          "Diese Karte ist in Ihrem EUDI Wallet und für Zahlungen bereit.",
       },
     },
     [AV_CREDENTIAL_TYPE_ID]: {
@@ -102,7 +104,8 @@ export const FACE_COPY: Record<
       },
       active: {
         badge: "Im Wallet",
-        explain: "Ihr Altersnachweis ist in Ihrem EUDI Wallet und einsatzbereit.",
+        explain:
+          "Ihr Altersnachweis ist in Ihrem EUDI Wallet und einsatzbereit.",
       },
     },
   },

@@ -62,7 +62,8 @@ export const en: Messages = {
     connectionFailed: "Connection to the server failed.",
     expired: "The request has expired. Please try again.",
     connectionLost: "Lost connection to the server.",
-    dcApiUnsupported: "This browser does not support the Digital Credentials API.",
+    dcApiUnsupported:
+      "This browser does not support the Digital Credentials API.",
     dcApiCancelled: "The wallet handover was cancelled.",
   },
 };

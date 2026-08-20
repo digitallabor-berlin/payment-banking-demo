@@ -13,5 +13,5 @@ import { LOCALE_COOKIE, resolveLocale, type Locale } from "./locale.js";
  * `export const dynamic = "force-dynamic"` and already `await getSession()`.
  */
 export async function getLocale(): Promise<Locale> {
-  return resolveLocale((await cookies()).get(LOCALE_COOKIE)?.value);
+ return resolveLocale((await cookies()).get(LOCALE_COOKIE)?.value);
 }

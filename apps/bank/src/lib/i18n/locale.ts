@@ -32,8 +32,8 @@ export const LOCALE_COOKIE = "bank_locale";
  * answer. Two locales do not justify a BCP-47 parser.
  */
 export function resolveLocale(raw: string | undefined): Locale {
-  const normalised = (raw ?? "").trim().toLowerCase();
-  return LOCALES.includes(normalised as Locale)
-    ? (normalised as Locale)
-    : DEFAULT_LOCALE;
+ const normalised = (raw ?? "").trim().toLowerCase();
+ return LOCALES.includes(normalised as Locale)
+  ? (normalised as Locale)
+  : DEFAULT_LOCALE;
 }

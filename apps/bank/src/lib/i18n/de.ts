@@ -62,7 +62,8 @@ export const de: Messages = {
     connectionFailed: "Verbindung zum Server fehlgeschlagen.",
     expired: "Die Anfrage ist abgelaufen. Bitte erneut versuchen.",
     connectionLost: "Verbindung zum Server verloren.",
-    dcApiUnsupported: "Dieser Browser unterstützt die Digital Credentials API nicht.",
+    dcApiUnsupported:
+      "Dieser Browser unterstützt die Digital Credentials API nicht.",
     dcApiCancelled: "Die Übergabe an die Wallet wurde abgebrochen.",
   },
 };

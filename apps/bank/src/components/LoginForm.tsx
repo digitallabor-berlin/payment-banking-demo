@@ -70,12 +70,19 @@ export function LoginForm({ locale }: { locale: Locale }) {
       </div>
 
       {error ? (
-        <p role="alert" className="text-sm font-medium text-[var(--color-destructive)]">
+        <p
+          role="alert"
+          className="text-sm font-medium text-[var(--color-destructive)]"
+        >
           {error}
         </p>
       ) : null}
 
-      <button type="submit" disabled={pending} className="btn btn-primary w-full py-3">
+      <button
+        type="submit"
+        disabled={pending}
+        className="btn btn-primary w-full py-3"
+      >
         {pending ? t.login.submitPending : t.login.submit}
       </button>
 

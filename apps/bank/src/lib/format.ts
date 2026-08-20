@@ -17,28 +17,28 @@ const TAG: Record<Locale, string> = { en: "en-IE", de: "de-DE" };
 // One Intl instance per locale, built once at module scope rather than per
 // call — the same reason the originals were module constants.
 const euro: Record<Locale, Intl.NumberFormat> = {
-  en: new Intl.NumberFormat(TAG.en, {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }),
-  de: new Intl.NumberFormat(TAG.de, {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }),
+ en: new Intl.NumberFormat(TAG.en, {
+  style: "currency",
+  currency: "EUR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+ }),
+ de: new Intl.NumberFormat(TAG.de, {
+  style: "currency",
+  currency: "EUR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+ }),
 };
 
 const weekday: Record<Locale, Intl.DateTimeFormat> = {
-  en: new Intl.DateTimeFormat(TAG.en, { weekday: "short", timeZone: "UTC" }),
-  de: new Intl.DateTimeFormat(TAG.de, { weekday: "short", timeZone: "UTC" }),
+ en: new Intl.DateTimeFormat(TAG.en, { weekday: "short", timeZone: "UTC" }),
+ de: new Intl.DateTimeFormat(TAG.de, { weekday: "short", timeZone: "UTC" }),
 };
 
 const majorUnits: Record<Locale, Intl.NumberFormat> = {
-  en: new Intl.NumberFormat(TAG.en, { maximumFractionDigits: 0 }),
-  de: new Intl.NumberFormat(TAG.de, { maximumFractionDigits: 0 }),
+ en: new Intl.NumberFormat(TAG.en, { maximumFractionDigits: 0 }),
+ de: new Intl.NumberFormat(TAG.de, { maximumFractionDigits: 0 }),
 };
 
 /** The separator between the parts of a numeric date. */
@@ -46,7 +46,7 @@ const DATE_SEPARATOR: Record<Locale, string> = { en: "/", de: "." };
 
 /** Integer cents to a localized euro string. */
 export function formatEuroCents(cents: number, locale: Locale): string {
-  return euro[locale].format(cents / 100);
+ return euro[locale].format(cents / 100);
 }
 
 /**
@@ -56,7 +56,7 @@ export function formatEuroCents(cents: number, locale: Locale): string {
  * national one.
  */
 export function formatIban(iban: string): string {
-  return (iban.replace(/\s+/g, "").match(/.{1,4}/g) ?? []).join(" ");
+ return (iban.replace(/\s+/g, "").match(/.{1,4}/g) ?? []).join(" ");
 }
 
 /**
@@ -68,11 +68,11 @@ export function formatIban(iban: string): string {
  * introduced.
  */
 export function formatBookedAt(ms: number, locale: Locale): string {
-  const date = new Date(ms);
-  const day = String(date.getUTCDate()).padStart(2, "0");
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const sep = DATE_SEPARATOR[locale];
-  return `${day}${sep}${month}${sep}${date.getUTCFullYear()}`;
+ const date = new Date(ms);
+ const day = String(date.getUTCDate()).padStart(2, "0");
+ const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+ const sep = DATE_SEPARATOR[locale];
+ return `${day}${sep}${month}${sep}${date.getUTCFullYear()}`;
 }
 
 /**
@@ -80,16 +80,16 @@ export function formatBookedAt(ms: number, locale: Locale): string {
  * for the same reason as formatBookedAt.
  */
 export function formatDayLabel(ms: number, locale: Locale): string {
-  return `${weekday[locale].format(new Date(ms))}, ${formatBookedAt(ms, locale)}`;
+ return `${weekday[locale].format(new Date(ms))}, ${formatBookedAt(ms, locale)}`;
 }
 
 export interface EuroParts {
-  /** "−" (U+2212, a real minus) for debits, empty otherwise. */
-  sign: string;
-  /** Grouped euros, e.g. "3.487" (de) or "3,487" (en). */
-  major: string;
-  /** Always two digits, e.g. "12". */
-  minor: string;
+ /** "−" (U+2212, a real minus) for debits, empty otherwise. */
+ sign: string;
+ /** Grouped euros, e.g. "3.487" (de) or "3,487" (en). */
+ major: string;
+ /** Always two digits, e.g. "12". */
+ minor: string;
 }
 
 /**
@@ -98,10 +98,10 @@ export interface EuroParts {
  * which is only possible if they are separate elements.
  */
 export function splitEuroCents(cents: number, locale: Locale): EuroParts {
-  const absolute = Math.abs(cents);
-  return {
-    sign: cents < 0 ? "\u2212" : "",
-    major: majorUnits[locale].format(Math.trunc(absolute / 100)),
-    minor: String(absolute % 100).padStart(2, "0"),
-  };
+ const absolute = Math.abs(cents);
+ return {
+  sign: cents < 0 ? "\u2212" : "",
+  major: majorUnits[locale].format(Math.trunc(absolute / 100)),
+  minor: String(absolute % 100).padStart(2, "0"),
+ };
 }

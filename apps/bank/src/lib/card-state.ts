@@ -12,8 +12,8 @@ import type { CardCredentialState } from "./queries.js";
 export type CardFaceState = "none" | "offered" | "active";
 
 export interface CardFaceCopy {
-  badge: string;
-  explain: string;
+ badge: string;
+ explain: string;
 }
 
 /**
@@ -22,7 +22,7 @@ export interface CardFaceCopy {
  * not mean a second convention.
  */
 export function stateCopy(locale: Locale, state: CardFaceState): CardFaceCopy {
-  return FACE_COPY[locale][DPC_CREDENTIAL_TYPE_ID][state];
+ return FACE_COPY[locale][DPC_CREDENTIAL_TYPE_ID][state];
 }
 
 /**
@@ -48,9 +48,9 @@ export function stateCopy(locale: Locale, state: CardFaceState): CardFaceCopy {
  * covered by a test.
  */
 export function cardFaceState(
-  persisted: CardCredentialState,
-  issuing: boolean,
+ persisted: CardCredentialState,
+ issuing: boolean,
 ): CardFaceState {
-  if (persisted === "active") return "active";
-  return issuing ? "offered" : "none";
+ if (persisted === "active") return "active";
+ return issuing ? "offered" : "none";
 }

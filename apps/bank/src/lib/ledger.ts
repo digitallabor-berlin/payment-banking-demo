@@ -2,18 +2,18 @@ import { formatDayLabel } from "./format.js";
 import type { Locale } from "./i18n/locale.js";
 
 export interface DayGroup<T> {
-  /** Stable React key: the UTC calendar day, e.g. "2025-08-01". */
-  key: string;
-  /** Human label for the day rail, e.g. "Fr, 01.08.2025" or "Fri, 01/08/2025". */
-  label: string;
-  entries: T[];
+ /** Stable React key: the UTC calendar day, e.g. "2025-08-01". */
+ key: string;
+ /** Human label for the day rail, e.g. "Fr, 01.08.2025" or "Fri, 01/08/2025". */
+ label: string;
+ entries: T[];
 }
 
 function utcDayKey(ms: number): string {
-  const date = new Date(ms);
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(date.getUTCDate()).padStart(2, "0");
-  return `${date.getUTCFullYear()}-${month}-${day}`;
+ const date = new Date(ms);
+ const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+ const day = String(date.getUTCDate()).padStart(2, "0");
+ return `${date.getUTCFullYear()}-${month}-${day}`;
 }
 
 /**
@@ -26,24 +26,24 @@ function utcDayKey(ms: number): string {
  * that hides it.
  */
 export function groupByBookingDay<T extends { bookedAt: number }>(
-  rows: readonly T[],
-  locale: Locale,
+ rows: readonly T[],
+ locale: Locale,
 ): Array<DayGroup<T>> {
-  const groups: Array<DayGroup<T>> = [];
+ const groups: Array<DayGroup<T>> = [];
 
-  for (const row of rows) {
-    const key = utcDayKey(row.bookedAt);
-    const current = groups.at(-1);
-    if (current && current.key === key) {
-      current.entries.push(row);
-    } else {
-      groups.push({
-        key,
-        label: formatDayLabel(row.bookedAt, locale),
-        entries: [row],
-      });
-    }
+ for (const row of rows) {
+  const key = utcDayKey(row.bookedAt);
+  const current = groups.at(-1);
+  if (current && current.key === key) {
+   current.entries.push(row);
+  } else {
+   groups.push({
+    key,
+    label: formatDayLabel(row.bookedAt, locale),
+    entries: [row],
+   });
   }
+ }
 
-  return groups;
+ return groups;
 }

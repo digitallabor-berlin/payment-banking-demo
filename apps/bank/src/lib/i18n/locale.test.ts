@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_LOCALE, LOCALES, LOCALE_COOKIE, resolveLocale } from "./locale.js";
+import {
+  DEFAULT_LOCALE,
+  LOCALES,
+  LOCALE_COOKIE,
+  resolveLocale,
+} from "./locale.js";
 
 describe("locale constants", () => {
   it("defaults to English", () => {

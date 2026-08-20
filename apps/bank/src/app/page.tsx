@@ -39,7 +39,9 @@ export default async function DashboardPage() {
       />
 
       <main className="mx-auto max-w-5xl space-y-10 px-4 py-8">
-        <h1 className="page-title">{t.dashboard.greeting(session.displayName)}</h1>
+        <h1 className="page-title">
+          {t.dashboard.greeting(session.displayName)}
+        </h1>
 
         <section className="grid gap-4 sm:grid-cols-2">
           {accounts.map((account) => (

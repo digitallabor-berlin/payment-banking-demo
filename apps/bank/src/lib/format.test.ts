@@ -33,7 +33,9 @@ describe("formatEuroCents", () => {
 
 describe("formatIban", () => {
   it("groups an IBAN in blocks of four", () => {
-    expect(formatIban("DE02120300000000202051")).toBe("DE02 1203 0000 0000 2020 51");
+    expect(formatIban("DE02120300000000202051")).toBe(
+      "DE02 1203 0000 0000 2020 51",
+    );
   });
 
   it("leaves an already-short value alone", () => {
