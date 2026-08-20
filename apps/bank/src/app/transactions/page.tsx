@@ -31,7 +31,11 @@ export default async function TransactionsPage({
 
   return (
     <>
-      <AppHeader displayName={session.displayName} active="transactions" />
+      <AppHeader
+        displayName={session.displayName}
+        active="transactions"
+        locale={locale}
+      />
 
       <main className="mx-auto max-w-5xl px-4 py-8">
         <div className="flex items-baseline justify-between gap-4">

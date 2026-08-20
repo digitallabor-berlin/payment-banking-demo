@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Fira_Mono, Fira_Sans } from "next/font/google";
+import { MESSAGES } from "@/lib/i18n/messages.js";
+import { getLocale } from "@/lib/i18n/server.js";
 import "./globals.css";
 
 /*
@@ -26,14 +28,27 @@ const mono = Fira_Mono({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  title: "Sparkasse Musterstadt",
-  description: "Online-Banking Demo mit EUDI Wallet",
-};
+/**
+ * "Sparkasse Musterstadt" is a proper noun and stays in both languages; only
+ * the description translates. Async because the locale comes from a cookie,
+ * which is why every page in this app is already force-dynamic.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getLocale();
+  return {
+    title: "Sparkasse Musterstadt",
+    description: MESSAGES[locale].meta.description,
+  };
+}
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const locale = await getLocale();
   return (
-    <html lang="de" className={`${sans.variable} ${mono.variable}`}>
+    <html lang={locale} className={`${sans.variable} ${mono.variable}`}>
       <body className="min-h-dvh antialiased">{children}</body>
     </html>
   );

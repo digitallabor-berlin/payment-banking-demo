@@ -30,7 +30,11 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <AppHeader displayName={session.displayName} active="dashboard" />
+      <AppHeader
+        displayName={session.displayName}
+        active="dashboard"
+        locale={locale}
+      />
 
       <main className="mx-auto max-w-5xl space-y-10 px-4 py-8">
         <h1 className="page-title">Guten Tag, {session.displayName}</h1>

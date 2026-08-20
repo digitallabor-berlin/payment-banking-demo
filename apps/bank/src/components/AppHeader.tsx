@@ -4,21 +4,28 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@demo/ui";
+import type { Locale } from "@/lib/i18n/locale.js";
+import { MESSAGES } from "@/lib/i18n/messages.js";
+import { LocaleSwitcher } from "./LocaleSwitcher.js";
 import { SparkasseLogo } from "./SparkasseLogo.js";
-
-const NAV = [
-  { key: "dashboard", href: "/", label: "Übersicht" },
-  { key: "transactions", href: "/transactions", label: "Umsätze" },
-] as const;
 
 export interface AppHeaderProps {
   displayName: string;
   active: "dashboard" | "transactions";
+  locale: Locale;
 }
 
-export function AppHeader({ displayName, active }: AppHeaderProps) {
+export function AppHeader({ displayName, active, locale }: AppHeaderProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const t = MESSAGES[locale];
+
+  // Built inside the component rather than at module scope: the labels come
+  // from the catalog, so they cannot be resolved before the locale is known.
+  const nav = [
+    { key: "dashboard", href: "/", label: t.nav.overview },
+    { key: "transactions", href: "/transactions", label: t.nav.transactions },
+  ] as const;
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -32,7 +39,7 @@ export function AppHeader({ displayName, active }: AppHeaderProps) {
         <Link
           href="/"
           className="flex items-center gap-2.5"
-          aria-label="Zur Übersicht"
+          aria-label={t.nav.toOverview}
         >
           <SparkasseLogo className="h-8 w-auto shrink-0" />
           <span className="text-[1.0625rem] tracking-tight">
@@ -42,7 +49,7 @@ export function AppHeader({ displayName, active }: AppHeaderProps) {
         </Link>
 
         <nav className="ml-auto hidden items-center gap-1 sm:flex">
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <Link
               key={item.key}
               href={item.href}
@@ -60,23 +67,24 @@ export function AppHeader({ displayName, active }: AppHeaderProps) {
 
           <span className="mx-3 h-5 w-px bg-white/25" aria-hidden="true" />
           <span className="text-sm font-medium">{displayName}</span>
+          <LocaleSwitcher locale={locale} />
           <button
             type="button"
             onClick={logout}
             className="ml-2 rounded-md px-3 py-1.5 text-sm font-medium text-white/85 transition-colors hover:bg-white/12 hover:text-white"
           >
-            Abmelden
+            {t.nav.signOut}
           </button>
         </nav>
 
         <button
           type="button"
-          aria-label="Menü"
+          aria-label={t.nav.menu}
           aria-expanded={open}
           onClick={() => setOpen((value) => !value)}
           className="ml-auto rounded-md bg-white/15 px-3 py-2 text-sm sm:hidden"
         >
-          Menü
+          {t.nav.menu}
         </button>
       </div>
 
@@ -85,7 +93,7 @@ export function AppHeader({ displayName, active }: AppHeaderProps) {
           <p className="py-2 text-xs font-medium uppercase tracking-widest text-white/70">
             {displayName}
           </p>
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <Link
               key={item.key}
               href={item.href}
@@ -100,8 +108,11 @@ export function AppHeader({ displayName, active }: AppHeaderProps) {
             onClick={logout}
             className="py-2 text-sm font-medium"
           >
-            Abmelden
+            {t.nav.signOut}
           </button>
+          <div className="pt-2">
+            <LocaleSwitcher locale={locale} />
+          </div>
         </div>
       ) : null}
     </header>
