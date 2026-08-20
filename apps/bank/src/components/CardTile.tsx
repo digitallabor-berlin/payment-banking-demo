@@ -3,6 +3,8 @@
 import { useState } from "react";
 import type { CardDto } from "@/lib/queries.js";
 import { STATE_COPY, cardFaceState } from "@/lib/card-state.js";
+import { DIALOG_COPY } from "@/lib/credential-copy.js";
+import { DPC_CREDENTIAL_TYPE_ID } from "@/lib/credential-types.js";
 import { formatIban } from "@/lib/format.js";
 import { AddToWalletButton } from "./AddToWalletButton.js";
 import { EuStars } from "./EuStars.js";
@@ -124,6 +126,7 @@ export function CardTile({
           sessionId={session.sessionId}
           offerUri={session.offerUri}
           dcApiOffer={session.dcApiOffer}
+          copy={DIALOG_COPY[DPC_CREDENTIAL_TYPE_ID]}
           onClose={() => setSession(null)}
         />
       ) : null}

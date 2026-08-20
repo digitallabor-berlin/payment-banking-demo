@@ -1,3 +1,5 @@
+import { FACE_COPY } from "./credential-copy.js";
+import { DPC_CREDENTIAL_TYPE_ID } from "./credential-types.js";
 import type { CardCredentialState } from "./queries.js";
 
 /**
@@ -14,24 +16,13 @@ export interface CardFaceCopy {
  explain: string;
 }
 
-export const STATE_COPY: Record<CardFaceState, CardFaceCopy> = {
- none: {
-  badge: "Nicht im Wallet",
-  badgeClass: "badge-neutral",
-  explain:
-   "Fügen Sie diese Karte Ihrem EUDI Wallet hinzu, um online zu bezahlen.",
- },
- offered: {
-  badge: "Wird hinzugefügt…",
-  badgeClass: "badge-wallet",
-  explain: "Bestätigen Sie das Angebot in Ihrer Wallet-App.",
- },
- active: {
-  badge: "Im Wallet",
-  badgeClass: "badge-success",
-  explain: "Diese Karte ist in Ihrem EUDI Wallet und für Zahlungen bereit.",
- },
-};
+/**
+ * The card's own face copy. Re-exported from `credential-copy.ts`, where it
+ * sits beside the age credential's, so a second credential type did not mean a
+ * second convention. `CardTile` and its tests consume this name unchanged.
+ */
+export const STATE_COPY: Record<CardFaceState, CardFaceCopy> =
+ FACE_COPY[DPC_CREDENTIAL_TYPE_ID];
 
 /**
  * Collapse the persisted credential state and the live browser session into

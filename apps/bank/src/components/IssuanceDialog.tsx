@@ -12,6 +12,7 @@ import {
   useIsTouch,
   useStatusPoll,
 } from "@demo/ui";
+import type { IssuanceCopy } from "@/lib/credential-copy.js";
 import { AlertMark, CheckMark } from "./StatusMark.js";
 
 /** Sparkasse red, matching --color-primary, for the QR's dark modules. */
@@ -23,6 +24,7 @@ export interface IssuanceDialogProps {
   sessionId: string;
   offerUri: string;
   dcApiOffer: unknown;
+  copy: IssuanceCopy;
   onClose: () => void;
 }
 
@@ -30,6 +32,7 @@ export function IssuanceDialog({
   sessionId,
   offerUri,
   dcApiOffer,
+  copy,
   onClose,
 }: IssuanceDialogProps) {
   const router = useRouter();
@@ -76,7 +79,7 @@ export function IssuanceDialog({
       ? "Die Anfrage ist abgelaufen. Bitte erneut versuchen."
       : outcome?.status === "failed"
         ? "Verbindung zum Server verloren."
-        : "Die Karte konnte nicht hinzugefügt werden.";
+        : copy.failureBody;
 
   // No `await` may execute before invokeDcCreate — Chrome consumes the click's
   // transient activation otherwise. dcApiOffer is already a prop, so nothing
@@ -101,12 +104,12 @@ export function IssuanceDialog({
       className="dialog-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label="Karte zum EUDI Wallet hinzufügen"
+      aria-label={copy.title}
     >
       <div className="dialog-card px-7 py-8">
         {phase === "waiting" ? (
           <>
-            <h2 className="panel-title">Karte zum EUDI Wallet hinzufügen</h2>
+            <h2 className="panel-title">{copy.title}</h2>
 
             {dcSupported === null ? (
               /* "Not yet known" is NOT "unavailable". Rendering the QR here
@@ -171,9 +174,11 @@ export function IssuanceDialog({
         {phase === "success" ? (
           <>
             <CheckMark className="mx-auto h-12 w-12 text-[var(--color-success)]" />
-            <h2 className="panel-title mt-4 text-[var(--color-success)]">Karte hinzugefügt</h2>
+            <h2 className="panel-title mt-4 text-[var(--color-success)]">
+              {copy.successTitle}
+            </h2>
             <p className="mt-1.5 text-sm text-[var(--color-muted-foreground)]">
-              Ihre Karte ist jetzt in Ihrem EUDI Wallet.
+              {copy.successBody}
             </p>
           </>
         ) : null}
