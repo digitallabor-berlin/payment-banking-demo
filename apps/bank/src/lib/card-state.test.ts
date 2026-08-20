@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { STATE_COPY, cardFaceState } from "./card-state.js";
+import { cardFaceState, stateCopy } from "./card-state.js";
+import { BADGE_CLASS } from "./credential-copy.js";
 
 describe("cardFaceState", () => {
   it("reports active for a live credential", () => {
@@ -35,23 +36,31 @@ describe("cardFaceState", () => {
   });
 });
 
-describe("STATE_COPY", () => {
+describe("stateCopy", () => {
   it("labels the none state as not yet in the wallet", () => {
-    expect(STATE_COPY.none.badge).toBe("Nicht im Wallet");
+    expect(stateCopy("de", "none").badge).toBe("Nicht im Wallet");
   });
 
   it("labels the offered state as in progress", () => {
-    expect(STATE_COPY.offered.badge).toBe("Wird hinzugefügt…");
+    expect(stateCopy("de", "offered").badge).toBe("Wird hinzugefügt…");
   });
 
   it("labels the active state as in the wallet", () => {
-    expect(STATE_COPY.active.badge).toBe("Im Wallet");
+    expect(stateCopy("de", "active").badge).toBe("Im Wallet");
   });
 
   it("explains every face state", () => {
-    for (const copy of Object.values(STATE_COPY)) {
-      expect(copy.explain.length).toBeGreaterThan(0);
-      expect(copy.badgeClass).toMatch(/^badge-/);
+    for (const state of ["none", "offered", "active"] as const) {
+      expect(stateCopy("de", state).explain.length).toBeGreaterThan(0);
+      // badgeClass is no longer part of the copy — a CSS class has no
+      // language. It lives in BADGE_CLASS, keyed by state alone.
+      expect(BADGE_CLASS[state]).toMatch(/^badge-/);
     }
+  });
+
+  it("returns English face copy for the card", () => {
+    expect(stateCopy("en", "active").explain).toBe(
+      "This card is in your EUDI Wallet and ready for payments.",
+    );
   });
 });

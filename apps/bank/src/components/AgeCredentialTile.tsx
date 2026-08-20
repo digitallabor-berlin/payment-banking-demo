@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { cardFaceState } from "@/lib/card-state.js";
-import { DIALOG_COPY, FACE_COPY } from "@/lib/credential-copy.js";
+import { BADGE_CLASS, dialogCopy, faceCopy } from "@/lib/credential-copy.js";
 import { AV_CREDENTIAL_TYPE_ID } from "@/lib/credential-types.js";
+import type { Locale } from "@/lib/i18n/locale.js";
 import type { CardCredentialState } from "@/lib/queries.js";
 import { AddToWalletButton } from "./AddToWalletButton.js";
 import { IssuanceDialog } from "./IssuanceDialog.js";
@@ -30,8 +31,10 @@ interface IssuanceSession {
  */
 export function AgeCredentialTile({
   credentialState,
+  locale,
 }: {
   credentialState: CardCredentialState;
+  locale: Locale;
 }) {
   const [session, setSession] = useState<IssuanceSession | null>(null);
   const [pending, setPending] = useState(false);
@@ -39,7 +42,7 @@ export function AgeCredentialTile({
 
   const issuing = pending || session !== null;
   const faceState = cardFaceState(credentialState, issuing);
-  const copy = FACE_COPY[AV_CREDENTIAL_TYPE_ID][faceState];
+  const copy = faceCopy(locale, AV_CREDENTIAL_TYPE_ID, faceState);
 
   async function start() {
     setPending(true);
@@ -79,7 +82,7 @@ export function AgeCredentialTile({
               no alt text, so this heading is the credential's only accessible
               name. */}
           <h3 className="panel-title">Altersnachweis</h3>
-          <span className={`badge ${copy.badgeClass} px-2.5 py-1`}>
+          <span className={`badge ${BADGE_CLASS[faceState]} px-2.5 py-1`}>
             {copy.badge}
           </span>
         </div>
@@ -103,7 +106,7 @@ export function AgeCredentialTile({
           sessionId={session.sessionId}
           offerUri={session.offerUri}
           dcApiOffer={session.dcApiOffer}
-          copy={DIALOG_COPY[AV_CREDENTIAL_TYPE_ID]}
+          copy={dialogCopy(locale, AV_CREDENTIAL_TYPE_ID)}
           onClose={() => setSession(null)}
         />
       ) : null}

@@ -53,6 +53,7 @@ export default async function DashboardPage() {
                   accounts.find((account) => account.id === card.accountId)
                     ?.iban
                 }
+                locale={locale}
               />
             ))}
           </div>
@@ -61,7 +62,10 @@ export default async function DashboardPage() {
         <section>
           <h2 className="eyebrow">Nachweise</h2>
           <div className="mt-3 space-y-4">
-            <AgeCredentialTile credentialState={ageCredential.state} />
+            <AgeCredentialTile
+              credentialState={ageCredential.state}
+              locale={locale}
+            />
           </div>
         </section>
 
