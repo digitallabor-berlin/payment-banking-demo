@@ -1,11 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AccountPanel } from "@/components/AccountPanel.js";
+import { AgeCredentialTile } from "@/components/AgeCredentialTile.js";
 import { AppHeader } from "@/components/AppHeader.js";
 import { CardTile } from "@/components/CardTile.js";
 import { TransactionLedger } from "@/components/TransactionLedger.js";
 import { getDb } from "@/db/index.js";
-import { listAccounts, listCards, listTransactions } from "@/lib/queries.js";
+import {
+  getAgeCredentialState,
+  listAccounts,
+  listCards,
+  listTransactions,
+} from "@/lib/queries.js";
 import { getSession } from "@/lib/session.js";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +24,7 @@ export default async function DashboardPage() {
   const accounts = listAccounts(db, session.userId);
   const cards = listCards(db, session.userId);
   const recent = listTransactions(db, session.userId, 5, 0);
+  const ageCredential = getAgeCredentialState(db, session.userId);
 
   return (
     <>
@@ -46,6 +53,13 @@ export default async function DashboardPage() {
                 }
               />
             ))}
+          </div>
+        </section>
+
+        <section>
+          <h2 className="eyebrow">Nachweise</h2>
+          <div className="mt-3 space-y-4">
+            <AgeCredentialTile credentialState={ageCredential.state} />
           </div>
         </section>
 

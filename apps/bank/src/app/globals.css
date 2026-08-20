@@ -206,6 +206,23 @@ body {
   filter: saturate(0.82);
 }
 
+/*
+ * The age credential's face. Only the image and the load-time fallback colour
+ * differ from .card-object — geometry, radius, shadow and the not-yet-issued
+ * desaturation are all inherited. #ff0000 is the artwork's OWN red, not
+ * Sparkasse's --color-primary (#EA0016), so a missing asset degrades to the
+ * right colour rather than a near-miss.
+ *
+ * Nothing is drawn over this face. The artwork already carries the
+ * "Altersnachweis / Proof of Age" wordmark top-right and the Sparkasse logo
+ * bottom-left — which is also why it gets no .card-stars: that class is
+ * positioned into exactly the corner the wordmark occupies.
+ */
+.card-object-av {
+  background-color: #ff0000;
+  background-image: url("/av-face.svg");
+}
+
 /* ---------------------------------------------------------- the ledger ---- */
 
 /*
