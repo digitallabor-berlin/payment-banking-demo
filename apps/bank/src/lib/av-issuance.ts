@@ -39,7 +39,7 @@ export type StartAvIssuanceResult =
  * the bank's own UI artwork and is never sent anywhere.
  *
  * The row is written BEFORE foundry is called, so a foundry outage — or a
- * foundry with no `av` credential type configured — leaves a visible `failed`
+ * foundry with no `av-sparkasse` credential type configured — leaves a visible `failed`
  * row rather than nothing at all.
  */
 export async function startAvIssuance(

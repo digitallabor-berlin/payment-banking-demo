@@ -53,8 +53,20 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**405 tests** (196 bank + 167 merchant + 11 foundry-client + 31 ui), measured
-2026-08-20.
+**460 tests** (251 bank + 167 merchant + 11 foundry-client + 31 ui), measured
+2026-08-21.
+
+That was **405** before the two-card-format work, which added 55, all in
+`apps/bank`: 11 in the new `credential-types.test.ts`, 12 in the new
+`payment-claims.test.ts`, 3 in `credential-id.test.ts` (`mintJoinKey`), 10 in
+`issuance.test.ts` (a whole `sparkassencard` describe block), 9 in
+`queries.test.ts` (a `listCards per format` block), 3 in `payments.test.ts`, and
++7 net in `credential-copy.test.ts`, which was rewritten rather than extended
+because both its copy maps were re-keyed. Two existing tests changed rather than
+being added: the verbatim English active-`explain` assertion in
+`card-state.test.ts` and its twin in `credential-copy.test.ts`, both because the
+card's active copy stopped naming a specific wallet. No plan; the work was a
+bounded request.
 
 That was **397** before the re-issuance work, which added 8, all in `apps/bank`:
 5 in `credential-copy.test.ts` (4 for the new `walletActionLabel`, 1 asserting
@@ -118,25 +130,95 @@ them without reading the linked reasoning first.
   `ct.vct == "com.emvco.dpc.card"` and *rejects* them for every other credential
   type. A non-DPC credential's wallet appearance can therefore come only from
   foundry's static `display:` config — the issuer cannot influence it. Sending
-  the bank's card display metadata on an `av` offer would turn every issuance
-  into a `failed` row.
+  the bank's card display metadata on an `av-sparkasse` or `sparkassencard`
+  offer would turn every issuance into a `failed` row. `sendsDpcDisplayMetadata`
+  in `lib/credential-types.ts` is the guard, and it is a named predicate with
+  its own test rather than an inline comparison precisely because the failure is
+  a `failed` row and not a card missing its artwork.
+
+- **The girocard is issued in TWO payment formats, and they share no claims.**
+  `com.emvco.dpc.card` declares `{ credential_id, network, card_id }`;
+  `sparkassencard` (vct `https://creds.digitallabor.dev/vct/sparkassencard`)
+  declares `{ sub, masked_iban, psu_id }`. Not a superset, not a rename. Both
+  are payable, so `processPayment` asks `isPaymentCredentialType` rather than
+  naming one type. `lib/payment-claims.ts` owns the per-format claim shape and
+  is the only place that can assert the negatives — that a DPC never carries a
+  `psu_id`, and that neither format ever discloses a full IBAN.
+
+- **`psu_id` is the Sparkasse card's join key, and it lands in the same
+  `credential_id` column.** The DPC spells that role `credential_id`; there is
+  one lookup in `processPayment` either way, which is the whole reason the
+  column is not per-format. `mintJoinKey` picks the shape: the DPC keeps the
+  `dpc_`-prefixed base64url form, `sparkassencard` gets a bare `randomUUID()`
+  because its vct declares a UUID and a prefix there would be malformed. `sub`
+  is minted per issuance, sent, and never persisted — nothing resolves a
+  credential by it.
+
+- **`masked_iban` is `DE** **** 1234`, and its four digits come from
+  `ibanLastFour`.** Not a second `slice`: the Sparkasse card's `masked_iban` and
+  the DPC's `card.last_four` must show the same digits, so they share one tested
+  derivation — which also means `maskIban` inherits its throw-on-non-numeric-tail
+  guard. The mask is a fixed shape rather than one `*` per hidden character; a
+  variable-length mask would leak the IBAN's length, which identifies the
+  issuing country's format.
+
+- **The card tile's two buttons need per-format state, or they lie.**
+  `CardDto.formats` is a `Record<PaymentCredentialTypeId, CardCredentialState>`
+  alongside the combined `credentialState`. Without it, adding the card through
+  one button flips the other's label to "add again" for a credential that was
+  never issued in that format. The combined state is what draws the EU stars —
+  the card is in a wallet, and the face has no opinion about which format got it
+  there. Both come from `pickLiveCredential` applied at two scopes rather than
+  from a second rule for combining per-format answers.
+
+- **`credential_type_id` has NO CHECK constraint, so widening it needs no
+  migration.** The column is plain `text`; the drizzle `enum:` is a TypeScript
+  claim about the data, not a database one. Verified against
+  `0001_even_bloodscream.sql`. Adding `sparkassencard` and `av-sparkasse` was a
+  one-line schema edit and zero SQL.
+
+- **The copy maps are keyed by what the copy varies with, NOT by credential type
+  id.** `FACE_COPY` is keyed by `CredentialKind` (`card | age`) because one tile
+  shows one badge for both card formats; `DIALOG_COPY` is keyed by
+  `IssuanceFlavour` (`card-eudi | card-google | age`) because a dialog reading
+  "Add card to EUDI Wallet" over a handover started from a Google Wallet badge
+  is a visible defect. Keying either by type id would duplicate every card
+  string in both locales and let the two formats drift. The card's `active`
+  explain deliberately no longer names a wallet, for the same reason.
+
+- **The Google Wallet badge has no "add again" state.** It is Google's artwork
+  and its text is drawn as SVG paths, so `walletActionLabel`'s three-way choice
+  has nowhere to render. `AddToGoogleWalletButton` is a sibling of
+  `AddToWalletButton` rather than a `variant` on it: that component's contract
+  is a resolved `label` *string* inside `.btn.btn-primary`, and this one's
+  `label` is the accessible name only (`aria-label` plus the image's `alt`).
+  Sized by height alone (`h-11 w-auto`) — Google's brand guidelines forbid
+  altering the badge's proportions or colours.
 
 - **A `credentials` row needs neither a card nor a `credential_id`.**
-  `credentialTypeId` (`com.emvco.dpc.card | av`) is the discriminator and
-  defaults to the DPC type, so an insert that forgets it silently becomes a
-  payment credential. `processPayment` refuses anything that is not a DPC row
-  with a card — three independent ways, one of which is that SQL never matches
-  `credential_id = <string>` against NULL.
+  `credentialTypeId` (`com.emvco.dpc.card | sparkassencard | av | av-sparkasse`)
+  is the discriminator and defaults to the DPC type, so an insert that forgets
+  it silently becomes a payment credential. `processPayment` refuses anything
+  that is not a *payment* row with a card — three independent ways, one of which
+  is that SQL never matches `credential_id = <string>` against NULL. That guard
+  is `isPaymentCredentialType`, not a comparison against one id: widening it to
+  admit `sparkassencard` was the point, and a legacy `av` row is still refused
+  even though the column can hold it.
 
-- **`credential_type_id` for age verification is `av`.** Not
+- **`credential_type_id` for age verification is `av-sparkasse`.** Not
   `eu.europa.ec.av.1` — that is the mdoc docType configured on foundry's side,
-  not the id the admin API takes.
+  not the id the admin API takes. It was `av` until the two card formats landed;
+  the old value stays in the schema enum so a pre-existing row still reads back,
+  but nothing issues it and `getAgeCredentialState` does not match it, so a
+  legacy row reads as "not in wallet" and the tile offers to add it again.
 
 - **Issuance is repeatable, and an `active` row outranks a newer `offered`
   one.** Nothing behind the UI ever forbade a second issuance — neither route
   guards on state, and both `startIssuance` and `startAvIssuance` just insert
   another row — so the bank offers "add again" on a credential that is already
-  in the wallet. `pickLiveCredential` in `lib/queries.ts` is what makes that
+  in the wallet. The two card formats are independent under this rule: neither
+  supersedes the other, and `CardDto.formats` is what keeps their buttons from
+  claiming credit for each other's work. `pickLiveCredential` in `lib/queries.ts` is what makes that
   safe: the plain "newest non-failed row wins" rule it replaced meant one
   abandoned re-issue wrote an `offered` row that outranked the `active` one
   *forever* (nothing in this project clears an offered row), and the tile then
@@ -150,7 +232,8 @@ them without reading the linked reasoning first.
   string and has no locale. Same reason as `cardFaceState`: vitest is
   `environment: "node"` with `include: ["src/**/*.test.ts"]`, so a ternary in a
   `.tsx` file is untested. It also means the card tile and the age tile cannot
-  disagree about the wording.
+  disagree about the wording. It governs the EUDI button only — see the Google
+  Wallet badge bullet above for why the badge has no label to choose.
 
 - **No foundry config declares an `av` credential type**, so the bank's
   age-credential happy path has never run. Verified 2026-08-20 against a
@@ -158,6 +241,25 @@ them without reading the linked reasoning first.
   `{"error":"unknown credential_type_id 'av'"}`. Adding the type is the
   operator's task. Note the local config's *named queries* already reference
   `av`, which makes the omission easy to misread as present.
+
+- **Neither `sparkassencard` nor `av-sparkasse` is declared by any foundry
+  config either.** Verified 2026-08-21 against the running local foundry with
+  the exact payload the bank sends: both are HTTP **400**,
+  `{"error":"unknown credential_type_id '<id>'"}`. So the bank's Sparkasse-card
+  and age happy paths have never run, and a real attempt degrades to a visible
+  `failed` row — confirmed in the dev database. `com.emvco.dpc.card` IS declared
+  and its issuance was verified end-to-end the same day: HTTP 200, a real
+  `openid-credential-offer://` deep link, and the display metadata echoed back
+  in `credential_offer.display`. Adding the two missing types is the operator's
+  task.
+
+- **The merchant cannot request a `sparkassencard` presentation.**
+  `selectNamedQuery` resolves foundry's `dpc` / `dpc_av` named queries, which
+  ask for the EMVCo DPC, and `extractCredentialId` (`apps/merchant/src/lib/
+  checks.ts`) reads `claims.credential_id` — a claim `sparkassencard` does not
+  carry. So a checkout can only be completed with the DPC today. Closing that
+  loop needs a foundry named query for the new vct *and* a merchant change; it
+  is deliberately out of scope of the bank-side work.
 
 - **Read `drizzle-kit generate`'s output before committing it.** For the `0001`
   migration it emitted a table rebuild whose `INSERT … SELECT` listed the

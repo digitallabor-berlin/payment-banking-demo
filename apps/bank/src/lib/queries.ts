@@ -1,7 +1,11 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import { accounts, cards, credentials, transactions } from "../db/schema.js";
-import { AV_CREDENTIAL_TYPE_ID } from "./credential-types.js";
+import {
+  AV_CREDENTIAL_TYPE_ID,
+  PAYMENT_CREDENTIAL_TYPE_IDS,
+  type PaymentCredentialTypeId,
+} from "./credential-types.js";
 
 export interface AccountDto {
   id: string;
@@ -19,8 +23,22 @@ export interface CardDto {
   panLast4: string;
   network: string;
   cardAlias: string;
+  /**
+   * The card's state across ALL its formats — what the card face draws. The
+   * EU's stars belong on the artwork once the card is in a wallet at all; which
+   * format got it there is not something the face has an opinion about.
+   */
   credentialState: CardCredentialState;
   credentialRowId: string | null;
+  /**
+   * The same question asked per format, which is what each of the tile's two
+   * wallet buttons needs.
+   *
+   * Without this the buttons would lie to each other: adding the card through
+   * one of them would flip the other's label to "add again" for a credential
+   * that was never issued in that format.
+   */
+  formats: Record<PaymentCredentialTypeId, CardCredentialState>;
 }
 
 export interface AgeCredentialDto {
@@ -78,30 +96,57 @@ function pickLiveCredential<T extends { state: string }>(
   return newestFirst.find((row) => row.state === "active") ?? newestFirst[0];
 }
 
+/**
+ * The state of a chosen subset of a card's non-failed credential rows.
+ *
+ * `pickLiveCredential` is applied at two scopes here — once across every
+ * format, once within each — rather than the combined answer being derived
+ * from the per-format ones. "Active outranks offered, newest wins within a
+ * state" is one rule, and asking it twice of the same rows is cheaper than a
+ * second rule for combining its own answers.
+ */
+function stateOf(
+  rows: Array<{ id: string; state: string }>,
+): { state: CardCredentialState; rowId: string | null } {
+  const credential = pickLiveCredential(rows);
+  // The caller's where(inArray(..., ["offered", "active"])) guarantees the
+  // state is never "failed" here, but Drizzle's inferred column type is still
+  // the full union — TS cannot see through a SQL predicate.
+  return {
+    state: credential ? (credential.state as "offered" | "active") : "none",
+    rowId: credential?.id ?? null,
+  };
+}
+
 export function listCards(db: Db, userId: string): CardDto[] {
   const rows = db.select().from(cards).where(eq(cards.userId, userId)).all();
 
   return rows.map((card) => {
-    const credential = pickLiveCredential(
-      db
-        .select()
-        .from(credentials)
-        .where(
-          and(
-            eq(credentials.cardId, card.id),
-            inArray(credentials.state, ["offered", "active"]),
-          ),
-        )
-        .orderBy(desc(credentials.createdAt))
-        .all(),
-    );
+    // Scoped to the payment types explicitly, though a row with a card_id can
+    // only be one today — the age credential is issued to the person and has no
+    // card. Naming them keeps that an assertion rather than an accident.
+    const live = db
+      .select()
+      .from(credentials)
+      .where(
+        and(
+          eq(credentials.cardId, card.id),
+          inArray(credentials.credentialTypeId, [
+            ...PAYMENT_CREDENTIAL_TYPE_IDS,
+          ]),
+          inArray(credentials.state, ["offered", "active"]),
+        ),
+      )
+      .orderBy(desc(credentials.createdAt))
+      .all();
 
-    // The where(inArray(..., ["offered", "active"])) clause above guarantees
-    // credential.state is never "failed" here, but Drizzle's inferred column
-    // type is still the full union — TS cannot see through a SQL predicate.
-    const credentialState: CardCredentialState = credential
-      ? (credential.state as "offered" | "active")
-      : "none";
+    const combined = stateOf(live);
+    const formats = Object.fromEntries(
+      PAYMENT_CREDENTIAL_TYPE_IDS.map((typeId) => [
+        typeId,
+        stateOf(live.filter((row) => row.credentialTypeId === typeId)).state,
+      ]),
+    ) as Record<PaymentCredentialTypeId, CardCredentialState>;
 
     return {
       id: card.id,
@@ -109,8 +154,9 @@ export function listCards(db: Db, userId: string): CardDto[] {
       panLast4: card.panLast4,
       network: card.network,
       cardAlias: card.cardAlias,
-      credentialState,
-      credentialRowId: credential?.id ?? null,
+      credentialState: combined.state,
+      credentialRowId: combined.rowId,
+      formats,
     } satisfies CardDto;
   });
 }

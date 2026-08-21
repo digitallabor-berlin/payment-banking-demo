@@ -1,5 +1,4 @@
 import { FACE_COPY } from "./credential-copy.js";
-import { DPC_CREDENTIAL_TYPE_ID } from "./credential-types.js";
 import type { Locale } from "./i18n/locale.js";
 import type { CardCredentialState } from "./queries.js";
 
@@ -20,9 +19,13 @@ export interface CardFaceCopy {
  * The card's own face copy for a locale. Sourced from `credential-copy.ts`,
  * where it sits beside the age credential's, so a second credential type did
  * not mean a second convention.
+ *
+ * Keyed by kind rather than by credential type id: the card is issued in two
+ * formats and this is the copy on the ONE tile that presents both, so there is
+ * nothing here for a format to disagree about.
  */
 export function stateCopy(locale: Locale, state: CardFaceState): CardFaceCopy {
- return FACE_COPY[locale][DPC_CREDENTIAL_TYPE_ID][state];
+ return FACE_COPY[locale].card[state];
 }
 
 /**

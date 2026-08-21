@@ -48,6 +48,9 @@ export const en: Messages = {
   issuance: {
     addToWallet: "Add to EUDI Wallet",
     addAgain: "Add to EUDI Wallet again",
+    // The accessible name for the Google Wallet badge. The badge is artwork
+    // whose text is drawn as SVG paths, so nothing renders this string.
+    addToGoogleWallet: "Add to Google Wallet",
     preparing: "Preparing…",
     confirmInApp: "Confirm the offer in your EUDI Wallet app.",
     openInWallet: "Open in wallet",

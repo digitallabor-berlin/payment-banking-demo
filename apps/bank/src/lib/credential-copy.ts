@@ -1,22 +1,34 @@
 import type { CardFaceCopy, CardFaceState } from "./card-state.js";
-import {
-  AV_CREDENTIAL_TYPE_ID,
-  DPC_CREDENTIAL_TYPE_ID,
-  type CredentialTypeId,
-} from "./credential-types.js";
 import type { Locale } from "./i18n/locale.js";
 import { MESSAGES } from "./i18n/messages.js";
 
 /**
- * Every string the two credentials show, in both languages, in one place,
- * keyed by locale and then by credential type id.
+ * Every string the bank's credentials show, in both languages, in one place.
  *
  * It lives in a `.ts` module rather than inside the components for the reason
  * that governs this whole app: every vitest project is `environment: "node"`
  * with `include: ["src/**\/*.test.ts"]`, so a string decided in a `.tsx` file
- * is never covered by a test. A third credential type gets a third entry here
- * and no new component-level branching.
+ * is never covered by a test.
+ *
+ * Keyed by what the copy actually varies with, which is NOT the credential type
+ * id. The girocard is issued in two formats and a tile shows one badge for
+ * both, so face copy varies by *kind*; the dialog additionally names the wallet
+ * it is handing over to, so it varies by *flavour*. Keying either by type id
+ * would duplicate identical German and English strings across the two card
+ * formats and let them drift.
  */
+
+/** What a tile is about. One tile, one kind, however many formats behind it. */
+export type CredentialKind = "card" | "age";
+
+/**
+ * One issuance conversation — a kind plus the wallet it targets.
+ *
+ * `card-google` exists because a dialog reading "Add card to EUDI Wallet" over
+ * a handover the user started from a Google Wallet badge is simply wrong. There
+ * is no `age-google`: the age tile offers one button.
+ */
+export type IssuanceFlavour = "card-eudi" | "card-google" | "age";
 
 /** The copy the issuance dialog needs, which differs by grammatical gender. */
 export interface IssuanceCopy {
@@ -39,13 +51,13 @@ export const BADGE_CLASS: Record<CardFaceState, string> = {
   active: "badge-success",
 };
 
-/** The tile's badge and explanation, per locale, credential type and face state. */
+/** The tile's badge and explanation, per locale, credential kind and face state. */
 export const FACE_COPY: Record<
   Locale,
-  Record<CredentialTypeId, Record<CardFaceState, CardFaceCopy>>
+  Record<CredentialKind, Record<CardFaceState, CardFaceCopy>>
 > = {
   en: {
-    [DPC_CREDENTIAL_TYPE_ID]: {
+    card: {
       none: {
         badge: "Not in wallet",
         explain: "Add this card to your EUDI Wallet to pay online.",
@@ -57,10 +69,10 @@ export const FACE_COPY: Record<
       active: {
         badge: "In wallet",
         explain:
-          "This card is in your EUDI Wallet and ready for payments. You can add it again at any time.",
+          "This card is in your wallet and ready for payments. You can add it again at any time.",
       },
     },
-    [AV_CREDENTIAL_TYPE_ID]: {
+    age: {
       none: {
         badge: "Not in wallet",
         explain:
@@ -78,7 +90,7 @@ export const FACE_COPY: Record<
     },
   },
   de: {
-    [DPC_CREDENTIAL_TYPE_ID]: {
+    card: {
       none: {
         badge: "Nicht im Wallet",
         explain:
@@ -91,10 +103,10 @@ export const FACE_COPY: Record<
       active: {
         badge: "Im Wallet",
         explain:
-          "Diese Karte ist in Ihrem EUDI Wallet und für Zahlungen bereit. Sie können sie jederzeit erneut hinzufügen.",
+          "Diese Karte ist in Ihrem Wallet und für Zahlungen bereit. Sie können sie jederzeit erneut hinzufügen.",
       },
     },
-    [AV_CREDENTIAL_TYPE_ID]: {
+    age: {
       none: {
         badge: "Nicht im Wallet",
         explain:
@@ -121,16 +133,25 @@ export const FACE_COPY: Record<
  */
 export const DIALOG_COPY: Record<
   Locale,
-  Record<CredentialTypeId, IssuanceCopy>
+  Record<IssuanceFlavour, IssuanceCopy>
 > = {
   en: {
-    [DPC_CREDENTIAL_TYPE_ID]: {
+    "card-eudi": {
       title: "Add card to EUDI Wallet",
       successTitle: "Card added",
       successBody: "Your card is now in your EUDI Wallet.",
       failureBody: "The card could not be added.",
     },
-    [AV_CREDENTIAL_TYPE_ID]: {
+    "card-google": {
+      title: "Add card to Google Wallet",
+      successTitle: "Card added",
+      // Deliberately does not name Google Wallet. This is an OpenID4VCI offer;
+      // which app answered it is not something the bank can observe, and
+      // claiming otherwise would be the one string here that is not true.
+      successBody: "Your card is now in your wallet.",
+      failureBody: "The card could not be added.",
+    },
+    age: {
       title: "Add age verification to EUDI Wallet",
       successTitle: "Age verification added",
       successBody: "Your age verification is now in your EUDI Wallet.",
@@ -138,13 +159,19 @@ export const DIALOG_COPY: Record<
     },
   },
   de: {
-    [DPC_CREDENTIAL_TYPE_ID]: {
+    "card-eudi": {
       title: "Karte zum EUDI Wallet hinzufügen",
       successTitle: "Karte hinzugefügt",
       successBody: "Ihre Karte ist jetzt in Ihrem EUDI Wallet.",
       failureBody: "Die Karte konnte nicht hinzugefügt werden.",
     },
-    [AV_CREDENTIAL_TYPE_ID]: {
+    "card-google": {
+      title: "Karte zu Google Wallet hinzufügen",
+      successTitle: "Karte hinzugefügt",
+      successBody: "Ihre Karte ist jetzt in Ihrem Wallet.",
+      failureBody: "Die Karte konnte nicht hinzugefügt werden.",
+    },
+    age: {
       title: "Altersnachweis zum EUDI Wallet hinzufügen",
       successTitle: "Altersnachweis hinzugefügt",
       successBody: "Ihr Altersnachweis ist jetzt in Ihrem EUDI Wallet.",
@@ -155,25 +182,28 @@ export const DIALOG_COPY: Record<
 
 export function faceCopy(
   locale: Locale,
-  typeId: CredentialTypeId,
+  kind: CredentialKind,
   state: CardFaceState,
 ): CardFaceCopy {
-  return FACE_COPY[locale][typeId][state];
+  return FACE_COPY[locale][kind][state];
 }
 
 export function dialogCopy(
   locale: Locale,
-  typeId: CredentialTypeId,
+  flavour: IssuanceFlavour,
 ): IssuanceCopy {
-  return DIALOG_COPY[locale][typeId];
+  return DIALOG_COPY[locale][flavour];
 }
 
 /**
  * The label on the one button beside a credential.
  *
- * Credential-type independent — "Add to EUDI Wallet" says nothing about what is
+ * Credential-independent — "Add to EUDI Wallet" says nothing about what is
  * being added, because the tile's heading and face already do — so this reads
- * the shared catalog rather than FACE_COPY.
+ * the shared catalog rather than FACE_COPY. It is the EUDI button's label only:
+ * the Google Wallet badge is artwork and carries its text in the SVG, so
+ * `MESSAGES[locale].issuance.addToGoogleWallet` is its accessible name rather
+ * than a rendered string.
  *
  * It exists as a function here, rather than a ternary in the tiles' JSX, for
  * the reason that governs every decision in this app: vitest runs

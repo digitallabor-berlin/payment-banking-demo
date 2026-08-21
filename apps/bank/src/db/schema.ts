@@ -49,18 +49,28 @@ export const credentials = sqliteTable("credentials", {
    * because that is the only thing this bank issued before age verification
    * existed, which also makes the 0001 migration's backfill automatic. An
    * insert that means something else must say so: `startAvIssuance` does.
+   *
+   * `av` is legacy: the age credential is issued as `av-sparkasse` now, but the
+   * column can still hold rows written before that, so the value stays in the
+   * union to keep reading them honest. Widening this list is free — the column
+   * is plain `text` and the 0001 migration emits no CHECK constraint, so the
+   * enum is a TypeScript claim about the data, not a database one.
    */
   credentialTypeId: text("credential_type_id", {
-    enum: ["com.emvco.dpc.card", "av"],
+    enum: ["com.emvco.dpc.card", "sparkassencard", "av", "av-sparkasse"],
   })
     .notNull()
     .default("com.emvco.dpc.card"),
   /**
-   * The opaque value carried in the DPC credential — the loop's join key with
-   * the merchant. NULL for an age credential, which has no payment join key and
-   * discloses no identifier at all. SQLite treats NULLs as distinct under a
-   * UNIQUE index, so the DPC uniqueness invariant is untouched, and
-   * `processPayment`'s `credential_id = ?` lookup can never match a NULL row.
+   * The opaque value a payment credential carries — the loop's join key with
+   * the merchant. The DPC spells it `credential_id`; `sparkassencard` has no
+   * such claim and spells the same role `psu_id`. Both land here, so
+   * `processPayment` has one lookup rather than one per format.
+   *
+   * NULL for an age credential, which has no payment join key and discloses no
+   * identifier at all. SQLite treats NULLs as distinct under a UNIQUE index, so
+   * the uniqueness invariant is untouched, and `processPayment`'s
+   * `credential_id = ?` lookup can never match a NULL row.
    */
   credentialId: text("credential_id").unique(),
   foundryTxId: text("foundry_tx_id"),

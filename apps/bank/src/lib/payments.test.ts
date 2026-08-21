@@ -115,7 +115,7 @@ describe("processPayment", () => {
         id: "cred_av_active",
         userId: "user_anna",
         cardId: null,
-        credentialTypeId: "av",
+        credentialTypeId: "av-sparkasse",
         credentialId: "av_pretending_to_be_a_card",
         state: "active",
         issuedAt: 1,
@@ -140,6 +140,94 @@ describe("processPayment", () => {
         .where(eq(transactions.idempotencyKey, "idem_av_1"))
         .get(),
     ).toBeUndefined();
+  });
+
+  it("settles against a Sparkasse card credential", () => {
+    // The girocard is issued in two formats and both authorize money to move.
+    // The join key arrived in this row's credential_id column as a `psu_id`
+    // rather than a `credential_id` claim, which the debit path never sees.
+    db.insert(credentials)
+      .values({
+        id: "cred_sparkassencard",
+        userId: "user_anna",
+        cardId: "card_anna",
+        credentialTypeId: "sparkassencard",
+        credentialId: "9f1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d",
+        state: "active",
+        issuedAt: 1,
+        createdAt: 1,
+      })
+      .run();
+
+    const result = processPayment(
+      db,
+      baseInput({
+        credentialId: "9f1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d",
+        idempotencyKey: "idem_sk_1",
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.newBalanceCents).toBeTypeOf("number");
+    expect(
+      db
+        .select()
+        .from(transactions)
+        .where(eq(transactions.idempotencyKey, "idem_sk_1"))
+        .get()?.credentialId,
+    ).toBe("9f1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d");
+  });
+
+  it("still refuses a Sparkasse card credential that is not active", () => {
+    // Widening the type guard must not have widened the state guard with it.
+    db.insert(credentials)
+      .values({
+        id: "cred_sparkassencard_offered",
+        userId: "user_anna",
+        cardId: "card_anna",
+        credentialTypeId: "sparkassencard",
+        credentialId: "11111111-2222-4333-8444-555555555555",
+        state: "offered",
+        issuedAt: null,
+        createdAt: 1,
+      })
+      .run();
+
+    expect(
+      processPayment(
+        db,
+        baseInput({
+          credentialId: "11111111-2222-4333-8444-555555555555",
+          idempotencyKey: "idem_sk_2",
+        }),
+      ),
+    ).toEqual({ ok: false, reason: "credential_not_active" });
+  });
+
+  it("refuses a legacy 'av' row even though the column still holds the value", () => {
+    db.insert(credentials)
+      .values({
+        id: "cred_av_legacy",
+        userId: "user_anna",
+        cardId: null,
+        credentialTypeId: "av",
+        credentialId: "legacy_av_join_key",
+        state: "active",
+        issuedAt: 1,
+        createdAt: 1,
+      })
+      .run();
+
+    expect(
+      processPayment(
+        db,
+        baseInput({
+          credentialId: "legacy_av_join_key",
+          idempotencyKey: "idem_av_legacy",
+        }),
+      ),
+    ).toEqual({ ok: false, reason: "unknown_credential" });
   });
 
   it("refuses to settle a payment credential that has no card", () => {

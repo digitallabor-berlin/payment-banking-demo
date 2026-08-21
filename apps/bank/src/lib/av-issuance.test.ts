@@ -60,7 +60,7 @@ const offerOk = {
     credential_offer_uri: "openid-credential-offer://?av=1",
     dc_api_offer: {
       credential_issuer: "https://foundry.example",
-      credential_configuration_ids: ["av"],
+      credential_configuration_ids: ["av-sparkasse"],
     },
   },
 };
@@ -76,11 +76,11 @@ describe("startAvIssuance", () => {
     });
   });
 
-  it("asks foundry for credential_type_id 'av'", async () => {
+  it("asks foundry for credential_type_id 'av-sparkasse'", async () => {
     const captures: Capture[] = [];
     await startAvIssuance(db, stubClient(captures, offerOk), "user_anna");
     expect(captures).toHaveLength(1);
-    expect(captures[0]?.body.credential_type_id).toBe("av");
+    expect(captures[0]?.body.credential_type_id).toBe("av-sparkasse");
   });
 
   it("sends exactly the two age booleans and nothing else", async () => {
@@ -113,7 +113,7 @@ describe("startAvIssuance", () => {
     expect(row?.userId).toBe("user_anna");
     expect(row?.cardId).toBeNull();
     expect(row?.credentialId).toBeNull();
-    expect(row?.credentialTypeId).toBe("av");
+    expect(row?.credentialTypeId).toBe("av-sparkasse");
     expect(row?.state).toBe("offered");
     expect(row?.issuedAt).toBeNull();
   });
@@ -130,7 +130,7 @@ describe("startAvIssuance", () => {
   });
 
   it("leaves a failed row when foundry rejects the offer", async () => {
-    // The state a foundry with no 'av' credential type configured produces.
+    // The state a foundry with no `av-sparkasse` credential type configured produces.
     const result = await startAvIssuance(
       db,
       stubClient([], { status: 400, body: { error: "unknown_credential_type" } }),

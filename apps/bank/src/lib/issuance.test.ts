@@ -7,6 +7,10 @@ import { FoundryClient } from "@demo/foundry-client";
 import { createDb, type Db } from "../db/index.js";
 import { credentials } from "../db/schema.js";
 import { seed } from "../db/seed.js";
+import {
+  DPC_CREDENTIAL_TYPE_ID,
+  SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
+} from "./credential-types.js";
 import { refreshIssuanceState, startIssuance } from "./issuance.js";
 
 let dir: string;
@@ -66,6 +70,7 @@ describe("startIssuance", () => {
       stubClient(offerOk),
       "user_anna",
       "card_anna",
+      DPC_CREDENTIAL_TYPE_ID,
     );
 
     expect(result).toEqual({
@@ -91,7 +96,7 @@ describe("startIssuance", () => {
       return offerOk();
     });
 
-    await startIssuance(db, client, "user_anna", "card_anna");
+    await startIssuance(db, client, "user_anna", "card_anna", DPC_CREDENTIAL_TYPE_ID);
 
     expect(sentBody).toMatchObject({
       credential_type_id: "com.emvco.dpc.card",
@@ -106,7 +111,7 @@ describe("startIssuance", () => {
       return offerOk();
     });
 
-    await startIssuance(db, client, "user_ben", "card_ben");
+    await startIssuance(db, client, "user_ben", "card_ben", DPC_CREDENTIAL_TYPE_ID);
 
     expect(sentBody).toMatchObject({
       claims: { network: "girocard", card_id: "card_ben" },
@@ -120,7 +125,7 @@ describe("startIssuance", () => {
       return offerOk();
     });
 
-    await startIssuance(db, client, "user_anna", "card_anna");
+    await startIssuance(db, client, "user_anna", "card_anna", DPC_CREDENTIAL_TYPE_ID);
 
     const offerCard = (
       sentBody.offer_display as Array<{ card: Record<string, unknown> }>
@@ -152,7 +157,7 @@ describe("startIssuance", () => {
       return offerOk();
     });
 
-    await startIssuance(db, client, "user_ben", "card_ben");
+    await startIssuance(db, client, "user_ben", "card_ben", DPC_CREDENTIAL_TYPE_ID);
 
     const responseCard = (
       sentBody.credential_response_display as Array<{
@@ -170,6 +175,7 @@ describe("startIssuance", () => {
       stubClient(offerOk),
       "user_ben",
       "card_anna",
+      DPC_CREDENTIAL_TYPE_ID,
     );
     expect(result).toEqual({ ok: false, reason: "card_not_found" });
     expect(db.select().from(credentials).all()).toHaveLength(0);
@@ -181,6 +187,7 @@ describe("startIssuance", () => {
       stubClient(offerOk),
       "user_anna",
       "card_nope",
+      DPC_CREDENTIAL_TYPE_ID,
     );
     expect(result).toEqual({ ok: false, reason: "card_not_found" });
   });
@@ -188,7 +195,7 @@ describe("startIssuance", () => {
   it("marks the row failed when foundry rejects the offer", async () => {
     const client = stubClient(() => ({ status: 500, body: { error: "boom" } }));
 
-    const result = await startIssuance(db, client, "user_anna", "card_anna");
+    const result = await startIssuance(db, client, "user_anna", "card_anna", DPC_CREDENTIAL_TYPE_ID);
 
     expect(result).toEqual({ ok: false, reason: "foundry_unavailable" });
     const row = db.select().from(credentials).get();
@@ -199,8 +206,8 @@ describe("startIssuance", () => {
   });
 
   it("allows re-issuing the same card, creating a second row", async () => {
-    await startIssuance(db, stubClient(offerOk), "user_anna", "card_anna");
-    await startIssuance(db, stubClient(offerOk), "user_anna", "card_anna");
+    await startIssuance(db, stubClient(offerOk), "user_anna", "card_anna", DPC_CREDENTIAL_TYPE_ID);
+    await startIssuance(db, stubClient(offerOk), "user_anna", "card_anna", DPC_CREDENTIAL_TYPE_ID);
     expect(db.select().from(credentials).all()).toHaveLength(2);
   });
 
@@ -210,6 +217,7 @@ describe("startIssuance", () => {
       stubClient(offerOk),
       "user_anna",
       "card_anna",
+      DPC_CREDENTIAL_TYPE_ID,
     );
 
     expect(result.ok).toBe(true);
@@ -234,11 +242,138 @@ describe("startIssuance", () => {
       stubClient(noDcApi),
       "user_anna",
       "card_anna",
+      DPC_CREDENTIAL_TYPE_ID,
     );
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.dcApiOffer).toBeUndefined();
+  });
+});
+
+describe("startIssuance for the Sparkasse card format", () => {
+  async function sentFor(
+    userId: string,
+    cardId: string,
+  ): Promise<Record<string, unknown>> {
+    let sentBody: Record<string, unknown> = {};
+    const client = stubClient((_url, init) => {
+      sentBody = JSON.parse(String(init.body));
+      return offerOk();
+    });
+    await startIssuance(
+      db,
+      client,
+      userId,
+      cardId,
+      SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
+    );
+    return sentBody;
+  }
+
+  it("asks foundry for the sparkassencard type", async () => {
+    const sent = await sentFor("user_anna", "card_anna");
+    expect(sent.credential_type_id).toBe("sparkassencard");
+  });
+
+  it("sends the sub / masked_iban / psu_id claims its vct declares", async () => {
+    const sent = await sentFor("user_anna", "card_anna");
+    // acc_anna's IBAN is DE02120300000000202051.
+    expect(sent.claims).toEqual({
+      sub: expect.any(String),
+      masked_iban: "DE** **** 2051",
+      psu_id: expect.any(String),
+    });
+  });
+
+  it("sends NEITHER display array", async () => {
+    // foundry gates both on the resolved type's vct and rejects them for
+    // anything else, which would land every attempt as a `failed` row rather
+    // than as a card missing its artwork.
+    const sent = await sentFor("user_anna", "card_anna");
+    expect(sent).not.toHaveProperty("offer_display");
+    expect(sent).not.toHaveProperty("credential_response_display");
+  });
+
+  it("stores the psu_id it sent as the row's join key", async () => {
+    const sent = await sentFor("user_anna", "card_anna");
+    const row = db.select().from(credentials).get();
+    expect(row?.credentialTypeId).toBe("sparkassencard");
+    expect(row?.credentialId).toBe(
+      (sent.claims as Record<string, string>).psu_id,
+    );
+  });
+
+  it("mints that join key as a bare UUID, not a dpc_-prefixed value", async () => {
+    await sentFor("user_anna", "card_anna");
+    const row = db.select().from(credentials).get();
+    expect(row?.credentialId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it("keeps the card behind the row, so the debit path can resolve an account", async () => {
+    await sentFor("user_anna", "card_anna");
+    const row = db.select().from(credentials).get();
+    expect(row?.cardId).toBe("card_anna");
+    expect(row?.state).toBe("offered");
+  });
+
+  it("masks the second account's IBAN, not the first's", async () => {
+    const sent = await sentFor("user_ben", "card_ben");
+    // acc_ben's IBAN is DE02500105170137075030.
+    expect((sent.claims as Record<string, string>).masked_iban).toBe(
+      "DE** **** 5030",
+    );
+  });
+
+  it("gives each issuance a fresh sub", async () => {
+    const first = await sentFor("user_anna", "card_anna");
+    const second = await sentFor("user_anna", "card_anna");
+    expect((first.claims as Record<string, string>).sub).not.toBe(
+      (second.claims as Record<string, string>).sub,
+    );
+  });
+
+  it("coexists with a DPC row for the same card", async () => {
+    // The two formats are independent credentials for one girocard; neither
+    // supersedes the other.
+    await startIssuance(
+      db,
+      stubClient(offerOk),
+      "user_anna",
+      "card_anna",
+      DPC_CREDENTIAL_TYPE_ID,
+    );
+    await startIssuance(
+      db,
+      stubClient(offerOk),
+      "user_anna",
+      "card_anna",
+      SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
+    );
+
+    const rows = db.select().from(credentials).all();
+    expect(rows.map((r) => r.credentialTypeId).sort()).toEqual([
+      "com.emvco.dpc.card",
+      "sparkassencard",
+    ]);
+    // Distinct join keys — the UNIQUE index on credential_id depends on it.
+    expect(new Set(rows.map((r) => r.credentialId)).size).toBe(2);
+  });
+
+  it("marks the row failed when foundry rejects the offer", async () => {
+    const client = stubClient(() => ({ status: 500, body: { error: "boom" } }));
+    const result = await startIssuance(
+      db,
+      client,
+      "user_anna",
+      "card_anna",
+      SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
+    );
+
+    expect(result).toEqual({ ok: false, reason: "foundry_unavailable" });
+    expect(db.select().from(credentials).get()?.state).toBe("failed");
   });
 });
 
@@ -249,6 +384,7 @@ describe("refreshIssuanceState", () => {
       stubClient(offerOk),
       "user_anna",
       "card_anna",
+      DPC_CREDENTIAL_TYPE_ID,
     );
     if (!started.ok) throw new Error("setup failed");
     return started.sessionId;

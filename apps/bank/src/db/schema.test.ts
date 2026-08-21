@@ -199,7 +199,7 @@ describe("credentials shape", () => {
         id: "cred_av",
         userId: "user_anna",
         cardId: null,
-        credentialTypeId: "av",
+        credentialTypeId: "av-sparkasse",
         credentialId: null,
         state: "offered",
         createdAt: 1,
@@ -212,7 +212,7 @@ describe("credentials shape", () => {
       .get();
     expect(row?.cardId).toBeNull();
     expect(row?.credentialId).toBeNull();
-    expect(row?.credentialTypeId).toBe("av");
+    expect(row?.credentialTypeId).toBe("av-sparkasse");
   });
 
   it("permits several rows with a null credential id", () => {
@@ -225,7 +225,7 @@ describe("credentials shape", () => {
           id,
           userId: "user_anna",
           cardId: null,
-          credentialTypeId: "av",
+          credentialTypeId: "av-sparkasse",
           credentialId: null,
           state: "offered",
           createdAt: 1,

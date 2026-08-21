@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import { accounts, cards, credentials, transactions } from "../db/schema.js";
-import { DPC_CREDENTIAL_TYPE_ID } from "./credential-types.js";
+import { isPaymentCredentialType } from "./credential-types.js";
 
 export interface ProcessPaymentInput {
   credentialId: string;
@@ -49,7 +49,13 @@ export function processPayment(
   // unknown_credential rather than as a distinct reason: this is a
   // server-to-server call behind a shared secret, and the merchant maps every
   // credential problem to one user-facing message anyway.
-  if (credential.credentialTypeId !== DPC_CREDENTIAL_TYPE_ID) {
+  //
+  // Asks the predicate rather than naming one type: the girocard is issued in
+  // two formats and both authorize money to move. Whichever claim carried the
+  // value that got us here — `credential_id` on the DPC, `psu_id` on the
+  // Sparkasse card — issuance stored it in the one column the SELECT above
+  // reads, so there is one lookup and one guard rather than a path per format.
+  if (!isPaymentCredentialType(credential.credentialTypeId)) {
     return { ok: false, reason: "unknown_credential" };
   }
 

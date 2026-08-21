@@ -183,6 +183,125 @@ describe("listCards", () => {
   });
 });
 
+describe("listCards per format", () => {
+  /** Inserts one payment credential of a named format for anna's card. */
+  function insertCard(
+    id: string,
+    credentialTypeId: "com.emvco.dpc.card" | "sparkassencard",
+    state: "offered" | "active" | "failed",
+    createdAt: number,
+  ) {
+    db.insert(credentials)
+      .values({
+        id,
+        userId: "user_anna",
+        cardId: "card_anna",
+        credentialTypeId,
+        credentialId: `key_${id}`,
+        state,
+        issuedAt: state === "active" ? createdAt : null,
+        createdAt,
+      })
+      .run();
+  }
+
+  it("reports 'none' for both formats when nothing has been issued", () => {
+    expect(listCards(db, "user_anna")[0]?.formats).toEqual({
+      "com.emvco.dpc.card": "none",
+      sparkassencard: "none",
+    });
+  });
+
+  it("does not report the other format as issued when one is", () => {
+    // The whole reason this field exists: the tile's two buttons must not
+    // claim credit for each other's work.
+    insertCard("cred_dpc", "com.emvco.dpc.card", "active", 10);
+    expect(listCards(db, "user_anna")[0]?.formats).toEqual({
+      "com.emvco.dpc.card": "active",
+      sparkassencard: "none",
+    });
+  });
+
+  it("reports the Sparkasse card independently of the DPC", () => {
+    insertCard("cred_sk", "sparkassencard", "offered", 10);
+    expect(listCards(db, "user_anna")[0]?.formats).toEqual({
+      "com.emvco.dpc.card": "none",
+      sparkassencard: "offered",
+    });
+  });
+
+  it("reports both when the card is in the wallet twice", () => {
+    insertCard("cred_dpc", "com.emvco.dpc.card", "active", 10);
+    insertCard("cred_sk", "sparkassencard", "active", 20);
+    expect(listCards(db, "user_anna")[0]?.formats).toEqual({
+      "com.emvco.dpc.card": "active",
+      sparkassencard: "active",
+    });
+  });
+
+  it("applies 'active outranks offered' within a format, not across formats", () => {
+    // A newer abandoned DPC offer must not demote the DPC's own active row,
+    // and must not touch the Sparkasse card's answer at all.
+    insertCard("cred_dpc_active", "com.emvco.dpc.card", "active", 10);
+    insertCard("cred_dpc_offer", "com.emvco.dpc.card", "offered", 30);
+    insertCard("cred_sk_offer", "sparkassencard", "offered", 20);
+    expect(listCards(db, "user_anna")[0]?.formats).toEqual({
+      "com.emvco.dpc.card": "active",
+      sparkassencard: "offered",
+    });
+  });
+
+  it("ignores a failed attempt per format", () => {
+    insertCard("cred_sk_bad", "sparkassencard", "failed", 40);
+    insertCard("cred_dpc", "com.emvco.dpc.card", "active", 10);
+    expect(listCards(db, "user_anna")[0]?.formats).toEqual({
+      "com.emvco.dpc.card": "active",
+      sparkassencard: "none",
+    });
+  });
+
+  it("shows the card face as 'active' when either format is in the wallet", () => {
+    // The combined state is what draws the EU stars: the card is in a wallet,
+    // and the face has no opinion about which format got it there.
+    insertCard("cred_sk", "sparkassencard", "active", 10);
+    const card = listCards(db, "user_anna")[0];
+    expect(card?.credentialState).toBe("active");
+    expect(card?.credentialRowId).toBe("cred_sk");
+  });
+
+  it("prefers an active row of either format over a newer offer of the other", () => {
+    insertCard("cred_dpc_active", "com.emvco.dpc.card", "active", 10);
+    insertCard("cred_sk_offer", "sparkassencard", "offered", 30);
+    const card = listCards(db, "user_anna")[0];
+    expect(card?.credentialState).toBe("active");
+    expect(card?.credentialRowId).toBe("cred_dpc_active");
+  });
+
+  it("excludes an age credential from a card's formats", () => {
+    // An age credential has no card_id, so it could never have been scoped in;
+    // the explicit type filter makes that an assertion rather than a
+    // coincidence of the data.
+    db.insert(credentials)
+      .values({
+        id: "cred_av",
+        userId: "user_anna",
+        cardId: null,
+        credentialTypeId: "av-sparkasse",
+        credentialId: null,
+        state: "active",
+        issuedAt: 1,
+        createdAt: 50,
+      })
+      .run();
+    const card = listCards(db, "user_anna")[0];
+    expect(card?.credentialState).toBe("none");
+    expect(card?.formats).toEqual({
+      "com.emvco.dpc.card": "none",
+      sparkassencard: "none",
+    });
+  });
+});
+
 describe("listTransactions", () => {
   it("returns the newest transactions first", () => {
     const rows = listTransactions(db, "user_anna", 5, 0);
@@ -244,7 +363,7 @@ describe("getAgeCredentialState", () => {
         id,
         userId,
         cardId: null,
-        credentialTypeId: "av",
+        credentialTypeId: "av-sparkasse",
         credentialId: null,
         state,
         issuedAt: state === "active" ? createdAt : null,

@@ -74,6 +74,16 @@ export interface Messages {
      * row wins), so the button stays live and has to say so.
      */
     addAgain: string;
+    /**
+     * The accessible name for the Google Wallet badge.
+     *
+     * Unlike every other entry here, nothing renders this string: the badge is
+     * Google's artwork and its text is drawn as SVG paths, so this is the
+     * button's `aria-label` and the image's `alt` and nothing else. It is
+     * catalogued rather than hardcoded because a screen reader in German
+     * should not be read an English name.
+     */
+    addToGoogleWallet: string;
     preparing: string;
     confirmInApp: string;
     openInWallet: string;

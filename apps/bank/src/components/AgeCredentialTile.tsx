@@ -8,7 +8,6 @@ import {
   faceCopy,
   walletActionLabel,
 } from "@/lib/credential-copy.js";
-import { AV_CREDENTIAL_TYPE_ID } from "@/lib/credential-types.js";
 import type { Locale } from "@/lib/i18n/locale.js";
 import { MESSAGES } from "@/lib/i18n/messages.js";
 import type { CardCredentialState } from "@/lib/queries.js";
@@ -49,7 +48,7 @@ export function AgeCredentialTile({
 
   const issuing = pending || session !== null;
   const faceState = cardFaceState(credentialState, issuing);
-  const copy = faceCopy(locale, AV_CREDENTIAL_TYPE_ID, faceState);
+  const copy = faceCopy(locale, "age", faceState);
 
   async function start() {
     setPending(true);
@@ -113,7 +112,7 @@ export function AgeCredentialTile({
           sessionId={session.sessionId}
           offerUri={session.offerUri}
           dcApiOffer={session.dcApiOffer}
-          copy={dialogCopy(locale, AV_CREDENTIAL_TYPE_ID)}
+          copy={dialogCopy(locale, "age")}
           locale={locale}
           onClose={() => setSession(null)}
         />
