@@ -96,7 +96,13 @@ describe("startIssuance", () => {
       return offerOk();
     });
 
-    await startIssuance(db, client, "user_anna", "card_anna", DPC_CREDENTIAL_TYPE_ID);
+    await startIssuance(
+      db,
+      client,
+      "user_anna",
+      "card_anna",
+      DPC_CREDENTIAL_TYPE_ID,
+    );
 
     expect(sentBody).toMatchObject({
       credential_type_id: "com.emvco.dpc.card",
@@ -111,7 +117,13 @@ describe("startIssuance", () => {
       return offerOk();
     });
 
-    await startIssuance(db, client, "user_ben", "card_ben", DPC_CREDENTIAL_TYPE_ID);
+    await startIssuance(
+      db,
+      client,
+      "user_ben",
+      "card_ben",
+      DPC_CREDENTIAL_TYPE_ID,
+    );
 
     expect(sentBody).toMatchObject({
       claims: { network: "girocard", card_id: "card_ben" },
@@ -125,7 +137,13 @@ describe("startIssuance", () => {
       return offerOk();
     });
 
-    await startIssuance(db, client, "user_anna", "card_anna", DPC_CREDENTIAL_TYPE_ID);
+    await startIssuance(
+      db,
+      client,
+      "user_anna",
+      "card_anna",
+      DPC_CREDENTIAL_TYPE_ID,
+    );
 
     const offerCard = (
       sentBody.offer_display as Array<{ card: Record<string, unknown> }>
@@ -157,7 +175,13 @@ describe("startIssuance", () => {
       return offerOk();
     });
 
-    await startIssuance(db, client, "user_ben", "card_ben", DPC_CREDENTIAL_TYPE_ID);
+    await startIssuance(
+      db,
+      client,
+      "user_ben",
+      "card_ben",
+      DPC_CREDENTIAL_TYPE_ID,
+    );
 
     const responseCard = (
       sentBody.credential_response_display as Array<{
@@ -195,7 +219,13 @@ describe("startIssuance", () => {
   it("marks the row failed when foundry rejects the offer", async () => {
     const client = stubClient(() => ({ status: 500, body: { error: "boom" } }));
 
-    const result = await startIssuance(db, client, "user_anna", "card_anna", DPC_CREDENTIAL_TYPE_ID);
+    const result = await startIssuance(
+      db,
+      client,
+      "user_anna",
+      "card_anna",
+      DPC_CREDENTIAL_TYPE_ID,
+    );
 
     expect(result).toEqual({ ok: false, reason: "foundry_unavailable" });
     const row = db.select().from(credentials).get();
@@ -206,8 +236,20 @@ describe("startIssuance", () => {
   });
 
   it("allows re-issuing the same card, creating a second row", async () => {
-    await startIssuance(db, stubClient(offerOk), "user_anna", "card_anna", DPC_CREDENTIAL_TYPE_ID);
-    await startIssuance(db, stubClient(offerOk), "user_anna", "card_anna", DPC_CREDENTIAL_TYPE_ID);
+    await startIssuance(
+      db,
+      stubClient(offerOk),
+      "user_anna",
+      "card_anna",
+      DPC_CREDENTIAL_TYPE_ID,
+    );
+    await startIssuance(
+      db,
+      stubClient(offerOk),
+      "user_anna",
+      "card_anna",
+      DPC_CREDENTIAL_TYPE_ID,
+    );
     expect(db.select().from(credentials).all()).toHaveLength(2);
   });
 

@@ -16,7 +16,8 @@ import type { Credential } from "../db/schema.js";
 export type CredentialTypeId = Credential["credentialTypeId"];
 
 /** The EMVCo Digital Payment Credential. */
-export const DPC_CREDENTIAL_TYPE_ID = "com.emvco.dpc.card" satisfies CredentialTypeId;
+export const DPC_CREDENTIAL_TYPE_ID =
+ "com.emvco.dpc.card" satisfies CredentialTypeId;
 
 /**
  * The bank's own card credential — the same girocard in a second format,
@@ -24,7 +25,8 @@ export const DPC_CREDENTIAL_TYPE_ID = "com.emvco.dpc.card" satisfies CredentialT
  * side. Payable like the DPC, but it carries an entirely different claim set:
  * see `payment-claims.ts`.
  */
-export const SPARKASSEN_CARD_CREDENTIAL_TYPE_ID = "sparkassencard" satisfies CredentialTypeId;
+export const SPARKASSEN_CARD_CREDENTIAL_TYPE_ID =
+ "sparkassencard" satisfies CredentialTypeId;
 
 /**
  * The age-verification attestation. NOT `eu.europa.ec.av.1` — that is the mdoc
@@ -47,11 +49,12 @@ export const AV_CREDENTIAL_TYPE_ID = "av-sparkasse" satisfies CredentialTypeId;
  * rejecting it.
  */
 export const PAYMENT_CREDENTIAL_TYPE_IDS = [
-  DPC_CREDENTIAL_TYPE_ID,
-  SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
+ DPC_CREDENTIAL_TYPE_ID,
+ SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
 ] as const;
 
-export type PaymentCredentialTypeId = (typeof PAYMENT_CREDENTIAL_TYPE_IDS)[number];
+export type PaymentCredentialTypeId =
+ (typeof PAYMENT_CREDENTIAL_TYPE_IDS)[number];
 
 /**
  * Whether a stored row is a payment credential.
@@ -61,9 +64,9 @@ export type PaymentCredentialTypeId = (typeof PAYMENT_CREDENTIAL_TYPE_IDS)[numbe
  * other reads a column whose legacy values outlive the union.
  */
 export function isPaymentCredentialType(
-  typeId: string,
+ typeId: string,
 ): typeId is PaymentCredentialTypeId {
-  return (PAYMENT_CREDENTIAL_TYPE_IDS as readonly string[]).includes(typeId);
+ return (PAYMENT_CREDENTIAL_TYPE_IDS as readonly string[]).includes(typeId);
 }
 
 /**
@@ -76,6 +79,8 @@ export function isPaymentCredentialType(
  * safety guard, not a presentation preference, which is why it is a named
  * predicate with its own test rather than a comparison inline in `issuance.ts`.
  */
-export function sendsDpcDisplayMetadata(typeId: PaymentCredentialTypeId): boolean {
-  return typeId === DPC_CREDENTIAL_TYPE_ID;
+export function sendsDpcDisplayMetadata(
+ typeId: PaymentCredentialTypeId,
+): boolean {
+ return typeId === DPC_CREDENTIAL_TYPE_ID;
 }

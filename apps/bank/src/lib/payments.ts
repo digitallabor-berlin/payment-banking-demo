@@ -15,7 +15,13 @@ export interface ProcessPaymentInput {
 
 export type ProcessPaymentResult =
   | { ok: true; bankTxId: string; newBalanceCents: number }
-  | { ok: false; reason: "unknown_credential" | "credential_not_active" | "insufficient_funds" };
+  | {
+      ok: false;
+      reason:
+        | "unknown_credential"
+        | "credential_not_active"
+        | "insufficient_funds";
+    };
 
 /**
  * The merchant→bank debit (spec §6.2 steps 8–9). Checked in order: an existing
@@ -34,8 +40,16 @@ export function processPayment(
     .where(eq(transactions.idempotencyKey, input.idempotencyKey))
     .get();
   if (existing) {
-    const account = db.select().from(accounts).where(eq(accounts.id, existing.accountId)).get();
-    return { ok: true, bankTxId: existing.id, newBalanceCents: account?.balanceCents ?? 0 };
+    const account = db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, existing.accountId))
+      .get();
+    return {
+      ok: true,
+      bankTxId: existing.id,
+      newBalanceCents: account?.balanceCents ?? 0,
+    };
   }
 
   const credential = db
@@ -59,20 +73,30 @@ export function processPayment(
     return { ok: false, reason: "unknown_credential" };
   }
 
-  if (credential.state !== "active") return { ok: false, reason: "credential_not_active" };
+  if (credential.state !== "active")
+    return { ok: false, reason: "credential_not_active" };
 
   // cardId is nullable since the age credential landed. The narrowing is what
   // the next line needs, and closing the same hole twice is deliberate: this
   // one is enforced by the compiler, the one above by the type id.
   if (!credential.cardId) return { ok: false, reason: "unknown_credential" };
 
-  const card = db.select().from(cards).where(eq(cards.id, credential.cardId)).get();
+  const card = db
+    .select()
+    .from(cards)
+    .where(eq(cards.id, credential.cardId))
+    .get();
   if (!card) return { ok: false, reason: "unknown_credential" };
 
-  const account = db.select().from(accounts).where(eq(accounts.id, card.accountId)).get();
+  const account = db
+    .select()
+    .from(accounts)
+    .where(eq(accounts.id, card.accountId))
+    .get();
   if (!account) return { ok: false, reason: "unknown_credential" };
 
-  if (account.balanceCents < input.amountCents) return { ok: false, reason: "insufficient_funds" };
+  if (account.balanceCents < input.amountCents)
+    return { ok: false, reason: "insufficient_funds" };
 
   const bankTxId = `tx_${randomUUID()}`;
   const newBalanceCents = account.balanceCents - input.amountCents;
@@ -112,8 +136,16 @@ export function processPayment(
       .where(eq(transactions.idempotencyKey, input.idempotencyKey))
       .get();
     if (raced) {
-      const racedAccount = db.select().from(accounts).where(eq(accounts.id, raced.accountId)).get();
-      return { ok: true, bankTxId: raced.id, newBalanceCents: racedAccount?.balanceCents ?? 0 };
+      const racedAccount = db
+        .select()
+        .from(accounts)
+        .where(eq(accounts.id, raced.accountId))
+        .get();
+      return {
+        ok: true,
+        bankTxId: raced.id,
+        newBalanceCents: racedAccount?.balanceCents ?? 0,
+      };
     }
     throw error;
   }

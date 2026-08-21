@@ -18,90 +18,90 @@ import { de } from "./de.js";
  * themselves rather than being handed resolved copy.
  */
 export interface Messages {
-  meta: {
-    description: string;
-  };
-  nav: {
-    overview: string;
-    transactions: string;
-    signOut: string;
-    menu: string;
-    /** aria-label on the logo link. */
-    toOverview: string;
-    /** aria-label on the language switcher group. */
-    language: string;
-  };
-  login: {
-    tagline: string;
-    walletFooter: string;
-    username: string;
-    password: string;
-    submit: string;
-    submitPending: string;
-    demoLogins: string;
-    failed: string;
-  };
-  dashboard: {
-    greeting: (name: string) => string;
-    cards: string;
-    credentials: string;
-    recentTransactions: string;
-    showAll: string;
-  };
-  transactions: {
-    title: string;
-    page: (page: number) => string;
-    empty: string;
-    emptyMore: string;
-    /** aria-label on the pagination nav. */
-    pagination: string;
-    newer: string;
-    older: string;
-  };
-  account: {
-    type: string;
-    available: string;
-  };
-  credential: {
-    ageTitle: string;
-  };
-  issuance: {
-    addToWallet: string;
-    /**
-     * The same button once the credential is already in the wallet. A
-     * separate key rather than a suffix: nothing forbids a second issuance
-     * (the server has no "already active" guard and the newest non-failed
-     * row wins), so the button stays live and has to say so.
-     */
-    addAgain: string;
-    /**
-     * The accessible name for the Google Wallet badge.
-     *
-     * Unlike every other entry here, nothing renders this string: the badge is
-     * Google's artwork and its text is drawn as SVG paths, so this is the
-     * button's `aria-label` and the image's `alt` and nothing else. It is
-     * catalogued rather than hardcoded because a screen reader in German
-     * should not be read an English name.
-     */
-    addToGoogleWallet: string;
-    preparing: string;
-    confirmInApp: string;
-    openInWallet: string;
-    scanCode: string;
-    qrAlt: string;
-    waiting: string;
-    cancel: string;
-    close: string;
-    failedTitle: string;
-  };
-  errors: {
-    offerNotCreated: string;
-    connectionFailed: string;
-    expired: string;
-    connectionLost: string;
-    dcApiUnsupported: string;
-    dcApiCancelled: string;
-  };
+   meta: {
+      description: string;
+   };
+   nav: {
+      overview: string;
+      transactions: string;
+      signOut: string;
+      menu: string;
+      /** aria-label on the logo link. */
+      toOverview: string;
+      /** aria-label on the language switcher group. */
+      language: string;
+   };
+   login: {
+      tagline: string;
+      walletFooter: string;
+      username: string;
+      password: string;
+      submit: string;
+      submitPending: string;
+      demoLogins: string;
+      failed: string;
+   };
+   dashboard: {
+      greeting: (name: string) => string;
+      cards: string;
+      credentials: string;
+      recentTransactions: string;
+      showAll: string;
+   };
+   transactions: {
+      title: string;
+      page: (page: number) => string;
+      empty: string;
+      emptyMore: string;
+      /** aria-label on the pagination nav. */
+      pagination: string;
+      newer: string;
+      older: string;
+   };
+   account: {
+      type: string;
+      available: string;
+   };
+   credential: {
+      ageTitle: string;
+   };
+   issuance: {
+      addToWallet: string;
+      /**
+       * The same button once the credential is already in the wallet. A
+       * separate key rather than a suffix: nothing forbids a second issuance
+       * (the server has no "already active" guard and the newest non-failed
+       * row wins), so the button stays live and has to say so.
+       */
+      addAgain: string;
+      /**
+       * The accessible name for the Google Wallet badge.
+       *
+       * Unlike every other entry here, nothing renders this string: the badge is
+       * Google's artwork and its text is drawn as SVG paths, so this is the
+       * button's `aria-label` and the image's `alt` and nothing else. It is
+       * catalogued rather than hardcoded because a screen reader in German
+       * should not be read an English name.
+       */
+      addToGoogleWallet: string;
+      preparing: string;
+      confirmInApp: string;
+      openInWallet: string;
+      scanCode: string;
+      qrAlt: string;
+      waiting: string;
+      cancel: string;
+      close: string;
+      failedTitle: string;
+   };
+   errors: {
+      offerNotCreated: string;
+      connectionFailed: string;
+      expired: string;
+      connectionLost: string;
+      dcApiUnsupported: string;
+      dcApiCancelled: string;
+   };
 }
 
 export const MESSAGES: Record<Locale, Messages> = { en, de };

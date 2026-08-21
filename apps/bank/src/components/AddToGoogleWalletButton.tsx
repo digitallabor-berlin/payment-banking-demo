@@ -26,52 +26,52 @@
  * rather than on it, for the same reason.
  */
 export function AddToGoogleWalletButton({
-  onStart,
-  pending,
-  error,
-  label,
-  pendingLabel,
+       onStart,
+       pending,
+       error,
+       label,
+       pendingLabel,
 }: {
-  onStart: () => void;
-  pending: boolean;
-  error: string | null;
-  label: string;
-  pendingLabel: string;
+       onStart: () => void;
+       pending: boolean;
+       error: string | null;
+       label: string;
+       pendingLabel: string;
 }) {
-  return (
-    <div className="flex flex-col items-start gap-1.5">
-      <button
-        type="button"
-        onClick={onStart}
-        disabled={pending}
-        aria-label={label}
-        className="rounded-full transition-opacity disabled:opacity-60"
-      >
-        {/* A plain <img>, not next/image: the asset is a fixed-size SVG served
+       return (
+              <div className="flex flex-col items-start gap-1.5">
+                     <button
+                            type="button"
+                            onClick={onStart}
+                            disabled={pending}
+                            aria-label={label}
+                            className="rounded-full transition-opacity disabled:opacity-60"
+                     >
+                            {/* A plain <img>, not next/image: the asset is a fixed-size SVG served
             from public/, so there is nothing for the optimizer to do and
             next/image does not process SVG by default anyway. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/add-to-google-wallet.svg"
-          alt={label}
-          width={199}
-          height={55}
-          className="h-11 w-auto"
-        />
-      </button>
-      {pending ? (
-        <span className="text-xs font-medium text-[var(--color-muted-foreground)]">
-          {pendingLabel}
-        </span>
-      ) : null}
-      {error ? (
-        <span
-          role="alert"
-          className="text-xs font-medium text-[var(--color-destructive)]"
-        >
-          {error}
-        </span>
-      ) : null}
-    </div>
-  );
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                                   src="/add-to-google-wallet.svg"
+                                   alt={label}
+                                   width={199}
+                                   height={55}
+                                   className="h-11 w-auto"
+                            />
+                     </button>
+                     {pending ? (
+                            <span className="text-xs font-medium text-[var(--color-muted-foreground)]">
+                                   {pendingLabel}
+                            </span>
+                     ) : null}
+                     {error ? (
+                            <span
+                                   role="alert"
+                                   className="text-xs font-medium text-[var(--color-destructive)]"
+                            >
+                                   {error}
+                            </span>
+                     ) : null}
+              </div>
+       );
 }

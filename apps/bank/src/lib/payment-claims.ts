@@ -1,6 +1,6 @@
 import {
-  DPC_CREDENTIAL_TYPE_ID,
-  type PaymentCredentialTypeId,
+ DPC_CREDENTIAL_TYPE_ID,
+ type PaymentCredentialTypeId,
 } from "./credential-types.js";
 import { ibanLastFour } from "./display-metadata.js";
 
@@ -22,17 +22,17 @@ import { ibanLastFour } from "./display-metadata.js";
  */
 
 export interface PaymentClaimsInput {
-  card: { id: string; network: string };
-  /** The IBAN of the account the card is drawn on — the source of `masked_iban`. */
-  iban: string;
-  /**
-   * The opaque value the wallet will disclose at checkout, and the value stored
-   * in the row's `credential_id` column. Each format spells it differently:
-   * `credential_id` on the DPC, `psu_id` on the Sparkasse card.
-   */
-  joinKey: string;
-  /** The `sub` claim. Generated per issuance and never persisted. */
-  subjectId: string;
+ card: { id: string; network: string };
+ /** The IBAN of the account the card is drawn on — the source of `masked_iban`. */
+ iban: string;
+ /**
+  * The opaque value the wallet will disclose at checkout, and the value stored
+  * in the row's `credential_id` column. Each format spells it differently:
+  * `credential_id` on the DPC, `psu_id` on the Sparkasse card.
+  */
+ joinKey: string;
+ /** The `sub` claim. Generated per issuance and never persisted. */
+ subjectId: string;
 }
 
 /**
@@ -49,9 +49,9 @@ export interface PaymentClaimsInput {
  * which identifies the issuing country's format.
  */
 export function maskIban(iban: string): string {
-  const compact = iban.replace(/\s+/g, "");
-  const country = compact.slice(0, 2).toUpperCase();
-  return `${country}** **** ${ibanLastFour(compact)}`;
+ const compact = iban.replace(/\s+/g, "");
+ const country = compact.slice(0, 2).toUpperCase();
+ return `${country}** **** ${ibanLastFour(compact)}`;
 }
 
 /**
@@ -62,20 +62,20 @@ export function maskIban(iban: string): string {
  * where it is tested — instead of at the call site.
  */
 export function buildPaymentClaims(
-  typeId: PaymentCredentialTypeId,
-  input: PaymentClaimsInput,
+ typeId: PaymentCredentialTypeId,
+ input: PaymentClaimsInput,
 ): Record<string, string> {
-  if (typeId === DPC_CREDENTIAL_TYPE_ID) {
-    return {
-      credential_id: input.joinKey,
-      network: input.card.network,
-      card_id: input.card.id,
-    };
-  }
-
+ if (typeId === DPC_CREDENTIAL_TYPE_ID) {
   return {
-    sub: input.subjectId,
-    masked_iban: maskIban(input.iban),
-    psu_id: input.joinKey,
+   credential_id: input.joinKey,
+   network: input.card.network,
+   card_id: input.card.id,
   };
+ }
+
+ return {
+  sub: input.subjectId,
+  masked_iban: maskIban(input.iban),
+  psu_id: input.joinKey,
+ };
 }

@@ -45,7 +45,9 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function baseInput(overrides: Partial<Parameters<typeof processPayment>[1]> = {}) {
+function baseInput(
+  overrides: Partial<Parameters<typeof processPayment>[1]> = {},
+) {
   return {
     credentialId: "dpc_active_1",
     amountCents: 4_798,
@@ -59,7 +61,11 @@ function baseInput(overrides: Partial<Parameters<typeof processPayment>[1]> = {}
 
 describe("processPayment", () => {
   it("debits the account and records a transaction", () => {
-    const before = db.select().from(accounts).where(eq(accounts.id, "acc_anna")).get();
+    const before = db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, "acc_anna"))
+      .get();
 
     const result = processPayment(db, baseInput());
 
@@ -67,7 +73,11 @@ describe("processPayment", () => {
     if (!result.ok) return;
     expect(result.newBalanceCents).toBe((before?.balanceCents ?? 0) - 4_798);
 
-    const row = db.select().from(transactions).where(eq(transactions.id, result.bankTxId)).get();
+    const row = db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.id, result.bankTxId))
+      .get();
     expect(row?.amountCents).toBe(-4_798);
     expect(row?.credentialId).toBe("dpc_active_1");
     expect(row?.idempotencyKey).toBe("sess_1");
@@ -75,15 +85,26 @@ describe("processPayment", () => {
   });
 
   it("rejects an unknown credential without touching the balance", () => {
-    const before = db.select().from(accounts).where(eq(accounts.id, "acc_anna")).get();
+    const before = db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, "acc_anna"))
+      .get();
     const result = processPayment(db, baseInput({ credentialId: "dpc_nope" }));
     expect(result).toEqual({ ok: false, reason: "unknown_credential" });
-    const after = db.select().from(accounts).where(eq(accounts.id, "acc_anna")).get();
+    const after = db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, "acc_anna"))
+      .get();
     expect(after?.balanceCents).toBe(before?.balanceCents);
   });
 
   it("rejects a credential that is only 'offered', not 'active'", () => {
-    const result = processPayment(db, baseInput({ credentialId: "dpc_offered_1" }));
+    const result = processPayment(
+      db,
+      baseInput({ credentialId: "dpc_offered_1" }),
+    );
     expect(result).toEqual({ ok: false, reason: "credential_not_active" });
   });
 

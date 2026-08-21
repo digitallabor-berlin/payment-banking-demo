@@ -105,9 +105,10 @@ function pickLiveCredential<T extends { state: string }>(
  * state" is one rule, and asking it twice of the same rows is cheaper than a
  * second rule for combining its own answers.
  */
-function stateOf(
-  rows: Array<{ id: string; state: string }>,
-): { state: CardCredentialState; rowId: string | null } {
+function stateOf(rows: Array<{ id: string; state: string }>): {
+  state: CardCredentialState;
+  rowId: string | null;
+} {
   const credential = pickLiveCredential(rows);
   // The caller's where(inArray(..., ["offered", "active"])) guarantees the
   // state is never "failed" here, but Drizzle's inferred column type is still

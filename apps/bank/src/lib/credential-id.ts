@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
-  DPC_CREDENTIAL_TYPE_ID,
-  type PaymentCredentialTypeId,
+ DPC_CREDENTIAL_TYPE_ID,
+ type PaymentCredentialTypeId,
 } from "./credential-types.js";
 
 /**
@@ -10,7 +10,7 @@ import {
  * no padding — roughly 144 bits, far beyond guessing range.
  */
 export function mintCredentialId(): string {
-  return `dpc_${randomBytes(18).toString("base64url")}`;
+ return `dpc_${randomBytes(18).toString("base64url")}`;
 }
 
 /**
@@ -27,5 +27,5 @@ export function mintCredentialId(): string {
  * so it gets its own test.
  */
 export function mintJoinKey(typeId: PaymentCredentialTypeId): string {
-  return typeId === DPC_CREDENTIAL_TYPE_ID ? mintCredentialId() : randomUUID();
+ return typeId === DPC_CREDENTIAL_TYPE_ID ? mintCredentialId() : randomUUID();
 }

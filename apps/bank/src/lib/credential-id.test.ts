@@ -19,7 +19,9 @@ describe("mintCredentialId", () => {
   });
 
   it("is unique across many mints", () => {
-    const seen = new Set(Array.from({ length: 2000 }, () => mintCredentialId()));
+    const seen = new Set(
+      Array.from({ length: 2000 }, () => mintCredentialId()),
+    );
     expect(seen.size).toBe(2000);
   });
 });
