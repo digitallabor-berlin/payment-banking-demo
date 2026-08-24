@@ -117,10 +117,11 @@ describe("startAuthenticatorIssuance", () => {
     expect(captures[0]?.body.claims).not.toEqual(captures[1]?.body.claims);
   });
 
-  it("never persists the sub it sent", async () => {
-    // `sub` is sent and forgotten, exactly as `startIssuance` treats its own:
-    // nothing resolves a credential by it, so a column would be an identifier
-    // this bank kept for no purpose.
+  it("persists the sub it sent, and nothing else from the claims", async () => {
+    // `sub` used to be sent and forgotten. Wallet login is what changed that:
+    // a presentation discloses this value and nothing else identifying, so it
+    // is the only way back from a vp_token to a customer. It lands in
+    // `credential_id` and nowhere else on the row.
     const captures: Capture[] = [];
     const result = await startAuthenticatorIssuance(
       db,
@@ -134,7 +135,8 @@ describe("startAuthenticatorIssuance", () => {
       .from(credentials)
       .where(eq(credentials.id, result.sessionId))
       .get();
-    expect(JSON.stringify(row)).not.toContain(String(claims.sub));
+    expect(row?.credentialId).toBe(String(claims.sub));
+    expect(Object.keys(claims)).toEqual(["sub"]);
   });
 
   it("sends no display metadata at all", async () => {
@@ -152,7 +154,7 @@ describe("startAuthenticatorIssuance", () => {
     expect(captures[0]?.body).not.toHaveProperty("credential_response_display");
   });
 
-  it("writes an offered row with no card and no join key", async () => {
+  it("writes an offered row with no card, keyed by the subject", async () => {
     const result = await startAuthenticatorIssuance(
       db,
       stubClient([], OFFER_OK),
@@ -168,7 +170,10 @@ describe("startAuthenticatorIssuance", () => {
     // No card: this credential attests a property of the person, and it is not
     // payable, so there is nothing for `processPayment` to debit through.
     expect(row?.cardId).toBeNull();
-    expect(row?.credentialId).toBeNull();
+    // `credential_id` here is the authentication subject, NOT a payment join
+    // key. `isPaymentCredentialType` is what stops it authorizing a debit —
+    // see the guard proved in payments.test.ts.
+    expect(row?.credentialId).toEqual(expect.any(String));
     expect(row?.credentialTypeId).toBe("sparkassen_auth");
     expect(row?.state).toBe("offered");
     expect(row?.issuedAt).toBeNull();
@@ -233,5 +238,43 @@ describe("startAuthenticatorIssuance", () => {
     if (!first.ok || !second.ok) throw new Error("expected both to succeed");
     expect(first.sessionId).not.toBe(second.sessionId);
     expect(db.select().from(credentials).all()).toHaveLength(2);
+  });
+});
+
+describe("persisting the subject", () => {
+  it("stores the sub it sent, so a presentation can be resolved to a user", async () => {
+    const captures: Capture[] = [];
+    const client = stubClient(captures, OFFER_OK);
+
+    const result = await startAuthenticatorIssuance(db, client, "user_anna");
+    expect(result.ok).toBe(true);
+
+    const row = db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.credentialTypeId, SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID))
+      .get();
+
+    const sent = (captures[0]?.body["claims"] as Record<string, unknown>)["sub"];
+    expect(typeof sent).toBe("string");
+    expect(row?.credentialId).toBe(sent);
+  });
+
+  it("mints a different sub per issuance, so two are not correlatable", async () => {
+    const captures: Capture[] = [];
+    const client = stubClient(captures, OFFER_OK);
+
+    await startAuthenticatorIssuance(db, client, "user_anna");
+    await startAuthenticatorIssuance(db, client, "user_anna");
+
+    const rows = db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.credentialTypeId, SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID))
+      .all();
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.credentialId).not.toBe(rows[1]?.credentialId);
+    expect(rows[0]?.credentialId).not.toBeNull();
   });
 });

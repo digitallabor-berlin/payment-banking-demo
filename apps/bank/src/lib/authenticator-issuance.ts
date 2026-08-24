@@ -19,11 +19,19 @@ export type StartAuthenticatorIssuanceResult =
  * the age path, not a body — but it is a separate function from that one too,
  * because the two share no claims and mean different things.
  *
- * The claim set is ONE claim: a `sub` UUID, minted here, sent, and never
- * persisted. Nothing resolves a credential by it, so a column would be an
- * identifier the bank kept for no purpose — the same treatment `startIssuance`
- * gives its own `sub`. Minting it per issuance is also what keeps two
- * authenticator credentials from being correlatable to each other.
+ * The claim set is ONE claim: a `sub` UUID, minted here, sent, AND PERSISTED
+ * to this row's `credential_id`.
+ *
+ * It was deliberately not persisted until wallet login existed. Persisting it
+ * is what lets a presentation resolve back to a customer, which is exactly
+ * what logging in requires. The privacy property that choice protected
+ * survives: the value is still fresh per issuance, so two of these credentials
+ * still cannot be correlated to each other by anyone. What changes is that the
+ * BANK can now link a presentation to the customer it issued to.
+ *
+ * Consequence, permanent and unfixable: any credential issued BEFORE this
+ * change has an unrecoverable `sub` and cannot be used to log in. There is no
+ * backfill, because the value was never stored.
  *
  * Sends NO `offer_display` and NO `credential_response_display`. foundry gates
  * both on the DPC's vct (`create_offer.rs`) and rejects them outright for any
@@ -47,6 +55,10 @@ export async function startAuthenticatorIssuance(
   now: number = Date.now(),
 ): Promise<StartAuthenticatorIssuanceResult> {
   const rowId = `cred_${randomUUID()}`;
+  // Minted here rather than at claim-building time because the row must carry
+  // it: a presentation discloses this value and nothing else that identifies
+  // the holder, so it is the ONLY way back from a vp_token to a customer.
+  const subject = randomUUID();
 
   db.insert(credentials)
     .values({
@@ -56,8 +68,11 @@ export async function startAuthenticatorIssuance(
       // they are. It is not payable, so there is nothing to debit through.
       cardId: null,
       credentialTypeId: SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID,
-      // No payment join key, and none is disclosed to anyone.
-      credentialId: null,
+      // Not a payment join key — nothing debits through this row. It shares
+      // the column because both are "the opaque value this credential
+      // discloses", and `isPaymentCredentialType` is what keeps the two roles
+      // apart at every read.
+      credentialId: subject,
       foundryTxId: null,
       state: "offered",
       issuedAt: null,
@@ -68,8 +83,7 @@ export async function startAuthenticatorIssuance(
   try {
     const offer = await client.createIssuanceOffer({
       credential_type_id: SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID,
-      // Sent, never stored — see the note above.
-      claims: { sub: randomUUID() },
+      claims: { sub: subject },
     });
 
     db.update(credentials)
