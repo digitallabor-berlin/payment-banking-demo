@@ -7,15 +7,25 @@ const BINDING_CHECK = "transaction_data_binding";
  * `payment_av` named queries. Also what `transaction_data.credential_ids` names.
  *
  * A map rather than a fallback chain, and the key order is the resolution
- * preference. Both formats are payable and their claim sets are disjoint — the
- * DPC declares `credential_id`/`network`/`card_id`, the Sparkassen Card
- * declares `sub`/`masked_iban`/`psu_id` — so reading "whichever key is present"
- * would let a claim-name collision pick who gets debited. Each query id may
- * only ever yield the claim its own vct declares.
+ * preference. All three are payable. The DPC's claim set is disjoint from the
+ * other two — it declares `credential_id`/`network`/`card_id` — so reading
+ * "whichever key is present" would let a claim-name collision pick who gets
+ * debited. Each query id may only ever yield the claim its own vct declares.
+ *
+ * `sparkassencard` and `wero` are why this is keyed by query id and not by claim
+ * shape at all: their claim sets are *identical* (`sub`/`masked_iban`/`psu_id`),
+ * and only the query id — hence the vct that answered it — tells them apart.
+ *
+ * It is also the one place that has to be widened when foundry adds a payment
+ * option, and the cost of missing that is a *decline*, not a gap: when `wero`
+ * joined `options: [[dpc], [sparkassencard], [wero]]` a Wero-only answer
+ * resolved to no payment credential at all, so the binding gate failed closed
+ * and the shopper was told the amount could not be confirmed.
  */
 const PAYMENT_JOIN_KEY_CLAIM = {
  dpc: "credential_id",
  sparkassencard: "psu_id",
+ wero: "psu_id",
 } as const;
 
 const PAYMENT_QUERY_IDS = Object.keys(

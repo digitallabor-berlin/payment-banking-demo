@@ -21,7 +21,7 @@ const RESTRICTED = new Set<string>(AGE_RESTRICTED_PRODUCT_IDS);
  * promise a check the presentation does not ask for.
  */
 export function isAgeRestricted(productId: string): boolean {
-  return RESTRICTED.has(productId);
+ return RESTRICTED.has(productId);
 }
 
 /**
@@ -42,15 +42,15 @@ export function isAgeRestricted(productId: string): boolean {
  * testable; the caller reads them from `order_items`, never from the browser.
  */
 export function selectNamedQuery(productIds: readonly string[]): NamedQueryRef {
-  return productIds.some(isAgeRestricted) ? "payment_av" : "payment";
+ return productIds.some(isAgeRestricted) ? "payment_av" : "payment";
 }
 
 export interface PaymentTransactionData {
-  /** Uniquely identifies this authorization attempt — the payment session id. */
-  transactionId: string;
-  amountCents: number;
-  payeeName: string;
-  payeeId: string;
+ /** Uniquely identifies this authorization attempt — the payment session id. */
+ transactionId: string;
+ amountCents: number;
+ payeeName: string;
+ payeeId: string;
 }
 
 /**
@@ -59,13 +59,23 @@ export interface PaymentTransactionData {
  * Sent as plain JSON: foundry performs the OpenID4VP §8.4 base64url encoding
  * itself, so a pre-encoded value here would be double-encoded.
  *
- * `credential_ids` names both payment credentials and neither age credential.
+ * `credential_ids` names every payment credential and no age credential.
  * foundry validates these against the resolved query's credential ids and
- * rejects an unknown one; `payment` and `payment_av` both declare `dpc` and
- * `sparkassencard`, and the holder chooses which of the two to answer with, so
- * naming only one would leave the amount unbound whenever the wallet answered
- * with the other. Binding to the *payment* credential is the point — an age
- * attestation is not what authorizes money to move.
+ * rejects an unknown one; `payment` and `payment_av` both declare `dpc`,
+ * `sparkassencard` and `wero` as the three options of one required
+ * `credential_sets` entry, and the holder chooses which to answer with, so
+ * naming a subset leaves the amount unbound whenever the wallet answers with
+ * one of the others. That is a hard decline rather than a soft gap:
+ * `transaction_data` binds only to the credentials it names, so an unnamed one's
+ * KB-JWT carries no `transaction_data_hashes`, foundry cannot report
+ * `transaction_data_binding` as passed on it, and the payment fails the gate.
+ * Binding to the *payment* credential is the point — an age attestation is not
+ * what authorizes money to move.
+ *
+ * This list and `PAYMENT_JOIN_KEY_CLAIM` in `checks.ts` are widened together:
+ * the first decides whether the amount can be confirmed, the second whether the
+ * merchant can tell the bank who to debit. Widening only the second would turn
+ * a decline into a settlement against an *unbound* amount.
  *
  * `transaction_data_hashes_alg` is sent explicitly even though foundry inserts
  * its own configured value when the key is absent (it uses `or_insert_with`, so
@@ -78,18 +88,18 @@ export interface PaymentTransactionData {
  * locales — would break the binding check on a differently-configured host.
  */
 export function buildTransactionData(
-  payment: PaymentTransactionData,
+ payment: PaymentTransactionData,
 ): unknown[] {
-  return [
-    {
-      type: "urn:eudi:sca:payment:1",
-      credential_ids: ["dpc", "sparkassencard"],
-      transaction_data_hashes_alg: ["sha-256"],
-      payload: {
-        payee: { name: payment.payeeName, id: payment.payeeId },
-        transaction_id: payment.transactionId,
-        amount_display: `€ ${centsToDecimalString(payment.amountCents)}`,
-      },
-    },
-  ];
+ return [
+  {
+   type: "urn:eudi:sca:payment:1",
+   credential_ids: ["dpc", "sparkassencard", "wero"],
+   transaction_data_hashes_alg: ["sha-256"],
+   payload: {
+    payee: { name: payment.payeeName, id: payment.payeeId },
+    transaction_id: payment.transactionId,
+    amount_display: `€ ${centsToDecimalString(payment.amountCents)}`,
+   },
+  },
+ ];
 }

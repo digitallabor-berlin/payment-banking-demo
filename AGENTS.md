@@ -53,8 +53,22 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**587 tests** (368 bank + 177 merchant + 11 foundry-client + 31 ui), measured
+**591 tests** (368 bank + 181 merchant + 11 foundry-client + 31 ui), measured
 2026-08-24.
+
+That was **587** before the Wero-payment fix, which added 4, all in
+`apps/merchant`: +2 in `checks.test.ts` (a Wero-only binding pass and a Wero
+`psu_id` read) and +2 in `settle.test.ts` (a Wero settle, alone and paired with
+an age attestation) — the same two-file, same-shape split the Sparkassen-Card
+work produced, because it is the same widening one option further along. Four
+existing tests changed rather than being added, in three files: the two
+`credential_ids` expectations in `payment-sessions.test.ts` and one each in
+`dcql.test.ts` and `checks.test.ts`, all re-keyed to the three-element list.
+Watch for the self-contradiction that showed up in the red run — a new
+assertion asserted Wero outranks `sparkassencard` while the assertion beside it
+assumed the opposite; the preference order is `PAYMENT_JOIN_KEY_CLAIM`'s
+declaration order, `dpc > sparkassencard > wero`, and nothing else. No plan; the
+work was a reported bug.
 
 That was **546** before the Sparkassen Authenticator work, which added 41, all
 in `apps/bank`: +11 in the new `authenticator-issuance.test.ts`, +11 in
@@ -206,8 +220,10 @@ them without reading the linked reasoning first.
   of what makes `POST /api/cards/{id}/credential` accept it, and
   `startIssuance`'s existing non-DPC branch already mints a bare-UUID join key,
   builds `{ sub, masked_iban, psu_id }` and suppresses the display metadata.
-  That claim set is an **assumption** — no foundry config declares `wero`, so
-  nothing has confirmed what its vct actually wants. It is offered for the EUDI
+  That claim set is **confirmed** as of 2026-08-24: the deployed foundry declares
+  `wero` with vct `https://creds.digitallabor.dev/vct/wero` and requires exactly
+  `sub` and `masked_iban` (`psu_id` optional) — the three the bank already sends.
+  It is offered for the EUDI
   Wallet only, which is why `WeroCredentialTile` has no `formats` record and no
   `FLAVOUR` map: those exist on the other two tiles because two buttons can lie
   to each other about what the other issued, and there is no second button here.
@@ -455,58 +471,98 @@ them without reading the linked reasoning first.
   which makes its absence as a *credential type* easy to misread as present.
   They are different registries; a named query naming `av` does not declare it.
 
-- **None of `sparkassencard`, `wero`, `sparkassen_auth`, `av-sparkasse` or `av`
-  is declared by any
-  foundry config.** Verified 2026-08-21 for the first, and 2026-08-24 for all
-  five, against the running local foundry with the exact payload the bank sends:
-  each is HTTP **400**, `{"error":"unknown credential_type_id '<id>'"}` —
-  including `sparkassen_auth` with its real `{ sub }` claim, measured against
-  `POST /admin/issuance/offers`, the endpoint `createIssuanceOffer` posts to.
-  The
-  local `../foundry/config.yaml` declares exactly three credential types — `pid`,
-  `com.emvco.dpc.card` and `eu.europa.ec.av.1` — and neither `wero` nor
-  `sparkassen_auth` appears in it at all. So the bank's Sparkasse-card, Wero,
-  authenticator and both age happy
-  paths have never run, and a real attempt degrades to a visible `failed` row —
-  confirmed in the dev database, where clicking each of the age tile's two
-  buttons wrote one `failed` row of the matching type, and clicking Wero's one
-  button wrote a `failed` `wero` row carrying `card_anna` and a bare-UUID join
-  key. In the browser that surfaces as the tile's own inline
-  `Angebot konnte nicht erstellt werden.` with **no dialog** — `IssuanceDialog`
-  only mounts once a 2xx offer exists. The authenticator tile behaves the same
-  way by construction (same `AddToWalletButton`, same inline error), though that
-  has not been observed in a browser. `com.emvco.dpc.card` IS declared and its issuance was
-  verified end-to-end: HTTP 200, a real `openid-credential-offer://` deep link,
-  and the display metadata echoed back in `credential_offer.display`. Adding the
-  five missing types is the operator's task.
+- **All five of `sparkassencard`, `wero`, `sparkassen_auth`, `av-sparkasse` and
+  `av` ARE now declared — on the DEPLOYED foundry, and still on neither local
+  one.** The operator's task described here is done. Re-measured 2026-08-24
+  against `https://foundry.digitallabor.dev` (admin API via
+  `kubectl -n foundry port-forward svc/foundry`), `POST /admin/issuance/offers`,
+  the endpoint `createIssuanceOffer` posts to: `sparkassen_auth` with its real
+  `{ sub }` claim is HTTP **200** with a live `credential_offer`, and every other
+  id fails on *claim validation* — `{"error":"claim validation failed: missing
+  required claim '<name>' for credential_type '<id>'"}` — never on
+  `unknown credential_type_id`. That distinction is the whole measurement: the
+  probe deliberately sent a bare `{ sub }` for all of them, so a declared type
+  must complain about the claims it wants and an undeclared one about itself.
+  Only `eu.europa.ec.av.1` is still unknown, and correctly so — it is an mdoc
+  docType, never an admin-API credential type id.
 
-- **The merchant now accepts EITHER payment format, and the join key is
-  per-format.** `selectNamedQuery` resolves foundry's `payment` / `payment_av`
-  named queries (2026-08-24, replacing `dpc` / `dpc_av`). Each declares both
-  payment credentials as the two options of one required `credential_sets`
-  entry, so a holder of either can pay, and `transaction_data.credential_ids` is
-  `["dpc", "sparkassencard"]` — naming one would leave the amount unbound
-  whenever the wallet answered with the other. `extractCredentialId`
+  What each declared type wants, read off `dl-infra-k8s/foundry/foundry_config.yml`
+  and consistent with those errors: `sparkassencard` and `wero` require
+  `sub` + `masked_iban` (`psu_id` optional); `sparkassen_auth` requires `sub`
+  alone; **both** `av-sparkasse` and `av` require `age_over_16` AND
+  `age_over_18`, and both are `dc+sd-jwt` on the *same* vct
+  `https://creds.digitallabor.dev/vct/av`. The bank's `AV_CLAIMS` already sends
+  both booleans, so nothing is mismatched — but note the consequence for the
+  merchant: both bank age formats answer the `av_sdjwt` DCQL query, and nothing
+  the bank issues can answer `av_mdoc`, which wants an `mso_mdoc` of docType
+  `eu.europa.ec.av.1` from some other issuer.
+
+  The **local** `../foundry/config.yaml` is unchanged and still declares exactly
+  three types — `pid`, `com.emvco.dpc.card` and `eu.europa.ec.av.1` — so every
+  statement above holds only against the deployed instance, and a local `pnpm
+  dev` still degrades each of these to a visible `failed` row (observed: clicking
+  each age button wrote one `failed` row of the matching type, and Wero's one
+  button wrote a `failed` `wero` row carrying `card_anna` and a bare-UUID join
+  key; in the browser that is the tile's own inline
+  `Angebot konnte nicht erstellt werden.` with **no dialog**, since
+  `IssuanceDialog` only mounts once a 2xx offer exists).
+  `com.emvco.dpc.card` is declared on both, and its issuance was
+  verified end-to-end: HTTP 200, a real `openid-credential-offer://` deep link,
+  and the display metadata echoed back in `credential_offer.display`.
+
+- **The merchant accepts ANY of the THREE payment credentials, and the join key
+  is per-format.** `selectNamedQuery` resolves foundry's `payment` / `payment_av`
+  named queries (2026-08-24, replacing `dpc` / `dpc_av`). Each declares all three
+  payment credentials as the options of one required `credential_sets`
+  entry — `[[dpc], [sparkassencard], [wero]]` — so a holder of any can pay, and
+  `transaction_data.credential_ids` is
+  `["dpc", "sparkassencard", "wero"]` — naming a subset leaves the amount unbound
+  whenever the wallet answers with one of the others. `extractCredentialId`
   (`apps/merchant/src/lib/checks.ts`) reads `credential_id` from a `dpc` answer
-  and `psu_id` from a `sparkassencard` one: a **map keyed by query id, never a
-  fallback chain**, because the two formats share no claims and a claim-name
-  collision must not decide who gets debited. `passedTransactionDataBinding` and
+  and `psu_id` from a `sparkassencard` or `wero` one: a **map keyed by query id,
+  never a fallback chain**. For `dpc` that is because the claim sets are disjoint
+  and a claim-name collision must not decide who gets debited; for
+  `sparkassencard` vs `wero` it is stronger than that — their claim sets are
+  *identical*, so the query id is the only thing that tells them apart at all.
+  `passedTransactionDataBinding` and
   `extractCredentialId` resolve **one** payment credential through a single
   shared helper, so the amount can never be bound to one card while the debit is
   keyed to another — which also means there is no "try the next payment
   credential" fallback when the resolved one's binding check failed.
 
-- **The merchant CANNOT request `wero`, so a Wero credential cannot actually
-  pay.** The bank would debit one — `isPaymentCredentialType` admits it and
-  `processPayment` has a test proving the debit — but foundry's `payment` /
-  `payment_av` named queries declare only `dpc` and `sparkassencard`, so no
-  wallet is ever asked for a Wero credential and `extractCredentialId` has no
-  entry for one. Wero is therefore issuance-complete and settlement-ready but
-  unreachable end to end, and the missing piece is a **foundry config** change
-  (declare the credential type, then add it to the named queries'
-  `credential_sets` and to `transaction_data.credential_ids`), not merchant
-  code. Adding it to `extractCredentialId` before the query declares it would be
-  dead code keyed to a query id nothing answers.
+- **A payment credential the merchant does not name is a DECLINE, not a gap —
+  this is how every Wero payment broke.** Reported from a real wallet on
+  2026-08-24: a `sparkassencard` checkout succeeded while a Wero one showed
+  `The amount could not be confirmed against your wallet's approval.` The
+  deployed foundry config had gained `wero` — as a credential type *and* as a
+  third option in both named queries' `credential_sets` — and neither of the
+  merchant's two lists had been widened with it. Two independent defects, and
+  fixing only the second would have been worse than the bug:
+
+  1. `PAYMENT_JOIN_KEY_CLAIM` in `checks.ts` knew only `dpc` and
+     `sparkassencard`, so `findPaymentCredential` resolved **nothing** in a
+     Wero-only verdict, `passedTransactionDataBinding` failed closed as designed,
+     and `payment-sessions.ts` wrote `transaction_data_binding_failed` — the
+     exact string the shopper saw.
+  2. `buildTransactionData`'s `credential_ids` named only those same two.
+     `transaction_data` binds **only** to the credentials it names, so a Wero
+     KB-JWT carries no `transaction_data_hashes` and foundry genuinely cannot
+     report the binding as passed on it.
+
+  So the two lists are widened **together**, always: the first decides whether
+  the amount can be confirmed, the second whether the merchant can tell the bank
+  who to debit. Widening only the join-key map turns a decline into a settlement
+  against an *unbound* amount, which is the one outcome `transaction_data` exists
+  to prevent.
+
+  Verified against the deployed foundry, not just in tests: the new payload is
+  HTTP 200 under both `payment` and `payment_av`, a deliberately bogus id is
+  still `400 transaction_data[0] references credential id '<id>' which is not
+  present in the DCQL query` (so the 200s are evidence, not serde dropping an
+  unknown field), and the request object fetched from the wallet-facing
+  `request_uri` carries `credential_ids: [dpc, sparkassencard, wero]` against a
+  query whose payment set is `[[dpc], [sparkassencard], [wero]]`. What remains
+  unverified is the wallet's answer itself — see Known-unverifiable.
 
 - **`payment_av` accepts either AGE format too, and their claim nestings
   differ.** `av_sdjwt` is a `dc+sd-jwt` VC whose `age_over_18` lands flat, like
@@ -805,8 +861,24 @@ a real checkout there produces an `openid4vp://` URI whose `request_uri` points
 at that public foundry host. So the infrastructural blocker is gone and a human
 with a device can now run the full flow.
 
-That is a strictly different claim from having run it. No wallet flow has been
-exercised. The local `pnpm dev` setup still talks to a `localhost` foundry.
+That is a strictly different claim from having run it. **A human has now run
+it** — 2026-08-24, reported by the operator rather than measured here: a real
+wallet paid a real checkout with a `sparkassencard` credential and it "works
+fine", while the same flow with a Wero credential declined with
+`The amount could not be confirmed against your wallet's approval.` So the
+wallet leg is no longer hypothetical, and the *bug that report describes* was
+reproduced from the code and fixed (see the Wero decline bullet under
+"Credentials and credential types").
+
+Treat that as one operator report, not as coverage. Nothing in this repo has
+observed a `vp_token`, so the actual claim *values* a wallet discloses remain
+unseen — only the schema is pinned. Specifically still unobserved: any age
+credential in either format, and any Wero presentation, since the fix has only
+been verified as far as the request object foundry serves to the wallet. Ask the
+operator to re-run the Wero checkout before calling that path proven. The local
+`pnpm dev` setup still talks to a `localhost` foundry, which declares neither
+the named queries nor four of the five credential types, so none of this is
+reproducible locally.
 
 Do not fake this. If a change depends on real wallet behaviour, say so.
 

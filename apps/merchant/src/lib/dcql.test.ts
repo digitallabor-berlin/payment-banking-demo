@@ -86,7 +86,7 @@ describe("buildTransactionData", () => {
     expect(buildTransactionData(payment)).toEqual([
       {
         type: "urn:eudi:sca:payment:1",
-        credential_ids: ["dpc", "sparkassencard"],
+        credential_ids: ["dpc", "sparkassencard", "wero"],
         transaction_data_hashes_alg: ["sha-256"],
         payload: {
           payee: { name: "Rock Legends", id: "Payee-id-123" },
@@ -97,16 +97,18 @@ describe("buildTransactionData", () => {
     ]);
   });
 
-  it("binds to both payment credentials and to neither age credential", () => {
-    // `payment` and `payment_av` both declare `dpc` and `sparkassencard` as the
-    // two options of one required credential_set, and the holder picks which to
-    // answer with. Naming only one would leave the amount unbound whenever the
-    // wallet answered with the other. `payment_av`'s `av_sdjwt`/`av_mdoc` are
-    // deliberately absent: an age attestation is not what moves money.
+  it("binds to every payment credential and to neither age credential", () => {
+    // `payment` and `payment_av` both declare `dpc`, `sparkassencard` and `wero`
+    // as the three options of one required credential_set, and the holder picks
+    // which to answer with. Naming a subset leaves the amount unbound whenever
+    // the wallet answers with one of the others — which is what declined every
+    // Wero payment with `transaction_data_binding_failed` while this list named
+    // only the first two. `payment_av`'s `av_sdjwt`/`av_mdoc` are deliberately
+    // absent: an age attestation is not what moves money.
     const [entry] = buildTransactionData(payment) as Array<{
       credential_ids: string[];
     }>;
-    expect(entry?.credential_ids).toEqual(["dpc", "sparkassencard"]);
+    expect(entry?.credential_ids).toEqual(["dpc", "sparkassencard", "wero"]);
   });
 
   it("renders a whole-euro amount without dropping decimals", () => {

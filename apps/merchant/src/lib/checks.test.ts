@@ -34,6 +34,27 @@ const cardOk = {
   ],
 };
 
+/**
+ * Wero. A third payment option in `payment`/`payment_av` since foundry declared
+ * it (`options: [[dpc], [sparkassencard], [wero]]`), and it reuses the
+ * Sparkassen Card's claim set verbatim — same three claims, a different vct and
+ * a different query id. That is exactly why resolution is keyed by query id and
+ * never by which claim happens to be present.
+ */
+const weroOk = {
+  query_id: "wero",
+  format: "dc+sd-jwt",
+  claims: {
+    sub: "urn:uuid:4a7b",
+    masked_iban: "DE** **** 5678",
+    psu_id: "7c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f",
+  },
+  checks: [
+    { check: "dcql_match", passed: true },
+    { check: "transaction_data_binding", passed: true },
+  ],
+};
+
 const avMdocOk = {
   query_id: "av_mdoc",
   format: "mso_mdoc",
@@ -60,6 +81,15 @@ describe("passedTransactionDataBinding", () => {
     expect(passedTransactionDataBinding(credentials(cardOk))).toBe(true);
   });
 
+  it("is true when a wero credential reports the binding as passed", () => {
+    // The reported defect: a Wero-only answer resolved to no payment credential
+    // at all, so the gate failed closed and the shopper was told the amount
+    // could not be confirmed. Wero is the third option of the same required
+    // `credential_sets` entry, so nothing named `dpc` or `sparkassencard`
+    // appears in the verdict.
+    expect(passedTransactionDataBinding(credentials(weroOk))).toBe(true);
+  });
+
   it("finds the binding on the payment credential even when an age credential is present", () => {
     // Under payment_av the verdict carries two entries; the money is bound to
     // the card, so the binding check lives on the payment credential only.
@@ -67,6 +97,9 @@ describe("passedTransactionDataBinding", () => {
       true,
     );
     expect(passedTransactionDataBinding(credentials(cardOk, avSdJwtOk))).toBe(
+      true,
+    );
+    expect(passedTransactionDataBinding(credentials(weroOk, avSdJwtOk))).toBe(
       true,
     );
   });
@@ -149,6 +182,15 @@ describe("extractCredentialId", () => {
     );
   });
 
+  it("reads psu_id from a wero credential's own claims", () => {
+    // Wero spells the join key `psu_id`, like the Sparkassen Card, and the bank
+    // stores the same bare UUID in its one `credential_id` column — so the
+    // debit is keyed identically once this value is out.
+    expect(extractCredentialId(credentials(weroOk))).toBe(
+      "7c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f",
+    );
+  });
+
   it("reads it when an age credential is also present", () => {
     expect(extractCredentialId(credentials(dpcOk, avMdocOk))).toBe("dpc_abc");
     expect(extractCredentialId(credentials(cardOk, avSdJwtOk))).toBe(
@@ -161,6 +203,19 @@ describe("extractCredentialId", () => {
     // `dpc` wins when a wallet answers both payment options, so the id comes
     // from the DPC and not from the sparkassencard sitting beside it.
     expect(extractCredentialId(credentials(cardOk, dpcOk))).toBe("dpc_abc");
+    // And with three payment credentials in play the order is total, not just
+    // pairwise: the binding gate above resolves the same one this does.
+    expect(extractCredentialId(credentials(weroOk, cardOk))).toBe(
+      "5f0e6d1a-2b3c-4d5e-8f90-a1b2c3d4e5f6",
+    );
+    expect(
+      passedTransactionDataBinding(
+        credentials(
+          { ...cardOk, checks: [{ check: "dcql_match", passed: true }] },
+          weroOk,
+        ),
+      ),
+    ).toBe(false);
   });
 
   it("never takes a credential_id from an age credential", () => {
@@ -188,6 +243,11 @@ describe("extractCredentialId", () => {
     expect(
       extractCredentialId(
         credentials({ ...cardOk, claims: { credential_id: "wrong-key" } }),
+      ),
+    ).toBeNull();
+    expect(
+      extractCredentialId(
+        credentials({ ...weroOk, claims: { credential_id: "wrong-key" } }),
       ),
     ).toBeNull();
   });

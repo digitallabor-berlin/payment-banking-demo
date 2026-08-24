@@ -208,7 +208,7 @@ describe("startPaymentSession", () => {
     expect(sentBody.transaction_data).toEqual([
       {
         type: "urn:eudi:sca:payment:1",
-        credential_ids: ["dpc", "sparkassencard"],
+        credential_ids: ["dpc", "sparkassencard", "wero"],
         transaction_data_hashes_alg: ["sha-256"],
         payload: {
           payee: { name: "Rock Legends", id: "Payee-id-123" },
@@ -221,7 +221,7 @@ describe("startPaymentSession", () => {
     ]);
   });
 
-  it("binds the amount to both payment credentials even under payment_av", async () => {
+  it("binds the amount to every payment credential even under payment_av", async () => {
     stockOrder("beer");
     let sentBody: { transaction_data?: Array<{ credential_ids: string[] }> } =
       {};
@@ -235,6 +235,7 @@ describe("startPaymentSession", () => {
     expect(sentBody.transaction_data?.[0]?.credential_ids).toEqual([
       "dpc",
       "sparkassencard",
+      "wero",
     ]);
   });
 

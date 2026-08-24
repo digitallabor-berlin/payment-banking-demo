@@ -84,10 +84,12 @@ The merchant sends **`named_query_ref`, never an inline `dcql_query`**. foundry
 prefers an inline query when both are present, so sending both would silently
 ignore the named one.
 
-- `payment` — a payment credential, **either format**, via a `credential_sets`
-  entry that requires exactly one of two options: `dpc` (the EMV DPC, asking
-  `credential_id` + `network`) or `sparkassencard` (asking `sub` +
-  `masked_iban` + `psu_id`).
+- `payment` — a payment credential, **any of three formats**, via a
+  `credential_sets` entry that requires exactly one of three options: `dpc` (the
+  EMV DPC, asking `credential_id` + `network`), `sparkassencard` or `wero` (both
+  asking `sub` + `masked_iban` + `psu_id`). The last two ask for a **byte-
+  identical** claim set on different vcts, which is why every read in
+  `checks.ts` is keyed by DCQL query id and never by which claim is present.
 - `payment_av` — the same, **plus** a second required set of two age formats:
   `av_sdjwt` (an SD-JWT VC, `https://creds.digitallabor.dev/vct/av`) or
   `av_mdoc` (an ISO mdoc EU Proof of Age, `eu.europa.ec.av.1`). Either way the
@@ -107,15 +109,22 @@ categories**: the whole `Drinks` aisle is not restricted (mineral water lives
 there). It takes product ids rather than an order id so the decision is pure and
 testable; the caller reads them from `order_items`, never from the browser.
 
-Both queries declare **both** payment credentials, so `transaction_data`'s
-`credential_ids` is `["dpc", "sparkassencard"]` in both cases — the money binds
-to whichever card the holder actually presents, and never to the age
-attestation. Naming only one would leave the amount unbound whenever the wallet
-answered with the other, which is a `verified: false` decline rather than an
-error. **foundry validates the ids**: verified 2026-08-19 against the deployed
+Both queries declare **all three** payment credentials, so `transaction_data`'s
+`credential_ids` is `["dpc", "sparkassencard", "wero"]` in both cases — the money
+binds to whichever instrument the holder actually presents, and never to the age
+attestation. Naming a subset leaves the amount unbound whenever the wallet
+answers with one of the others, which surfaces as a
+`transaction_data_binding_failed` decline rather than an error. That is not
+hypothetical: `wero` was added to both queries on foundry's side and this list
+was not widened, so **every Wero payment declined** until 2026-08-24. Keep it in
+lockstep with `PAYMENT_JOIN_KEY_CLAIM` in `checks.ts` — the root `AGENTS.md`
+bullet explains why widening only the latter is worse than the bug.
+**foundry validates the ids**: verified 2026-08-19 against the deployed
 instance, `credential_ids: ["card"]` (this app's old value) is a hard `400
 transaction_data[0] references credential id 'card' which is not present in the
-DCQL query`.
+DCQL query`, and re-confirmed 2026-08-24 with a bogus id against the current
+config — which is what makes the 200 for the three-element list evidence rather
+than silence.
 
 Both named queries live in foundry's config, not here. They are absent from
 `../foundry/config.yaml` (which has only `over18` and `payment-age-loyalty`) and
@@ -166,7 +175,8 @@ whole point:
 4. Age gate, **only when the row says `named_query_ref === "payment_av"`**:
    `age_over_18 === true` on `av_sdjwt` **or** `av_mdoc`, else
    `age_verification_failed`.
-5. Extract the bank's join key off that same payment credential.
+5. Extract the bank's join key off that same payment credential — `credential_id`
+   for `dpc`, `psu_id` for `sparkassencard` **and** `wero`.
 6. Write `verified`, then `settling`, then call the bank.
 
 **Everything in `src/lib/checks.ts` reads `result.credentials`, never
@@ -225,11 +235,17 @@ The branching that remains is by *format*, not a guess about one: `av_mdoc`'s
 path is `[namespace, element]`, while `av_sdjwt`'s is flat for the same reason
 the DPC's claims are. Each is pinned to its own shape.
 
-Still unobserved — and this is the part a wallet is needed for: no real
-presentation has ever been verified, so the *values* have never been seen, only
-the schema. In particular no age credential in either format, and no
-`sparkassencard`, has ever actually been returned — the latter cannot be, since
-its issuance still fails at foundry.
+Partly observed as of 2026-08-24, and the correction matters: a real wallet has
+now paid a real checkout with a **`sparkassencard`** credential (operator report,
+not measured here). The claim above that it "cannot be" returned was wrong on its
+premise — the deployed foundry declares `sparkassencard`, so its issuance
+succeeds there; only the local config still lacks it.
+
+What is still unobserved from inside this repo: no `vp_token` has been inspected,
+so the disclosed claim *values* have never been seen, only the schema. No age
+credential in either format has been returned, and no **Wero** presentation —
+the Wero fix is verified only as far as the request object foundry serves to the
+wallet, so ask the operator to re-run that checkout before calling it proven.
 
 ## The payment sheet — a modal on `/checkout`, plus `/pay/{sessionId}`
 

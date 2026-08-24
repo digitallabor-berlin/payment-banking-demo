@@ -90,6 +90,28 @@ const sparkassencardCredential = {
 };
 
 /**
+ * The third payment credential `payment`/`payment_av` accept. Its claim set is
+ * byte-identical to the Sparkassen Card's — same three claims, same `psu_id`
+ * join key — and only the query id says which vct answered. Kept as its own
+ * fixture rather than a spread of the card's so a settle keyed to the wrong one
+ * cannot pass by coincidence.
+ */
+const weroCredential = {
+  query_id: "wero",
+  format: "dc+sd-jwt",
+  claims: {
+    sub: "urn:uuid:4a7b",
+    masked_iban: "DE** **** 5678",
+    psu_id: "psu_wero",
+  },
+  checks: [
+    { check: "sd_jwt_vc_signature_and_kb_jwt", passed: true },
+    { check: "dcql_match", passed: true },
+    { check: "transaction_data_binding", passed: true },
+  ],
+};
+
+/**
  * The mdoc EU Proof of Age attestation, disclosing age_over_18 under its
  * namespace. `payment_av`'s second credential_set also accepts an SD-JWT VC
  * variant answering `av_sdjwt`; the shape difference is covered in
@@ -507,6 +529,70 @@ describe("refreshPaymentSessionState — settlement phase", () => {
 
     expect(result).toMatchObject({ ok: true, status: { state: "completed" } });
     expect(sent).toMatchObject({ credentialId: "psu_abc" });
+  });
+
+  it("settles a Wero presentation on its psu_id", async () => {
+    // The reported defect, end to end: a Wero-only answer used to resolve to no
+    // payment credential, so the binding gate failed closed and this session
+    // ended `failed`/`transaction_data_binding_failed` — the shopper was told
+    // the amount could not be confirmed — while the identical Sparkassen-Card
+    // presentation above settled.
+    const sessionId = await seedSession("cheese");
+    let sent: unknown;
+    const bank = stubBank({ ok: true, bankTxId: "tx_wero" }, (input) => {
+      sent = input;
+    });
+
+    const result = await refreshPaymentSessionState(
+      db,
+      stubFoundry(
+        verdict({
+          result: {
+            verified: true,
+            checks: [],
+            credentials: [weroCredential],
+          },
+        }),
+      ),
+      bank,
+      sessionId,
+    );
+
+    expect(result).toMatchObject({ ok: true, status: { state: "completed" } });
+    expect(sent).toMatchObject({
+      credentialId: "psu_wero",
+      idempotencyKey: sessionId,
+    });
+  });
+
+  it("settles a Wero credential paired with an age attestation", async () => {
+    // `payment_av` lists `wero` in the same required set as the other two, so
+    // the escalated basket must settle on it as well. A separate path from the
+    // plain one above: the age gate runs only after the binding gate resolved a
+    // payment credential.
+    const sessionId = await seedSession("beer");
+    let sent: unknown;
+    const bank = stubBank({ ok: true, bankTxId: "tx_wero_av" }, (input) => {
+      sent = input;
+    });
+
+    const result = await refreshPaymentSessionState(
+      db,
+      stubFoundry(
+        verdict({
+          result: {
+            verified: true,
+            checks: [],
+            credentials: [weroCredential, avCredential],
+          },
+        }),
+      ),
+      bank,
+      sessionId,
+    );
+
+    expect(result).toMatchObject({ ok: true, status: { state: "completed" } });
+    expect(sent).toMatchObject({ credentialId: "psu_wero" });
   });
 
   it("maps insufficient funds to a failed session and leaves the order pending", async () => {
