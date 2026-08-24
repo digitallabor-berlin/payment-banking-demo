@@ -17,7 +17,7 @@ export interface SheetSession {
   /** Empty string under dc_api — there is no URI to navigate to. */
   openid4vpUri: string;
   transport: "request_uri" | "dc_api";
-  /** True when this session presents the `dpc_av` named query. */
+  /** True when this session presents the `payment_av` named query. */
   ageRequested: boolean;
   dcApiRequest: unknown;
   initialState: string;
@@ -35,7 +35,10 @@ export interface SheetSession {
  * Returns null rather than throwing for an unknown id: a stale or hand-edited
  * `?session=` should render the ordinary checkout form, not an error page.
  */
-export function loadCheckoutSession(db: Db, sessionId: string): SheetSession | null {
+export function loadCheckoutSession(
+  db: Db,
+  sessionId: string,
+): SheetSession | null {
   const session = db
     .select()
     .from(paymentSessions)
@@ -56,7 +59,7 @@ export function loadCheckoutSession(db: Db, sessionId: string): SheetSession | n
     amountCents: order.totalCents,
     openid4vpUri: session.openid4vpUri ?? session.requestUri ?? "",
     transport: session.transport,
-    ageRequested: session.namedQueryRef === "dpc_av",
+    ageRequested: session.namedQueryRef === "payment_av",
     dcApiRequest: session.dcApiRequestJson
       ? JSON.parse(session.dcApiRequestJson)
       : null,

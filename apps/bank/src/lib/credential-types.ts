@@ -29,6 +29,20 @@ export const SPARKASSEN_CARD_CREDENTIAL_TYPE_ID =
  "sparkassencard" satisfies CredentialTypeId;
 
 /**
+ * Wero — the bank's account-to-account payment credential.
+ *
+ * Payable like the two girocard formats, and it reuses their non-DPC claim set
+ * (`{ sub, masked_iban, psu_id }`), but it is NOT a format of the girocard: it
+ * is a separate instrument with its own tile and its own artwork. That
+ * distinction is what `CARD_FORMAT_TYPE_IDS` exists to keep — see below.
+ *
+ * Offered for the EUDI Wallet only. There is no Google Wallet handover for it,
+ * so unlike the card and the age credential it has exactly one button and
+ * therefore no per-format tile state to track.
+ */
+export const WERO_CREDENTIAL_TYPE_ID = "wero" satisfies CredentialTypeId;
+
+/**
  * The age-verification attestation, in the bank's own format. NOT
  * `eu.europa.ec.av.1` — that is the mdoc docType configured on foundry's side;
  * this is the credential type id the admin API takes.
@@ -66,16 +80,35 @@ export const AGE_CREDENTIAL_TYPE_IDS = [
 export type AgeCredentialTypeId = (typeof AGE_CREDENTIAL_TYPE_IDS)[number];
 
 /**
- * The credential types that authorize money to move, in the order the card tile
- * presents them.
+ * The formats of the ONE girocard, in the order the card tile presents them:
+ * the Google Wallet badge's DPC, then the EUDI button's `sparkassencard`.
  *
- * `processPayment` reads this rather than naming one type, so adding a third
- * card format is a one-line change here instead of a guard that silently keeps
- * rejecting it.
+ * Deliberately narrower than `PAYMENT_CREDENTIAL_TYPE_IDS`. "What can pay" and
+ * "what is a format of this card" were the same question while the girocard was
+ * the only payment instrument; Wero separated them. `listCards` and
+ * `CardDto.formats` must read THIS one — scoping them to every payment type
+ * would make the girocard's face and badge read "In wallet" because a Wero
+ * credential exists, which is a lie about a different instrument.
  */
-export const PAYMENT_CREDENTIAL_TYPE_IDS = [
+export const CARD_FORMAT_TYPE_IDS = [
  DPC_CREDENTIAL_TYPE_ID,
  SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
+] as const;
+
+export type CardFormatTypeId = (typeof CARD_FORMAT_TYPE_IDS)[number];
+
+/**
+ * The credential types that authorize money to move: every format of the
+ * girocard, plus Wero.
+ *
+ * `processPayment` reads this rather than naming one type, so admitting a new
+ * instrument is a one-line change here instead of a guard that silently keeps
+ * rejecting it. The card route's parser reads it too, which is what makes
+ * `POST /api/cards/{id}/credential` accept a Wero issuance without a new route.
+ */
+export const PAYMENT_CREDENTIAL_TYPE_IDS = [
+ ...CARD_FORMAT_TYPE_IDS,
+ WERO_CREDENTIAL_TYPE_ID,
 ] as const;
 
 export type PaymentCredentialTypeId =

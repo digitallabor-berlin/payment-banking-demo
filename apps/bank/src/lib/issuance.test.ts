@@ -10,6 +10,7 @@ import { seed } from "../db/seed.js";
 import {
   DPC_CREDENTIAL_TYPE_ID,
   SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
+  WERO_CREDENTIAL_TYPE_ID,
 } from "./credential-types.js";
 import { refreshIssuanceState, startIssuance } from "./issuance.js";
 
@@ -416,6 +417,151 @@ describe("startIssuance for the Sparkasse card format", () => {
 
     expect(result).toEqual({ ok: false, reason: "foundry_unavailable" });
     expect(db.select().from(credentials).get()?.state).toBe("failed");
+  });
+});
+
+describe("startIssuance for Wero", () => {
+  /**
+   * Wero needs no new issuance function and no new route: admitting it to
+   * `PAYMENT_CREDENTIAL_TYPE_IDS` is what makes `startIssuance` accept it, and
+   * its non-DPC branch already does everything Wero needs. These tests pin
+   * that, so a future change to the branch condition cannot silently give Wero
+   * the DPC's shape.
+   */
+  async function sentFor(
+    userId: string,
+    cardId: string,
+  ): Promise<Record<string, unknown>> {
+    let sentBody: Record<string, unknown> = {};
+    const client = stubClient((_url, init) => {
+      sentBody = JSON.parse(String(init.body));
+      return offerOk();
+    });
+    await startIssuance(db, client, userId, cardId, WERO_CREDENTIAL_TYPE_ID);
+    return sentBody;
+  }
+
+  it("asks foundry for the wero type", async () => {
+    const sent = await sentFor("user_anna", "card_anna");
+    expect(sent.credential_type_id).toBe("wero");
+  });
+
+  it("sends the account-shaped claims, not the DPC's card-shaped ones", async () => {
+    const sent = await sentFor("user_anna", "card_anna");
+    // acc_anna's IBAN is DE02120300000000202051.
+    expect(sent.claims).toEqual({
+      sub: expect.any(String),
+      masked_iban: "DE** **** 2051",
+      psu_id: expect.any(String),
+    });
+  });
+
+  it("sends NEITHER display array", async () => {
+    // The single most consequential assertion here. foundry gates both fields
+    // on `ct.vct == "com.emvco.dpc.card"` and REJECTS them for anything else,
+    // so sending them would turn every Wero issuance into a `failed` row rather
+    // than a card missing its artwork. Wero's wallet appearance therefore comes
+    // entirely from foundry's own static `display:` config, and
+    // public/wero-face.svg is the bank's own UI artwork that no wallet sees.
+    const sent = await sentFor("user_anna", "card_anna");
+    expect(sent).not.toHaveProperty("offer_display");
+    expect(sent).not.toHaveProperty("credential_response_display");
+  });
+
+  it("stores the psu_id it sent as the row's join key", async () => {
+    const sent = await sentFor("user_anna", "card_anna");
+    const row = db.select().from(credentials).get();
+    expect(row?.credentialTypeId).toBe("wero");
+    expect(row?.credentialId).toBe(
+      (sent.claims as Record<string, string>).psu_id,
+    );
+  });
+
+  it("mints that join key as a bare UUID, not a dpc_-prefixed value", async () => {
+    await sentFor("user_anna", "card_anna");
+    expect(db.select().from(credentials).get()?.credentialId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it("keeps a card behind the row, so the debit path can resolve an account", async () => {
+    // Wero is drawn on the account, but `processPayment` resolves the account
+    // through the card, so the row must carry one even though no Wero claim
+    // mentions it.
+    await sentFor("user_anna", "card_anna");
+    const row = db.select().from(credentials).get();
+    expect(row?.cardId).toBe("card_anna");
+    expect(row?.state).toBe("offered");
+  });
+
+  it("masks the second account's IBAN, not the first's", async () => {
+    const sent = await sentFor("user_ben", "card_ben");
+    // acc_ben's IBAN is DE02500105170137075030.
+    expect((sent.claims as Record<string, string>).masked_iban).toBe(
+      "DE** **** 5030",
+    );
+  });
+
+  it("coexists with both girocard formats for the same card", async () => {
+    // Three independent payment credentials on one card, none superseding
+    // another. This is also what `listCards`' type filter has to survive.
+    for (const typeId of [
+      DPC_CREDENTIAL_TYPE_ID,
+      SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
+      WERO_CREDENTIAL_TYPE_ID,
+    ] as const) {
+      await startIssuance(
+        db,
+        stubClient(offerOk),
+        "user_anna",
+        "card_anna",
+        typeId,
+      );
+    }
+
+    const rows = db.select().from(credentials).all();
+    expect(rows.map((r) => r.credentialTypeId).sort()).toEqual([
+      "com.emvco.dpc.card",
+      "sparkassencard",
+      "wero",
+    ]);
+    // Distinct join keys — the UNIQUE index on credential_id depends on it.
+    expect(new Set(rows.map((r) => r.credentialId)).size).toBe(3);
+  });
+
+  it("refuses a card belonging to another user", async () => {
+    const result = await startIssuance(
+      db,
+      stubClient(offerOk),
+      "user_ben",
+      "card_anna",
+      WERO_CREDENTIAL_TYPE_ID,
+    );
+    expect(result).toEqual({ ok: false, reason: "card_not_found" });
+    expect(db.select().from(credentials).all()).toHaveLength(0);
+  });
+
+  it("marks the row failed when foundry rejects the offer", async () => {
+    // The path this actually takes today: no foundry config declares `wero`, so
+    // a real POST answers 400 and the row lands failed with its join key
+    // intact. See AGENTS.md.
+    const client = stubClient(() => ({
+      status: 400,
+      body: { error: "unknown credential_type_id 'wero'" },
+    }));
+    const result = await startIssuance(
+      db,
+      client,
+      "user_anna",
+      "card_anna",
+      WERO_CREDENTIAL_TYPE_ID,
+    );
+
+    expect(result).toEqual({ ok: false, reason: "foundry_unavailable" });
+    const row = db.select().from(credentials).get();
+    expect(row?.state).toBe("failed");
+    expect(row?.credentialTypeId).toBe("wero");
+    expect(row?.credentialId).not.toBeNull();
   });
 });
 

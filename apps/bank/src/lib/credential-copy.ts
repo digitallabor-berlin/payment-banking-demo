@@ -18,8 +18,15 @@ import { MESSAGES } from "./i18n/messages.js";
  * formats and let them drift.
  */
 
-/** What a tile is about. One tile, one kind, however many formats behind it. */
-export type CredentialKind = "card" | "age";
+/**
+ * What a tile is about. One tile, one kind, however many formats behind it.
+ *
+ * `wero` is a kind of its own rather than a third `card` format: it is a
+ * separate instrument with its own tile and its own artwork, so its copy has to
+ * name it. That it happens to be payable, like the girocard, is a fact about
+ * `PAYMENT_CREDENTIAL_TYPE_IDS`, not about what a tile says.
+ */
+export type CredentialKind = "card" | "age" | "wero";
 
 /**
  * One issuance conversation — a kind plus the wallet it targets.
@@ -32,7 +39,8 @@ export type IssuanceFlavour =
   | "card-eudi"
   | "card-google"
   | "age-eudi"
-  | "age-google";
+  | "age-google"
+  | "wero-eudi";
 
 /** The copy the issuance dialog needs, which differs by grammatical gender. */
 export interface IssuanceCopy {
@@ -94,6 +102,25 @@ export const FACE_COPY: Record<
           "Your age verification is in your wallet and ready to use. You can add it again at any time.",
       },
     },
+    wero: {
+      none: {
+        badge: "Not in wallet",
+        explain: "Add Wero to your EUDI Wallet to pay from your account.",
+      },
+      offered: {
+        badge: "Being added…",
+        explain: "Confirm the offer in your wallet app.",
+      },
+      active: {
+        badge: "In wallet",
+        // Unlike the other two kinds this tile HAS only the EUDI button, so
+        // naming that wallet here would be defensible — it is left unnamed
+        // anyway, because an OpenID4VCI offer is answered by whichever wallet
+        // the device hands it to, and the bank never learns which.
+        explain:
+          "Wero is in your wallet and ready for payments. You can add it again at any time.",
+      },
+    },
   },
   de: {
     card: {
@@ -126,6 +153,22 @@ export const FACE_COPY: Record<
         badge: "Im Wallet",
         explain:
           "Ihr Altersnachweis ist in Ihrem Wallet und einsatzbereit. Sie können ihn jederzeit erneut hinzufügen.",
+      },
+    },
+    wero: {
+      none: {
+        badge: "Nicht im Wallet",
+        explain:
+          "Fügen Sie Wero Ihrem EUDI Wallet hinzu, um von Ihrem Konto zu bezahlen.",
+      },
+      offered: {
+        badge: "Wird hinzugefügt…",
+        explain: "Bestätigen Sie das Angebot in Ihrer Wallet-App.",
+      },
+      active: {
+        badge: "Im Wallet",
+        explain:
+          "Wero ist in Ihrem Wallet und für Zahlungen bereit. Sie können es jederzeit erneut hinzufügen.",
       },
     },
   },
@@ -171,6 +214,14 @@ export const DIALOG_COPY: Record<
       successBody: "Your age verification is now in your wallet.",
       failureBody: "The age verification could not be added.",
     },
+    // No `wero-google` counterpart: Wero is offered for the EUDI Wallet alone,
+    // so a second flavour would be copy for a button that does not exist.
+    "wero-eudi": {
+      title: "Add Wero to EUDI Wallet",
+      successTitle: "Wero added",
+      successBody: "Wero is now in your EUDI Wallet.",
+      failureBody: "Wero could not be added.",
+    },
   },
   de: {
     "card-eudi": {
@@ -196,6 +247,12 @@ export const DIALOG_COPY: Record<
       successTitle: "Altersnachweis hinzugefügt",
       successBody: "Ihr Altersnachweis ist jetzt in Ihrem Wallet.",
       failureBody: "Der Altersnachweis konnte nicht hinzugefügt werden.",
+    },
+    "wero-eudi": {
+      title: "Wero zum EUDI Wallet hinzufügen",
+      successTitle: "Wero hinzugefügt",
+      successBody: "Wero ist jetzt in Ihrem EUDI Wallet.",
+      failureBody: "Wero konnte nicht hinzugefügt werden.",
     },
   },
 };

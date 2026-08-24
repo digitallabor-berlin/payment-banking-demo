@@ -5,11 +5,13 @@ import { AgeCredentialTile } from "@/components/AgeCredentialTile.js";
 import { AppHeader } from "@/components/AppHeader.js";
 import { CardTile } from "@/components/CardTile.js";
 import { TransactionLedger } from "@/components/TransactionLedger.js";
+import { WeroCredentialTile } from "@/components/WeroCredentialTile.js";
 import { getDb } from "@/db/index.js";
 import { MESSAGES } from "@/lib/i18n/messages.js";
 import { getLocale } from "@/lib/i18n/server.js";
 import {
   getAgeCredentialState,
+  getWeroCredentialState,
   listAccounts,
   listCards,
   listTransactions,
@@ -29,6 +31,11 @@ export default async function DashboardPage() {
   const cards = listCards(db, session.userId);
   const recent = listTransactions(db, session.userId, 5, 0);
   const ageCredential = getAgeCredentialState(db, session.userId);
+  const wero = getWeroCredentialState(db, session.userId);
+  // Wero is payable, and `processPayment` resolves an account through a card, so
+  // a Wero credential cannot be issued without one to hang the row on. No card,
+  // no tile — rather than a tile whose button can only ever fail.
+  const weroCardId = cards[0]?.id;
 
   return (
     <>
@@ -70,6 +77,13 @@ export default async function DashboardPage() {
         <section>
           <h2 className="eyebrow">{t.dashboard.credentials}</h2>
           <div className="mt-3 space-y-4">
+            {weroCardId ? (
+              <WeroCredentialTile
+                cardId={weroCardId}
+                credentialState={wero.state}
+                locale={locale}
+              />
+            ) : null}
             <AgeCredentialTile
               credentialState={ageCredential.state}
               formats={ageCredential.formats}

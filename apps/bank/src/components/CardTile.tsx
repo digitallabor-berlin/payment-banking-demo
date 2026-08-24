@@ -12,7 +12,7 @@ import {
 import {
   DPC_CREDENTIAL_TYPE_ID,
   SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
-  type PaymentCredentialTypeId,
+  type CardFormatTypeId,
 } from "@/lib/credential-types.js";
 import { formatIban } from "@/lib/format.js";
 import type { Locale } from "@/lib/i18n/locale.js";
@@ -31,8 +31,12 @@ interface IssuanceSession {
 /**
  * Which dialog copy each button's handover gets. A lookup rather than a ternary
  * in the JSX below, so the two are impossible to mismatch.
+ *
+ * Keyed by `CardFormatTypeId`, not by every payment type. Wero is payable but
+ * it is a different instrument with its own tile, and a `Record` over the wider
+ * union would demand a card flavour for it here.
  */
-const FLAVOUR: Record<PaymentCredentialTypeId, IssuanceFlavour> = {
+const FLAVOUR: Record<CardFormatTypeId, IssuanceFlavour> = {
   [DPC_CREDENTIAL_TYPE_ID]: "card-google",
   [SPARKASSEN_CARD_CREDENTIAL_TYPE_ID]: "card-eudi",
 };
@@ -76,12 +80,11 @@ export function CardTile({
 }) {
   const t = MESSAGES[locale];
   const [session, setSession] = useState<
-    (IssuanceSession & { typeId: PaymentCredentialTypeId }) | null
+    (IssuanceSession & { typeId: CardFormatTypeId }) | null
   >(null);
-  const [pendingType, setPendingType] =
-    useState<PaymentCredentialTypeId | null>(null);
+  const [pendingType, setPendingType] = useState<CardFormatTypeId | null>(null);
   const [error, setError] = useState<{
-    typeId: PaymentCredentialTypeId;
+    typeId: CardFormatTypeId;
     message: string;
   } | null>(null);
 
@@ -93,11 +96,11 @@ export function CardTile({
   const copy = stateCopy(locale, faceState);
 
   /** The state THIS format's button should describe, not the card's. */
-  function buttonState(typeId: PaymentCredentialTypeId) {
+  function buttonState(typeId: CardFormatTypeId) {
     return cardFaceState(card.formats[typeId], pendingType === typeId);
   }
 
-  async function start(typeId: PaymentCredentialTypeId) {
+  async function start(typeId: CardFormatTypeId) {
     setPendingType(typeId);
     setError(null);
     try {
@@ -124,7 +127,7 @@ export function CardTile({
     }
   }
 
-  function errorFor(typeId: PaymentCredentialTypeId) {
+  function errorFor(typeId: CardFormatTypeId) {
     return error?.typeId === typeId ? error.message : null;
   }
 

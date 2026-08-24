@@ -35,7 +35,7 @@ export const orders = sqliteTable("orders", {
  * One row per cart line, written by `createOrder` at the moment it prices the
  * order. Exists because the *composition* of a cart, not just its total, is
  * load-bearing at payment time: an order containing an age-restricted product
- * is presented with the `dpc_av` named query rather than `dpc`, and that
+ * is presented with the `payment_av` named query rather than `payment`, and that
  * decision is made in `startPaymentSession`, which sees only an order id.
  *
  * `unitPriceCents` is a snapshot, deliberately: it records what the customer
@@ -89,18 +89,31 @@ export const paymentSessions = sqliteTable("payment_sessions", {
   .notNull()
   .default("request_uri"),
  /**
-  * Which foundry named query this session asked for — `dpc` for an ordinary
-  * basket, `dpc_av` when the order contains an age-restricted product.
+  * Which foundry named query this session asked for — `payment` for an
+  * ordinary basket, `payment_av` when the order contains an age-restricted
+  * product. Both accept either payment credential format; `payment_av` adds a
+  * required proof of age in either of its two formats.
   *
   * Recorded rather than recomputed, for the same reason `transport` is: the
   * settle gate has to know whether an age attestation was actually *requested*
   * before it can treat a missing one as a failure, and re-deriving it from the
   * order at poll time would silently change the verdict if the restricted set
   * were edited mid-session.
+  *
+  * The column has NO CHECK constraint (`0003_violet_red_skull.sql` is plain
+  * `text`), so renaming these values from the older `dpc`/`dpc_av` needed no
+  * migration — the `enum:` here is a TypeScript claim about the data, not a
+  * database one. Two consequences, both accepted deliberately: the on-disk
+  * DEFAULT is still `'dpc'`, which is dead weight because every insert writes
+  * this column explicitly (see `startPaymentSession`); and a row left over from
+  * a pre-rename session still holds `dpc_av`, which now reads as a session that
+  * never asked for an age attestation. No such row can settle anyway — its
+  * stored verdict answers the retired `av` query id, which `extractCredentialId`
+  * and `passedAgeVerification` both refuse.
   */
- namedQueryRef: text("named_query_ref", { enum: ["dpc", "dpc_av"] })
+ namedQueryRef: text("named_query_ref", { enum: ["payment", "payment_av"] })
   .notNull()
-  .default("dpc"),
+  .default("payment"),
  /** foundry's inline unsigned request object, verbatim. Only for dc_api. */
  dcApiRequestJson: text("dc_api_request_json"),
  /** foundry's verdict, stored verbatim so the success screen can show it. */

@@ -55,14 +55,15 @@ export const credentials = sqliteTable("credentials", {
   * existed, which also makes the 0001 migration's backfill automatic. An
   * insert that means something else must say so: `startAvIssuance` does.
   *
-  * `av` is legacy: the age credential is issued as `av-sparkasse` now, but the
-  * column can still hold rows written before that, so the value stays in the
-  * union to keep reading them honest. Widening this list is free — the column
-  * is plain `text` and the 0001 migration emits no CHECK constraint, so the
-  * enum is a TypeScript claim about the data, not a database one.
+  * `av` is no longer legacy: it once was the age credential's only spelling,
+  * then nothing issued it, and it is now that credential's Google Wallet
+  * format. Widening this list is free — the column is plain `text` and the
+  * 0001 migration emits no CHECK constraint, so the enum is a TypeScript claim
+  * about the data, not a database one. `wero` was added on exactly those
+  * terms, with no migration.
   */
  credentialTypeId: text("credential_type_id", {
-  enum: ["com.emvco.dpc.card", "sparkassencard", "av", "av-sparkasse"],
+  enum: ["com.emvco.dpc.card", "sparkassencard", "wero", "av", "av-sparkasse"],
  })
   .notNull()
   .default("com.emvco.dpc.card"),

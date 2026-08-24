@@ -13,6 +13,7 @@ import {
 } from "./credential-types.js";
 import {
   getAgeCredentialState,
+  getWeroCredentialState,
   listAccounts,
   listCards,
   listTransactions,
@@ -284,6 +285,41 @@ describe("listCards per format", () => {
     expect(card?.credentialRowId).toBe("cred_dpc_active");
   });
 
+  it("excludes a Wero credential from a card's formats", () => {
+    // The reason CARD_FORMAT_TYPE_IDS exists. Unlike an age credential, a Wero
+    // row DOES carry a card_id — it must, because it is payable — so the
+    // card-scoped query would sweep it in without the explicit type filter, and
+    // the girocard's face would read "In wallet" for a credential that is not a
+    // girocard at all.
+    db.insert(credentials)
+      .values({
+        id: "cred_wero",
+        userId: "user_anna",
+        cardId: "card_anna",
+        credentialTypeId: "wero",
+        credentialId: "key_wero",
+        state: "active",
+        issuedAt: 1,
+        createdAt: 50,
+      })
+      .run();
+    const card = listCards(db, "user_anna")[0];
+    expect(card?.credentialState).toBe("none");
+    expect(card?.credentialRowId).toBeNull();
+    expect(card?.formats).toEqual({
+      "com.emvco.dpc.card": "none",
+      sparkassencard: "none",
+    });
+  });
+
+  it("keys the record by exactly the two girocard formats", () => {
+    // Wero is payable, so a record keyed by every payment type would gain a
+    // third key here and the tile would grow a button for another instrument.
+    expect(
+      Object.keys(listCards(db, "user_anna")[0]?.formats ?? {}).sort(),
+    ).toEqual(["com.emvco.dpc.card", "sparkassencard"]);
+  });
+
   it("excludes an age credential from a card's formats", () => {
     // An age credential has no card_id, so it could never have been scoped in;
     // the explicit type filter makes that an assertion rather than a
@@ -306,6 +342,127 @@ describe("listCards per format", () => {
       "com.emvco.dpc.card": "none",
       sparkassencard: "none",
     });
+  });
+});
+
+describe("getWeroCredentialState", () => {
+  /** Inserts one Wero credential for anna. It is payable, so it has a card. */
+  function insertWero(
+    id: string,
+    state: "offered" | "active" | "failed",
+    createdAt: number,
+  ) {
+    db.insert(credentials)
+      .values({
+        id,
+        userId: "user_anna",
+        cardId: "card_anna",
+        credentialTypeId: "wero",
+        credentialId: `key_${id}`,
+        state,
+        issuedAt: state === "active" ? createdAt : null,
+        createdAt,
+      })
+      .run();
+  }
+
+  it("reports 'none' when the user has no Wero credential", () => {
+    expect(getWeroCredentialState(db, "user_anna")).toEqual({
+      state: "none",
+      credentialRowId: null,
+    });
+  });
+
+  it("reports 'offered' for an open offer", () => {
+    insertWero("cred_wero", "offered", 10);
+    expect(getWeroCredentialState(db, "user_anna")).toEqual({
+      state: "offered",
+      credentialRowId: "cred_wero",
+    });
+  });
+
+  it("reports 'active' once the credential is issued", () => {
+    insertWero("cred_wero", "active", 10);
+    expect(getWeroCredentialState(db, "user_anna")).toEqual({
+      state: "active",
+      credentialRowId: "cred_wero",
+    });
+  });
+
+  it("does not let a newer offer mask a credential already in the wallet", () => {
+    // The same rule as every other tile: nothing in this project clears an
+    // offered row, so one abandoned re-add would otherwise pin the tile to
+    // "Not in wallet" forever.
+    insertWero("cred_active", "active", 10);
+    insertWero("cred_offer", "offered", 30);
+    expect(getWeroCredentialState(db, "user_anna")).toEqual({
+      state: "active",
+      credentialRowId: "cred_active",
+    });
+  });
+
+  it("prefers the newest row within one state, so a re-issue supersedes", () => {
+    insertWero("cred_old", "active", 10);
+    insertWero("cred_new", "active", 30);
+    expect(getWeroCredentialState(db, "user_anna").credentialRowId).toBe(
+      "cred_new",
+    );
+  });
+
+  it("ignores failed rows, so a failed attempt reads as 'none'", () => {
+    insertWero("cred_bad", "failed", 10);
+    expect(getWeroCredentialState(db, "user_anna").state).toBe("none");
+  });
+
+  it("ignores the girocard's formats, however active they are", () => {
+    // The mirror of listCards excluding Wero. Both are payment credentials on
+    // the same card, so only the type filter tells them apart.
+    db.insert(credentials)
+      .values({
+        id: "cred_dpc",
+        userId: "user_anna",
+        cardId: "card_anna",
+        credentialTypeId: "com.emvco.dpc.card",
+        credentialId: "key_dpc",
+        state: "active",
+        issuedAt: 1,
+        createdAt: 50,
+      })
+      .run();
+    expect(getWeroCredentialState(db, "user_anna")).toEqual({
+      state: "none",
+      credentialRowId: null,
+    });
+  });
+
+  it("ignores an age credential", () => {
+    db.insert(credentials)
+      .values({
+        id: "cred_av",
+        userId: "user_anna",
+        cardId: null,
+        credentialTypeId: AV_CREDENTIAL_TYPE_ID,
+        credentialId: null,
+        state: "active",
+        issuedAt: 1,
+        createdAt: 50,
+      })
+      .run();
+    expect(getWeroCredentialState(db, "user_anna").state).toBe("none");
+  });
+
+  it("never reports another user's Wero credential", () => {
+    insertWero("cred_wero", "active", 10);
+    expect(getWeroCredentialState(db, "user_ben").state).toBe("none");
+  });
+
+  it("exposes no per-format map, because Wero has one format", () => {
+    // One EUDI button and no Google Wallet handover, so there is no second
+    // format for a button to disagree with.
+    insertWero("cred_wero", "active", 10);
+    expect(getWeroCredentialState(db, "user_anna")).not.toHaveProperty(
+      "formats",
+    );
   });
 });
 

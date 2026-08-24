@@ -200,6 +200,106 @@ describe("processPayment", () => {
     ).toBe("9f1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d");
   });
 
+  it("settles against a Wero credential", () => {
+    // Wero is not a girocard format, but it IS money: it is in
+    // PAYMENT_CREDENTIAL_TYPE_IDS, so the debit path admits it. Its join key
+    // arrived in this column as a `psu_id`, exactly as the Sparkasse card's
+    // does — which is the whole reason processPayment needs no per-format
+    // branch.
+    db.insert(credentials)
+      .values({
+        id: "cred_wero",
+        userId: "user_anna",
+        cardId: "card_anna",
+        credentialTypeId: "wero",
+        credentialId: "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d",
+        state: "active",
+        issuedAt: 1,
+        createdAt: 1,
+      })
+      .run();
+
+    const before = db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, "acc_anna"))
+      .get();
+
+    const result = processPayment(
+      db,
+      baseInput({
+        credentialId: "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d",
+        idempotencyKey: "idem_wero_1",
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.newBalanceCents).toBe((before?.balanceCents ?? 0) - 4_798);
+    expect(
+      db
+        .select()
+        .from(transactions)
+        .where(eq(transactions.idempotencyKey, "idem_wero_1"))
+        .get()?.credentialId,
+    ).toBe("7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d");
+  });
+
+  it("still refuses a Wero credential that is not active", () => {
+    // Admitting a new instrument to the type guard must not widen the state
+    // guard with it.
+    db.insert(credentials)
+      .values({
+        id: "cred_wero_offered",
+        userId: "user_anna",
+        cardId: "card_anna",
+        credentialTypeId: "wero",
+        credentialId: "22222222-3333-4444-8555-666666666666",
+        state: "offered",
+        issuedAt: null,
+        createdAt: 1,
+      })
+      .run();
+
+    expect(
+      processPayment(
+        db,
+        baseInput({
+          credentialId: "22222222-3333-4444-8555-666666666666",
+          idempotencyKey: "idem_wero_2",
+        }),
+      ),
+    ).toEqual({ ok: false, reason: "credential_not_active" });
+  });
+
+  it("still refuses a Wero credential with no card", () => {
+    // The second of the three independent guards. Wero is drawn on the account,
+    // so a row without a card is conceivable — and must still be refused,
+    // because there is nothing to debit.
+    db.insert(credentials)
+      .values({
+        id: "cred_wero_orphan",
+        userId: "user_anna",
+        cardId: null,
+        credentialTypeId: "wero",
+        credentialId: "33333333-4444-4555-8666-777777777777",
+        state: "active",
+        issuedAt: 1,
+        createdAt: 1,
+      })
+      .run();
+
+    expect(
+      processPayment(
+        db,
+        baseInput({
+          credentialId: "33333333-4444-4555-8666-777777777777",
+          idempotencyKey: "idem_wero_3",
+        }),
+      ),
+    ).toEqual({ ok: false, reason: "unknown_credential" });
+  });
+
   it("still refuses a Sparkasse card credential that is not active", () => {
     // Widening the type guard must not have widened the state guard with it.
     db.insert(credentials)

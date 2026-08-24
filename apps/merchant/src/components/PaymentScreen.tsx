@@ -29,7 +29,7 @@ export interface PaymentScreenProps {
   merchantName: string;
   openid4vpUri: string;
   transport: "request_uri" | "dc_api";
-  /** True when this session presents `dpc_av`; adds one clause to the copy. */
+  /** True when this session presents `payment_av`; adds one clause to the copy. */
   ageRequested: boolean;
   dcApiRequest: unknown;
   /** A session that was already terminal when the page rendered. */
@@ -72,7 +72,8 @@ export function PaymentScreen({
   const [dcError, setDcError] = useState<DcError>(null);
   const [dcBusy, setDcBusy] = useState(false);
 
-  const terminalAtRender = initialState === "completed" || initialState === "failed";
+  const terminalAtRender =
+    initialState === "completed" || initialState === "failed";
 
   const fetchOnce = useCallback<() => Promise<SessionStatus>>(async () => {
     const response = await fetch(`/api/payment-sessions/${sessionId}`, {
@@ -104,7 +105,8 @@ export function PaymentScreen({
   }, [sessionId]);
 
   const isTerminal = useCallback(
-    (value: SessionStatus) => value.state === "completed" || value.state === "failed",
+    (value: SessionStatus) =>
+      value.state === "completed" || value.state === "failed",
     [],
   );
 
@@ -157,7 +159,10 @@ export function PaymentScreen({
   useEffect(() => {
     if (state !== "completed") return;
     clear();
-    const timer = setTimeout(() => router.replace(`/success?orderId=${orderId}`), 1500);
+    const timer = setTimeout(
+      () => router.replace(`/success?orderId=${orderId}`),
+      1500,
+    );
     return () => clearTimeout(timer);
   }, [state, router, orderId, clear]);
 
@@ -170,7 +175,9 @@ export function PaymentScreen({
   }, []);
 
   const cancel = useCallback(async () => {
-    await fetch(`/api/payment-sessions/${sessionId}/cancel`, { method: "POST" });
+    await fetch(`/api/payment-sessions/${sessionId}/cancel`, {
+      method: "POST",
+    });
     if (onClose) onClose();
     else router.replace("/");
   }, [sessionId, onClose, router]);
@@ -210,7 +217,9 @@ export function PaymentScreen({
         body: JSON.stringify({ orderId, dcApi }),
       });
       if (!response.ok) {
-        setRetryError("Could not start a new payment. Please start over from the shop.");
+        setRetryError(
+          "Could not start a new payment. Please start over from the shop.",
+        );
         return;
       }
       const body = (await response.json()) as { sessionId: string };
@@ -249,7 +258,8 @@ export function PaymentScreen({
     else if (view.primaryAction === "show-qr") void startFreshSession(false);
     // A dc_api session existing at all proves detection said yes on this
     // browser, so a retry keeps the preferred transport (spec D1).
-    else if (view.primaryAction === "retry") void startFreshSession(transport === "dc_api");
+    else if (view.primaryAction === "retry")
+      void startFreshSession(transport === "dc_api");
   }
 
   const primaryLabel =
@@ -282,12 +292,22 @@ export function PaymentScreen({
 
         <div className="eudipay-rule" />
 
-        <p className={view.phase === "declined" ? "eudipay-eyebrow is-alarm" : "eudipay-eyebrow"}>
+        <p
+          className={
+            view.phase === "declined"
+              ? "eudipay-eyebrow is-alarm"
+              : "eudipay-eyebrow"
+          }
+        >
           {view.eyebrow}
         </p>
         {/* The amount is the largest thing on the sheet in every state: the
             shopper's question is always "what happened to my €17.47". */}
-        <p className={view.showQr ? "eudipay-amount is-compact" : "eudipay-amount"}>
+        <p
+          className={
+            view.showQr ? "eudipay-amount is-compact" : "eudipay-amount"
+          }
+        >
           {formatEuroCents(amountCents)}
         </p>
 
@@ -306,7 +326,9 @@ export function PaymentScreen({
             screen reader. */}
         <div role="status">
           {view.pill ? <p className="eudipay-pill">{view.pill}</p> : null}
-          {view.headline ? <p className="eudipay-headline">{view.headline}</p> : null}
+          {view.headline ? (
+            <p className="eudipay-headline">{view.headline}</p>
+          ) : null}
         </div>
 
         {view.showQr ? (
@@ -357,7 +379,11 @@ export function PaymentScreen({
         ) : null}
 
         {view.showCancel ? (
-          <button type="button" onClick={() => void cancel()} className="eudipay-cancel">
+          <button
+            type="button"
+            onClick={() => void cancel()}
+            className="eudipay-cancel"
+          >
             Cancel
           </button>
         ) : null}

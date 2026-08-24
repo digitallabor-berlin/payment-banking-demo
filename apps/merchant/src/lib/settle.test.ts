@@ -70,9 +70,33 @@ const dpcCredential = {
   ],
 };
 
-/** The EU Proof of Age attestation, disclosing age_over_18 under its namespace. */
+/**
+ * The other payment credential `payment`/`payment_av` accept. Its join key to
+ * the bank is `psu_id`, not `credential_id` — the two formats share no claims.
+ */
+const sparkassencardCredential = {
+  query_id: "sparkassencard",
+  format: "dc+sd-jwt",
+  claims: {
+    sub: "urn:uuid:9f1c",
+    masked_iban: "DE** **** 1234",
+    psu_id: "psu_abc",
+  },
+  checks: [
+    { check: "sd_jwt_vc_signature_and_kb_jwt", passed: true },
+    { check: "dcql_match", passed: true },
+    { check: "transaction_data_binding", passed: true },
+  ],
+};
+
+/**
+ * The mdoc EU Proof of Age attestation, disclosing age_over_18 under its
+ * namespace. `payment_av`'s second credential_set also accepts an SD-JWT VC
+ * variant answering `av_sdjwt`; the shape difference is covered in
+ * checks.test.ts rather than duplicated through every settle path.
+ */
 const avCredential = {
-  query_id: "av",
+  query_id: "av_mdoc",
   format: "mso_mdoc",
   claims: { "eu.europa.ec.av.1": { age_over_18: true } },
   checks: [
@@ -113,7 +137,7 @@ function stubBank(
 
 /**
  * Starts a session for ord_1. Pass product ids to give the order a basket —
- * an age-restricted one makes the session a `dpc_av` session, which is what
+ * an age-restricted one makes the session a `payment_av` session, which is what
  * arms the age gate.
  */
 async function seedSession(...productIds: string[]): Promise<string> {
@@ -348,7 +372,8 @@ describe("refreshPaymentSessionState — age gate", () => {
 
   it("does not demand an age attestation for an ordinary basket", async () => {
     // The gate is armed by what the session ASKED for, not by what came back —
-    // otherwise every `dpc` payment would fail for want of an `av` credential.
+    // otherwise every `payment` session would fail for want of an age
+    // credential.
     const sessionId = await seedSession("cheese");
     const bank = stubBank({ ok: true, bankTxId: "tx_plain" });
 
@@ -363,7 +388,7 @@ describe("refreshPaymentSessionState — age gate", () => {
   });
 
   it("applies the gate the session recorded, not one re-derived from the order", async () => {
-    // A session started for a plain basket stays a `dpc` session even if the
+    // A session started for a plain basket stays a `payment` session even if the
     // order is edited afterwards. Re-deriving here would flip the verdict
     // mid-flight against a presentation the wallet already answered.
     const sessionId = await seedSession("cheese");
@@ -423,6 +448,65 @@ describe("refreshPaymentSessionState — settlement phase", () => {
       currency: "EUR",
       idempotencyKey: sessionId,
     });
+  });
+
+  it("settles a Sparkassen-Card presentation on its psu_id", async () => {
+    // `payment`'s credential_set accepts either payment format, so a wallet
+    // holding only the Sparkassen Card answers `sparkassencard` and nothing
+    // named `dpc` appears in the verdict at all. The bank keys on one
+    // `credential_id` column either way; `psu_id` is what fills it here.
+    const sessionId = await seedSession("cheese");
+    let sent: unknown;
+    const bank = stubBank({ ok: true, bankTxId: "tx_card" }, (input) => {
+      sent = input;
+    });
+
+    const result = await refreshPaymentSessionState(
+      db,
+      stubFoundry(
+        verdict({
+          result: {
+            verified: true,
+            checks: [],
+            credentials: [sparkassencardCredential],
+          },
+        }),
+      ),
+      bank,
+      sessionId,
+    );
+
+    expect(result).toMatchObject({ ok: true, status: { state: "completed" } });
+    expect(sent).toMatchObject({
+      credentialId: "psu_abc",
+      idempotencyKey: sessionId,
+    });
+  });
+
+  it("settles a Sparkassen Card paired with an age attestation", async () => {
+    const sessionId = await seedSession("beer");
+    let sent: unknown;
+    const bank = stubBank({ ok: true, bankTxId: "tx_card_av" }, (input) => {
+      sent = input;
+    });
+
+    const result = await refreshPaymentSessionState(
+      db,
+      stubFoundry(
+        verdict({
+          result: {
+            verified: true,
+            checks: [],
+            credentials: [sparkassencardCredential, avCredential],
+          },
+        }),
+      ),
+      bank,
+      sessionId,
+    );
+
+    expect(result).toMatchObject({ ok: true, status: { state: "completed" } });
+    expect(sent).toMatchObject({ credentialId: "psu_abc" });
   });
 
   it("maps insufficient funds to a failed session and leaves the order pending", async () => {

@@ -21,32 +21,36 @@ const RESTRICTED = new Set<string>(AGE_RESTRICTED_PRODUCT_IDS);
  * promise a check the presentation does not ask for.
  */
 export function isAgeRestricted(productId: string): boolean {
- return RESTRICTED.has(productId);
+  return RESTRICTED.has(productId);
 }
 
 /**
  * Picks which foundry named query to present with (see the `named_queries`
- * block in foundry's config): `dpc` for an ordinary basket, `dpc_av` when
- * anything in it is age-restricted.
+ * block in foundry's config): `payment` for an ordinary basket, `payment_av`
+ * when anything in it is age-restricted.
  *
- * Both queries declare a credential with id `dpc`; `dpc_av` adds a second
- * `av` credential — an ISO mdoc EU Proof of Age (`eu.europa.ec.av.1`) whose
- * only requested element is `age_over_18`. So the escalation asks for one extra
- * boolean and never for a birthdate: §6 data minimisation, decided at foundry.
+ * Both declare TWO payment credentials — the EMV DPC (`dpc`) and the Sparkassen
+ * Card (`sparkassencard`) — conjoined by a `credential_sets` entry that requires
+ * exactly one of them, so a holder of either can pay. `payment_av` adds a
+ * second required set of two age formats, `av_sdjwt` (an SD-JWT VC) and
+ * `av_mdoc` (an ISO mdoc EU Proof of Age, `eu.europa.ec.av.1`), whose only
+ * requested element is `age_over_18` either way. So the escalation asks for one
+ * extra boolean and never for a birthdate: §6 data minimisation, decided at
+ * foundry.
  *
  * Takes product ids rather than an order id so the decision is pure and
  * testable; the caller reads them from `order_items`, never from the browser.
  */
 export function selectNamedQuery(productIds: readonly string[]): NamedQueryRef {
- return productIds.some(isAgeRestricted) ? "dpc_av" : "dpc";
+  return productIds.some(isAgeRestricted) ? "payment_av" : "payment";
 }
 
 export interface PaymentTransactionData {
- /** Uniquely identifies this authorization attempt — the payment session id. */
- transactionId: string;
- amountCents: number;
- payeeName: string;
- payeeId: string;
+  /** Uniquely identifies this authorization attempt — the payment session id. */
+  transactionId: string;
+  amountCents: number;
+  payeeName: string;
+  payeeId: string;
 }
 
 /**
@@ -55,9 +59,12 @@ export interface PaymentTransactionData {
  * Sent as plain JSON: foundry performs the OpenID4VP §8.4 base64url encoding
  * itself, so a pre-encoded value here would be double-encoded.
  *
- * `credential_ids` names `dpc` for both named queries. foundry validates these
- * against the resolved query's credential ids and rejects an unknown one, and
- * binding the amount to the *payment* credential is the point — an age
+ * `credential_ids` names both payment credentials and neither age credential.
+ * foundry validates these against the resolved query's credential ids and
+ * rejects an unknown one; `payment` and `payment_av` both declare `dpc` and
+ * `sparkassencard`, and the holder chooses which of the two to answer with, so
+ * naming only one would leave the amount unbound whenever the wallet answered
+ * with the other. Binding to the *payment* credential is the point — an age
  * attestation is not what authorizes money to move.
  *
  * `transaction_data_hashes_alg` is sent explicitly even though foundry inserts
@@ -71,18 +78,18 @@ export interface PaymentTransactionData {
  * locales — would break the binding check on a differently-configured host.
  */
 export function buildTransactionData(
- payment: PaymentTransactionData,
+  payment: PaymentTransactionData,
 ): unknown[] {
- return [
-  {
-   type: "urn:eudi:sca:payment:1",
-   credential_ids: ["dpc"],
-   transaction_data_hashes_alg: ["sha-256"],
-   payload: {
-    payee: { name: payment.payeeName, id: payment.payeeId },
-    transaction_id: payment.transactionId,
-    amount_display: `€ ${centsToDecimalString(payment.amountCents)}`,
-   },
-  },
- ];
+  return [
+    {
+      type: "urn:eudi:sca:payment:1",
+      credential_ids: ["dpc", "sparkassencard"],
+      transaction_data_hashes_alg: ["sha-256"],
+      payload: {
+        payee: { name: payment.payeeName, id: payment.payeeId },
+        transaction_id: payment.transactionId,
+        amount_display: `€ ${centsToDecimalString(payment.amountCents)}`,
+      },
+    },
+  ];
 }

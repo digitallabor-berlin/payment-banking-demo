@@ -53,8 +53,33 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**489 tests** (280 bank + 167 merchant + 11 foundry-client + 31 ui), measured
+**546 tests** (327 bank + 177 merchant + 11 foundry-client + 31 ui), measured
 2026-08-24.
+
+That was **499** before the Wero work, which added 47, all in `apps/bank`, and
+the per-file split was measured rather than projected: +12 in `queries.test.ts`
+(the new `getWeroCredentialState` block plus two `listCards` exclusions), +10 in
+`issuance.test.ts` (a whole `startIssuance for Wero` describe), +8 in
+`credential-copy.test.ts`, +7 in `credential-types.test.ts` (the new
+`CARD_FORMAT_TYPE_IDS` block and the widened payment list), +4 in
+`payment-claims.test.ts`, +3 in `payments.test.ts`, +2 in
+`credential-id.test.ts` and +1 in `schema.test.ts`. Several existing tests
+changed rather than being added — `isPaymentCredentialType`'s list assertion,
+`isAgeCredentialType`'s "rejects both payment formats", and the
+never-discloses-a-full-IBAN and unique-join-key loops, all of which now iterate
+`PAYMENT_CREDENTIAL_TYPE_IDS` instead of naming two ids. No plan; the work was a
+bounded request.
+
+That was **489** before the `payment`/`payment_av` named-query work, which added
+10, all in `apps/merchant`: +8 net in `checks.test.ts` and +2 in
+`settle.test.ts` (a Sparkassen-Card settle, alone and paired with an age
+attestation). `checks.test.ts` gained more than 8 `it()` blocks but lost some
+too — several existing single-shape tests became two-format assertions inside
+one block rather than new blocks. Every other affected suite changed without
+growing: `dcql.test.ts`, `payment-sessions.test.ts` and
+`checkout-session.test.ts` only had their expected strings re-keyed. No plan;
+the work was a bounded request whose premise ("a rename") turned out to be
+wrong.
 
 That was **460** before the two-age-format work, which added 29, all in
 `apps/bank`: +8 in `credential-types.test.ts` (the new `av` id and
@@ -147,6 +172,40 @@ them without reading the linked reasoning first.
   its own test rather than an inline comparison precisely because the failure is
   a `failed` row and not a card missing its artwork.
 
+- **There are THREE payment credentials but only TWO girocard formats, and
+  conflating those two questions is a visible defect.** `CARD_FORMAT_TYPE_IDS`
+  (`com.emvco.dpc.card`, `sparkassencard`) is what the girocard tile and
+  `CardDto.formats` read; `PAYMENT_CREDENTIAL_TYPE_IDS` is that list plus `wero`
+  and is what the debit guard and the card route's parser read. They were the
+  same list while the girocard was the only instrument. Scoping `listCards` to
+  the wider one makes the *girocard's* face read "In wallet" because a Wero
+  credential exists — and unlike an age credential, a Wero row genuinely carries
+  a `card_id`, so the card-scoped query really would sweep it in. Verified in a
+  real browser: with an `active` Wero row present the girocard tile still reads
+  `Nicht im Wallet` with no stars and both its buttons intact.
+
+- **Wero is a payment credential with ONE button, and it reuses the Sparkasse
+  card's claim set.** `wero` needed no new route, no new issuance function and no
+  new claim builder: admitting it to `PAYMENT_CREDENTIAL_TYPE_IDS` is the whole
+  of what makes `POST /api/cards/{id}/credential` accept it, and
+  `startIssuance`'s existing non-DPC branch already mints a bare-UUID join key,
+  builds `{ sub, masked_iban, psu_id }` and suppresses the display metadata.
+  That claim set is an **assumption** — no foundry config declares `wero`, so
+  nothing has confirmed what its vct actually wants. It is offered for the EUDI
+  Wallet only, which is why `WeroCredentialTile` has no `formats` record and no
+  `FLAVOUR` map: those exist on the other two tiles because two buttons can lie
+  to each other about what the other issued, and there is no second button here.
+
+- **`.card-object-wero` must override `color`, and that is not cosmetic.**
+  `.card-object` sets `color: #fff` for the girocard's white-on-red printing and
+  `EuStars` draws in `currentColor`, so on `#fdf494` the twelve stars would be
+  invisible. `#1d1c1c` is the wordmark's own tone. This face *does* draw
+  `.card-stars`, unlike the age face — `public/wero-face.svg` places the
+  wordmark left of centre precisely so that corner is free. Verified by
+  rasterising the asset and sampling pixels: all four corners are exactly
+  `rgb(253,244,148)`, the wordmark's bounding box is x 40→224 / y 98→140 of 380×239,
+  and the star corner is clear ground.
+
 - **The girocard is issued in TWO payment formats, and they share no claims.**
   `com.emvco.dpc.card` declares `{ credential_id, network, card_id }`;
   `sparkassencard` (vct `https://creds.digitallabor.dev/vct/sparkassencard`)
@@ -174,8 +233,9 @@ them without reading the linked reasoning first.
   issuing country's format.
 
 - **The card tile's two buttons need per-format state, or they lie.**
-  `CardDto.formats` is a `Record<PaymentCredentialTypeId, CardCredentialState>`
-  alongside the combined `credentialState`. Without it, adding the card through
+  `CardDto.formats` is a `Record<CardFormatTypeId, CardCredentialState>`
+  alongside the combined `credentialState` — `CardFormatTypeId`, not
+  `PaymentCredentialTypeId`, since Wero joined the latter. Without it, adding the card through
   one button flips the other's label to "add again" for a credential that was
   never issued in that format. The combined state is what draws the EU stars —
   the card is in a wallet, and the face has no opinion about which format got it
@@ -185,18 +245,24 @@ them without reading the linked reasoning first.
 - **`credential_type_id` has NO CHECK constraint, so widening it needs no
   migration.** The column is plain `text`; the drizzle `enum:` is a TypeScript
   claim about the data, not a database one. Verified against
-  `0001_even_bloodscream.sql`. Adding `sparkassencard` and `av-sparkasse` was a
-  one-line schema edit and zero SQL.
+  `0001_even_bloodscream.sql`. Adding `sparkassencard`, `av-sparkasse` and later
+  `wero` was a one-line schema edit and zero SQL each time.
 
 - **The copy maps are keyed by what the copy varies with, NOT by credential type
-  id.** `FACE_COPY` is keyed by `CredentialKind` (`card | age`) because one tile
-  shows one badge for all of its formats; `DIALOG_COPY` is keyed by
-  `IssuanceFlavour` (`card-eudi | card-google | age-eudi | age-google`) because
+  id.** `FACE_COPY` is keyed by `CredentialKind` (`card | age | wero`) because
+  one tile shows one badge for all of its formats; `DIALOG_COPY` is keyed by
+  `IssuanceFlavour`
+  (`card-eudi | card-google | age-eudi | age-google | wero-eudi`) because
   a dialog reading "Add card to EUDI Wallet" over a handover started from a
   Google Wallet badge is a visible defect. Keying either by type id would
-  duplicate every string in both locales and let the formats drift. **Neither**
-  credential's `active` explain names a wallet, for the same reason — each can
-  arrive through either of its tile's two buttons.
+  duplicate every string in both locales and let the formats drift. `wero` is a
+  *kind* rather than a third `card` format precisely because its copy has to name
+  it, and there is no `wero-google` flavour — that would be copy for a button
+  that does not exist. **No** credential's `active` explain names a wallet: the
+  card's and the age credential's because each can arrive through either of its
+  tile's two buttons, and Wero's — which has only one button, so naming EUDI
+  Wallet there would be defensible — because an OpenID4VCI offer is answered by
+  whichever wallet the device hands it to, and the bank never learns which.
 
 - **The Google Wallet badge has no "add again" state.** It is Google's artwork
   and its text is drawn as SVG paths, so `walletActionLabel`'s three-way choice
@@ -210,14 +276,15 @@ them without reading the linked reasoning first.
   altering the badge's proportions or colours.
 
 - **A `credentials` row needs neither a card nor a `credential_id`.**
-  `credentialTypeId` (`com.emvco.dpc.card | sparkassencard | av | av-sparkasse`)
+  `credentialTypeId`
+  (`com.emvco.dpc.card | sparkassencard | wero | av | av-sparkasse`)
   is the discriminator and defaults to the DPC type, so an insert that forgets
   it silently becomes a payment credential. `processPayment` refuses anything
   that is not a *payment* row with a card — three independent ways, one of which
   is that SQL never matches `credential_id = <string>` against NULL. That guard
   is `isPaymentCredentialType`, not a comparison against one id: widening it to
-  admit `sparkassencard` was the point, and both age formats are still refused
-  even though the column holds them.
+  admit `sparkassencard` and then `wero` was the point, and both age formats are
+  still refused even though the column holds them.
 
 - **The age credential is issued in TWO formats, and they share ALL their
   claims.** `av-sparkasse` is the EUDI button's format; `av` is the Google
@@ -265,7 +332,7 @@ them without reading the linked reasoning first.
   "add again" and "preparing"; `AddToWalletButton` takes a resolved `label`
   string and has no locale. Same reason as `cardFaceState`: vitest is
   `environment: "node"` with `include: ["src/**/*.test.ts"]`, so a ternary in a
-  `.tsx` file is untested. It also means the card tile and the age tile cannot
+  `.tsx` file is untested. It also means the card, age and Wero tiles cannot
   disagree about the wording. It governs the EUDI button only — see the Google
   Wallet badge bullet above for why the badge has no label to choose.
 
@@ -273,25 +340,59 @@ them without reading the linked reasoning first.
   which makes its absence as a *credential type* easy to misread as present.
   They are different registries; a named query naming `av` does not declare it.
 
-- **None of `sparkassencard`, `av-sparkasse` or `av` is declared by any foundry
-  config.** Verified 2026-08-21 for the first two and 2026-08-24 for all three,
-  against the running local foundry with the exact payload the bank sends: each
-  is HTTP **400**, `{"error":"unknown credential_type_id '<id>'"}`. So the
-  bank's Sparkasse-card and both age happy paths have never run, and a real
-  attempt degrades to a visible `failed` row — confirmed in the dev database,
-  where clicking each of the age tile's two buttons wrote one `failed` row of
-  the matching type. `com.emvco.dpc.card` IS declared and its issuance was
+- **None of `sparkassencard`, `wero`, `av-sparkasse` or `av` is declared by any
+  foundry config.** Verified 2026-08-21 for the first, and 2026-08-24 for all
+  four, against the running local foundry with the exact payload the bank sends:
+  each is HTTP **400**, `{"error":"unknown credential_type_id '<id>'"}`. The
+  local `../foundry/config.yaml` declares exactly three credential types — `pid`,
+  `com.emvco.dpc.card` and `eu.europa.ec.av.1` — and the string `wero` does not
+  appear in it at all. So the bank's Sparkasse-card, Wero and both age happy
+  paths have never run, and a real attempt degrades to a visible `failed` row —
+  confirmed in the dev database, where clicking each of the age tile's two
+  buttons wrote one `failed` row of the matching type, and clicking Wero's one
+  button wrote a `failed` `wero` row carrying `card_anna` and a bare-UUID join
+  key. In the browser that surfaces as the tile's own inline
+  `Angebot konnte nicht erstellt werden.` with **no dialog** — `IssuanceDialog`
+  only mounts once a 2xx offer exists. `com.emvco.dpc.card` IS declared and its issuance was
   verified end-to-end: HTTP 200, a real `openid-credential-offer://` deep link,
   and the display metadata echoed back in `credential_offer.display`. Adding the
-  three missing types is the operator's task.
+  four missing types is the operator's task.
 
-- **The merchant cannot request a `sparkassencard` presentation.**
-  `selectNamedQuery` resolves foundry's `dpc` / `dpc_av` named queries, which
-  ask for the EMVCo DPC, and `extractCredentialId` (`apps/merchant/src/lib/
-  checks.ts`) reads `claims.credential_id` — a claim `sparkassencard` does not
-  carry. So a checkout can only be completed with the DPC today. Closing that
-  loop needs a foundry named query for the new vct *and* a merchant change; it
-  is deliberately out of scope of the bank-side work.
+- **The merchant now accepts EITHER payment format, and the join key is
+  per-format.** `selectNamedQuery` resolves foundry's `payment` / `payment_av`
+  named queries (2026-08-24, replacing `dpc` / `dpc_av`). Each declares both
+  payment credentials as the two options of one required `credential_sets`
+  entry, so a holder of either can pay, and `transaction_data.credential_ids` is
+  `["dpc", "sparkassencard"]` — naming one would leave the amount unbound
+  whenever the wallet answered with the other. `extractCredentialId`
+  (`apps/merchant/src/lib/checks.ts`) reads `credential_id` from a `dpc` answer
+  and `psu_id` from a `sparkassencard` one: a **map keyed by query id, never a
+  fallback chain**, because the two formats share no claims and a claim-name
+  collision must not decide who gets debited. `passedTransactionDataBinding` and
+  `extractCredentialId` resolve **one** payment credential through a single
+  shared helper, so the amount can never be bound to one card while the debit is
+  keyed to another — which also means there is no "try the next payment
+  credential" fallback when the resolved one's binding check failed.
+
+- **The merchant CANNOT request `wero`, so a Wero credential cannot actually
+  pay.** The bank would debit one — `isPaymentCredentialType` admits it and
+  `processPayment` has a test proving the debit — but foundry's `payment` /
+  `payment_av` named queries declare only `dpc` and `sparkassencard`, so no
+  wallet is ever asked for a Wero credential and `extractCredentialId` has no
+  entry for one. Wero is therefore issuance-complete and settlement-ready but
+  unreachable end to end, and the missing piece is a **foundry config** change
+  (declare the credential type, then add it to the named queries'
+  `credential_sets` and to `transaction_data.credential_ids`), not merchant
+  code. Adding it to `extractCredentialId` before the query declares it would be
+  dead code keyed to a query id nothing answers.
+
+- **`payment_av` accepts either AGE format too, and their claim nestings
+  differ.** `av_sdjwt` is a `dc+sd-jwt` VC whose `age_over_18` lands flat, like
+  the DPC's claims; `av_mdoc` is an mdoc whose element is nested under
+  `eu.europa.ec.av.1`. `passedAgeVerification` pins each format to its own
+  shape rather than accepting both shapes for both formats — a wallet that put
+  the element in the wrong place must fail. Nothing answers the retired `av`
+  query id, so a verdict stored under `dpc_av` cannot clear the new gate.
 
 - **Read `drizzle-kit generate`'s output before committing it.** For the `0001`
   migration it emitted a table rebuild whose `INSERT … SELECT` listed the
@@ -433,7 +534,8 @@ them without reading the linked reasoning first.
   rather than EudiPay's — an age restriction is the grocer's obligation. Its
   source of truth is `AGE_RESTRICTED_PRODUCT_IDS` in `lib/dcql.ts`, read through
   `isAgeRestricted`, which `selectNamedQuery` also calls so the shelf tag and the
-  `dpc` → `dpc_av` escalation cannot disagree. There is no `products` column.
+  `payment` → `payment_av` escalation cannot disagree. There is no `products`
+  column.
 
 ### The bank's card face
 
@@ -643,13 +745,21 @@ Not in this repo. Run it from `../foundry`:
   `transaction_data_binding` lives in `credentials[i].checks`, and claims are
   held per credential and never merged. See `apps/merchant/AGENTS.md`.
 - **The local and deployed foundry configs differ in their named queries.**
-  `../foundry/config.yaml` has only `over18`; the deployed
-  `dl-infra-k8s/foundry/foundry_config.yml` has `dpc`, `dpc_av`, `av`,
-  `dpc_discovery`, `dpc_by_network`. The merchant needs `dpc` and `dpc_av`, so
-  its payment flow **cannot** be exercised against a stock local foundry.
+  `../foundry/config.yaml` has only `over18` and `payment-age-loyalty`; the
+  deployed `dl-infra-k8s/foundry/foundry_config.yml` has `dpc`, `dpc_av`, `av`,
+  `dpc_discovery`, `dpc_by_network`, `payment` and `payment_av`. The merchant
+  needs `payment` and `payment_av`, so **neither** of its paths — not even a
+  plain basket — can be exercised against a stock local foundry. That is
+  stricter than the `dpc` era, when the ordinary path did work locally.
 - **foundry now verifies several credentials per `vp_token`.** The deployed
   config's warning that `dpc_av` "CANNOT be fully verified" is stale — the
   openapi serves `credentials[]` and `verify.rs` has `select_presentations`
-  (plural). Do not reason from that comment.
+  (plural). Do not reason from that comment; `payment_av` depends on exactly the
+  capability it claims is missing.
+- **`credential_sets` swaps a top-level verdict key.** A query carrying
+  `credential_sets` reports `credential_sets_satisfied` instead of
+  `requested_credentials_answered`; the two are mutually exclusive. `payment`
+  and `payment_av` both carry it. No merchant code reads either key — both gates
+  read `result.credentials` — so this is a fact to know, not a dependency.
 - **The deployed admin key is not `dev-admin-key`.** Read it with
   `kubectl -n foundry get secret foundry-admin -o jsonpath='{.data.admin-api-key}' | base64 -d`.

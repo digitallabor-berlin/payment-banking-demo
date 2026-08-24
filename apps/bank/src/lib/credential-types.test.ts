@@ -3,9 +3,11 @@ import {
   AGE_CREDENTIAL_TYPE_IDS,
   AV_CREDENTIAL_TYPE_ID,
   AV_GOOGLE_CREDENTIAL_TYPE_ID,
+  CARD_FORMAT_TYPE_IDS,
   DPC_CREDENTIAL_TYPE_ID,
   PAYMENT_CREDENTIAL_TYPE_IDS,
   SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
+  WERO_CREDENTIAL_TYPE_ID,
   isAgeCredentialType,
   isPaymentCredentialType,
   sendsDpcDisplayMetadata,
@@ -33,13 +35,46 @@ describe("credential type ids", () => {
     // ways, which is what makes per-format tile state meaningful at all.
     expect(AV_CREDENTIAL_TYPE_ID).not.toBe(AV_GOOGLE_CREDENTIAL_TYPE_ID);
   });
+
+  it("spells the Wero credential as foundry's admin API names it", () => {
+    expect(WERO_CREDENTIAL_TYPE_ID).toBe("wero");
+  });
+});
+
+describe("CARD_FORMAT_TYPE_IDS", () => {
+  /**
+   * The girocard's formats, which is a strictly narrower question than "what
+   * can pay". Wero is payable but it is not a format of the girocard, and
+   * conflating the two would make the card tile's face read "In wallet"
+   * because a Wero credential exists.
+   */
+  it("lists exactly the two girocard formats", () => {
+    expect([...CARD_FORMAT_TYPE_IDS]).toEqual([
+      DPC_CREDENTIAL_TYPE_ID,
+      SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
+    ]);
+  });
+
+  it("excludes Wero, which is payable but is not the girocard", () => {
+    expect([...CARD_FORMAT_TYPE_IDS]).not.toContain(WERO_CREDENTIAL_TYPE_ID);
+  });
+
+  it("is a subset of the payment types", () => {
+    // Every format of the card must be spendable. The reverse does not hold.
+    for (const typeId of CARD_FORMAT_TYPE_IDS) {
+      expect(isPaymentCredentialType(typeId)).toBe(true);
+    }
+  });
 });
 
 describe("isPaymentCredentialType", () => {
-  it("lists exactly the two card formats as payment types", () => {
+  it("lists the two card formats and Wero as payment types", () => {
+    // Order is the order each is presented: the girocard's two formats on the
+    // card tile, then Wero on its own.
     expect([...PAYMENT_CREDENTIAL_TYPE_IDS]).toEqual([
       DPC_CREDENTIAL_TYPE_ID,
       SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
+      WERO_CREDENTIAL_TYPE_ID,
     ]);
   });
 
@@ -51,6 +86,12 @@ describe("isPaymentCredentialType", () => {
     expect(isPaymentCredentialType(SPARKASSEN_CARD_CREDENTIAL_TYPE_ID)).toBe(
       true,
     );
+  });
+
+  it("accepts the Wero credential", () => {
+    // This is what lets `processPayment` debit against a Wero credential. It is
+    // not a girocard format, but it is money.
+    expect(isPaymentCredentialType(WERO_CREDENTIAL_TYPE_ID)).toBe(true);
   });
 
   it("rejects the age credential — an attestation is not a payment instrument", () => {
@@ -84,9 +125,10 @@ describe("isAgeCredentialType", () => {
     expect(isAgeCredentialType(AV_GOOGLE_CREDENTIAL_TYPE_ID)).toBe(true);
   });
 
-  it("rejects both payment formats — a card is not an age attestation", () => {
+  it("rejects every payment type — money is not an age attestation", () => {
     expect(isAgeCredentialType(DPC_CREDENTIAL_TYPE_ID)).toBe(false);
     expect(isAgeCredentialType(SPARKASSEN_CARD_CREDENTIAL_TYPE_ID)).toBe(false);
+    expect(isAgeCredentialType(WERO_CREDENTIAL_TYPE_ID)).toBe(false);
   });
 
   it("rejects the mdoc docType, which is foundry's own name and not an id", () => {
@@ -121,5 +163,19 @@ describe("sendsDpcDisplayMetadata", () => {
     expect(sendsDpcDisplayMetadata(SPARKASSEN_CARD_CREDENTIAL_TYPE_ID)).toBe(
       false,
     );
+  });
+
+  it("is false for the Wero credential", () => {
+    // Same reason, and it is worth pinning per type rather than trusting the
+    // negation: the cost of getting it wrong is a `failed` issuance row.
+    expect(sendsDpcDisplayMetadata(WERO_CREDENTIAL_TYPE_ID)).toBe(false);
+  });
+
+  it("is false for every payment type except the DPC", () => {
+    for (const typeId of PAYMENT_CREDENTIAL_TYPE_IDS) {
+      expect(sendsDpcDisplayMetadata(typeId)).toBe(
+        typeId === DPC_CREDENTIAL_TYPE_ID,
+      );
+    }
   });
 });

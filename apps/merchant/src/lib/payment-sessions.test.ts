@@ -127,7 +127,7 @@ describe("startPaymentSession", () => {
     expect(row?.foundryVerificationId).toBe("ver_1");
   });
 
-  it("asks for the dpc named query by reference, never an inline dcql_query", async () => {
+  it("asks for the payment named query by reference, never an inline dcql_query", async () => {
     stockOrder("cheese");
     let sentBody: Record<string, unknown> = {};
     const client = stubClient((_url, init) => {
@@ -137,13 +137,13 @@ describe("startPaymentSession", () => {
 
     await startPaymentSession(db, client, "ord_1", "Demo Shop", "Payee-id-123");
 
-    expect(sentBody.named_query_ref).toBe("dpc");
+    expect(sentBody.named_query_ref).toBe("payment");
     // Sending both would make foundry prefer the inline query and silently
     // ignore the named one.
     expect(sentBody.dcql_query).toBeUndefined();
   });
 
-  it("escalates to dpc_av when the basket holds an age-restricted product", async () => {
+  it("escalates to payment_av when the basket holds an age-restricted product", async () => {
     stockOrder("cheese", "beer");
     let sentBody: Record<string, unknown> = {};
     const client = stubClient((_url, init) => {
@@ -153,7 +153,7 @@ describe("startPaymentSession", () => {
 
     await startPaymentSession(db, client, "ord_1", "Demo Shop", "Payee-id-123");
 
-    expect(sentBody.named_query_ref).toBe("dpc_av");
+    expect(sentBody.named_query_ref).toBe("payment_av");
   });
 
   it("records which named query was used, so the settle gate can trust it", async () => {
@@ -167,13 +167,13 @@ describe("startPaymentSession", () => {
     );
 
     expect(db.select().from(paymentSessions).get()?.namedQueryRef).toBe(
-      "dpc_av",
+      "payment_av",
     );
   });
 
-  it("records dpc_av even when foundry rejects the request", async () => {
+  it("records payment_av even when foundry rejects the request", async () => {
     // The row is written before the call, so the attempted query has to be on
-    // it already — otherwise a failed row would claim it asked for `dpc`.
+    // it already — otherwise a failed row would claim it asked for `payment`.
     stockOrder("aperitif");
     await startPaymentSession(
       db,
@@ -185,7 +185,7 @@ describe("startPaymentSession", () => {
 
     const row = db.select().from(paymentSessions).get();
     expect(row?.state).toBe("failed");
-    expect(row?.namedQueryRef).toBe("dpc_av");
+    expect(row?.namedQueryRef).toBe("payment_av");
   });
 
   it("sends the urn:eudi:sca:payment:1 transaction_data for this order", async () => {
@@ -208,7 +208,7 @@ describe("startPaymentSession", () => {
     expect(sentBody.transaction_data).toEqual([
       {
         type: "urn:eudi:sca:payment:1",
-        credential_ids: ["dpc"],
+        credential_ids: ["dpc", "sparkassencard"],
         transaction_data_hashes_alg: ["sha-256"],
         payload: {
           payee: { name: "Rock Legends", id: "Payee-id-123" },
@@ -221,7 +221,7 @@ describe("startPaymentSession", () => {
     ]);
   });
 
-  it("binds the amount to the dpc credential even under dpc_av", async () => {
+  it("binds the amount to both payment credentials even under payment_av", async () => {
     stockOrder("beer");
     let sentBody: { transaction_data?: Array<{ credential_ids: string[] }> } =
       {};
@@ -232,7 +232,10 @@ describe("startPaymentSession", () => {
 
     await startPaymentSession(db, client, "ord_1", "Demo Shop", "Payee-id-123");
 
-    expect(sentBody.transaction_data?.[0]?.credential_ids).toEqual(["dpc"]);
+    expect(sentBody.transaction_data?.[0]?.credential_ids).toEqual([
+      "dpc",
+      "sparkassencard",
+    ]);
   });
 
   it("defaults to the request_uri transport and records it on the row", async () => {

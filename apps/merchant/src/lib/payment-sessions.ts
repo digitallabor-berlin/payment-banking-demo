@@ -36,7 +36,7 @@ export type StartPaymentSessionResult =
       /** From the order row. Never from the browser. */
       amountCents: number;
       transport: "request_uri" | "dc_api";
-      /** True when this session presents the `dpc_av` named query. */
+      /** True when this session presents the `payment_av` named query. */
       ageRequested: boolean;
       /** foundry's inline unsigned request object. Null under request_uri. */
       dcApiRequest: unknown;
@@ -58,7 +58,7 @@ export interface PaymentSessionStatusDto {
  * a failed verification-request creation leaves a visible `failed` row
  * rather than nothing at all — the same property Plan 1's bank issuance flow
  * relies on. `namedQueryRef` is part of that first write for the same reason:
- * a failed row must record which query was attempted, not default to `dpc`.
+ * a failed row must record which query was attempted, not default to `payment`.
  *
  * Which credentials are asked for is decided here, server-side, from the
  * order's own persisted lines. The browser is not consulted about whether a
@@ -120,7 +120,8 @@ export async function startPaymentSession(
         openid4vpUri: response.openid4vp_uri ?? null,
         requestUri: response.request_uri ?? null,
         transport: useDcApi ? "dc_api" : "request_uri",
-        dcApiRequestJson: dcApiRequest === null ? null : JSON.stringify(dcApiRequest),
+        dcApiRequestJson:
+          dcApiRequest === null ? null : JSON.stringify(dcApiRequest),
       })
       .where(eq(paymentSessions.id, sessionId))
       .run();
@@ -132,7 +133,7 @@ export async function startPaymentSession(
       orderId: order.id,
       amountCents: order.totalCents,
       transport: useDcApi ? "dc_api" : "request_uri",
-      ageRequested: namedQueryRef === "dpc_av",
+      ageRequested: namedQueryRef === "payment_av",
       dcApiRequest,
       state: "pending",
     };
@@ -271,7 +272,7 @@ export async function refreshPaymentSessionState(
     // The flag is read off the row rather than recomputed from the order, so
     // editing the restricted set cannot change the verdict mid-session.
     if (
-      row.namedQueryRef === "dpc_av" &&
+      row.namedQueryRef === "payment_av" &&
       !passedAgeVerification(verdict.result.credentials)
     ) {
       fail(db, sessionId, "age_verification_failed", checksJson);

@@ -13,16 +13,17 @@ import { stateCopy, type CardFaceState } from "./card-state.js";
 import { MESSAGES } from "./i18n/messages.js";
 
 const STATES: CardFaceState[] = ["none", "offered", "active"];
-const KINDS: CredentialKind[] = ["card", "age"];
+const KINDS: CredentialKind[] = ["card", "age", "wero"];
 const FLAVOURS: IssuanceFlavour[] = [
   "card-eudi",
   "card-google",
   "age-eudi",
   "age-google",
+  "wero-eudi",
 ];
 
 describe("FACE_COPY", () => {
-  it("covers every face state for both credential kinds", () => {
+  it("covers every face state for every credential kind", () => {
     for (const kind of KINDS) {
       for (const state of STATES) {
         const copy = faceCopy("de", kind, state);
@@ -44,8 +45,43 @@ describe("FACE_COPY", () => {
     // The girocard is issued in two formats behind ONE tile with ONE badge.
     // Keying this by type id would duplicate every card string and let the two
     // formats' copy drift apart for no reason a user could ever observe.
-    expect(Object.keys(FACE_COPY.de).sort()).toEqual(["age", "card"]);
-    expect(Object.keys(FACE_COPY.en).sort()).toEqual(["age", "card"]);
+    expect(Object.keys(FACE_COPY.de).sort()).toEqual(["age", "card", "wero"]);
+    expect(Object.keys(FACE_COPY.en).sort()).toEqual(["age", "card", "wero"]);
+  });
+
+  it("describes Wero as its own instrument, not as a card", () => {
+    // Wero is not a girocard format — it has its own tile — so sharing the
+    // card's copy would name the wrong instrument on the wrong artwork.
+    for (const state of ["none", "active"] as const) {
+      for (const locale of ["de", "en"] as const) {
+        expect(faceCopy(locale, "wero", state).explain).not.toBe(
+          faceCopy(locale, "card", state).explain,
+        );
+        expect(faceCopy(locale, "wero", state).explain).not.toBe(
+          faceCopy(locale, "age", state).explain,
+        );
+      }
+    }
+  });
+
+  it("names Wero in its own explanations, in both languages", () => {
+    for (const state of ["none", "active"] as const) {
+      for (const locale of ["de", "en"] as const) {
+        expect(faceCopy(locale, "wero", state).explain).toMatch(/Wero/);
+      }
+    }
+  });
+
+  it("reuses the shared badges for Wero rather than inventing new ones", () => {
+    // The badge answers "is it in a wallet", which is the same question for
+    // every credential. A third wording would be drift, not information.
+    for (const state of STATES) {
+      for (const locale of ["de", "en"] as const) {
+        expect(faceCopy(locale, "wero", state).badge).toBe(
+          faceCopy(locale, "card", state).badge,
+        );
+      }
+    }
   });
 
   it("explains the two credentials differently wherever the subject differs", () => {
@@ -77,6 +113,17 @@ describe("FACE_COPY", () => {
     );
     expect(faceCopy("en", "age", "offered").explain).toBe(
       "Confirm the offer in your wallet app.",
+    );
+  });
+
+  it("shares that same offered instruction with Wero, in both languages", () => {
+    // The sentence does not name its subject, so a third copy of it would be
+    // pointless drift waiting to happen.
+    expect(faceCopy("en", "wero", "offered").explain).toBe(
+      "Confirm the offer in your wallet app.",
+    );
+    expect(faceCopy("de", "wero", "offered").explain).toBe(
+      "Bestätigen Sie das Angebot in Ihrer Wallet-App.",
     );
   });
 
@@ -186,6 +233,44 @@ describe("DIALOG_COPY", () => {
       for (const key of Object.keys(card) as (keyof typeof card)[]) {
         expect(card[key]).not.toBe(age[key]);
       }
+    }
+  });
+
+  it("names EUDI Wallet in Wero's title, in both languages", () => {
+    expect(dialogCopy("en", "wero-eudi").title).toBe("Add Wero to EUDI Wallet");
+    expect(dialogCopy("de", "wero-eudi").title).toBe(
+      "Wero zum EUDI Wallet hinzufügen",
+    );
+  });
+
+  it("may name EUDI Wallet in Wero's success body, unlike the Google flavours", () => {
+    // Legitimate here for the same reason it is on card-eudi: this credential
+    // has exactly one handover, started from the EUDI button, so the sentence
+    // states something the bank actually intended rather than an outcome it
+    // cannot observe.
+    for (const locale of ["de", "en"] as const) {
+      expect(dialogCopy(locale, "wero-eudi").successBody).toMatch(/EUDI/);
+      expect(dialogCopy(locale, "wero-eudi").successBody).not.toMatch(/Google/);
+    }
+  });
+
+  it("gives Wero its own subject in every dialog string", () => {
+    for (const locale of ["de", "en"] as const) {
+      const wero = DIALOG_COPY[locale]["wero-eudi"];
+      for (const other of ["card-eudi", "age-eudi"] as const) {
+        const copy = DIALOG_COPY[locale][other];
+        for (const key of Object.keys(wero) as (keyof typeof wero)[]) {
+          expect(wero[key]).not.toBe(copy[key]);
+        }
+      }
+    }
+  });
+
+  it("has no Google flavour for Wero at all", () => {
+    // Wero is offered for the EUDI Wallet only, so a wero-google flavour would
+    // be copy for a button that does not exist.
+    for (const locale of ["de", "en"] as const) {
+      expect(Object.keys(DIALOG_COPY[locale])).not.toContain("wero-google");
     }
   });
 

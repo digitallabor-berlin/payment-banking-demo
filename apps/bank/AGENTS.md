@@ -16,6 +16,9 @@ The bank is the **credential issuer** and the **money mover**:
    It also issues an age-verification attestation
    (`POST /api/credentials/av`, type id `av-sparkasse`) — see **Age-verification
    credential** below; that path's happy case has never run.
+   And it issues **Wero** (type id `wero`) through that same card route, behind a
+   single *Add to EUDI Wallet* button on its own tile — see **Wero credential**
+   below; that path's happy case has never run either.
 2. Debits the account when the merchant presents a verified join key
    (`POST /api/payments`).
 
@@ -49,8 +52,8 @@ table and never persists one — it only forwards a `credential_id` string.
 `users`, `accounts`, `cards`, `credentials`, `transactions`.
 
 - `credentials.credentialTypeId` is the type discriminator:
-  `com.emvco.dpc.card | sparkassencard | av | av-sparkasse`, **defaulting to the
-  DPC**. The default is what made migration `0001`'s backfill automatic and kept
+  `com.emvco.dpc.card | sparkassencard | wero | av | av-sparkasse`, **defaulting
+  to the DPC**. The default is what made migration `0001`'s backfill automatic and kept
   the eight pre-existing `insert(credentials)` sites compiling. The cost is real:
   an insert that *forgets* the field silently becomes a payment credential, so
   `startAvIssuance` names its type explicitly and a test asserts it, and
@@ -62,7 +65,7 @@ table and never persists one — it only forwards a `credential_id` string.
 - **Widening that enum costs no migration.** The column is plain `text` and
   `0001` emits no CHECK constraint, so the enum is a TypeScript claim about the
   data rather than a database one. Adding `sparkassencard` and `av-sparkasse`
-  was a one-line schema edit and zero SQL.
+  was a one-line schema edit and zero SQL, and so was adding `wero`.
 - **`av` is NOT legacy — it is the age credential's Google Wallet format.**
   It once was: the age credential became `av-sparkasse`, nothing issued `av`,
   and `getAgeCredentialState` ignored it, so a leftover row read as "not in
@@ -296,16 +299,26 @@ The one girocard, issued as two independent credentials.
   `credentialState` is what the card face draws. Without the split, adding
   through one button flips the other's label to "add again" for a credential
   never issued in that format.
+- **It is keyed by `CardFormatTypeId`, not `PaymentCredentialTypeId`.** Those
+  were the same union until Wero, which is payable but is not a girocard format.
+  `listCards` filters on `CARD_FORMAT_TYPE_IDS` for the same reason — and here
+  the filter is load-bearing rather than an assertion, because a Wero row *does*
+  carry a `card_id` and the card-scoped query would otherwise sweep it in, making
+  the girocard's own face read "In wallet".
 - **`sparkassencard`'s happy path has never run.** Verified 2026-08-21 against
   the running local foundry with the exact payload the bank sends: **HTTP 400**
   `{"error":"unknown credential_type_id 'sparkassencard'"}`. The row lands
   `failed` with its UUID join key intact — confirmed in the dev database. The
   DPC's path *was* verified end-to-end the same day: HTTP 200, a real
   `openid-credential-offer://` link, display metadata echoed back.
-- **The merchant cannot request this format.** `extractCredentialId` reads
-  `claims.credential_id`, which `sparkassencard` does not carry, and
-  `selectNamedQuery` resolves `dpc` / `dpc_av`. A checkout is DPC-only until a
-  foundry named query and a merchant change exist. Out of scope here.
+- **The merchant CAN request this format, as of 2026-08-24.** It resolves
+  foundry's `payment` / `payment_av` named queries, whose required
+  `credential_sets` entry accepts either payment format, and
+  `extractCredentialId` reads `psu_id` for a `sparkassencard` answer where it
+  reads `credential_id` for a DPC. Both land in this bank's one `credential_id`
+  column, so `processPayment` needs no per-format branch. Still unexercised end
+  to end: this format's *issuance* is what fails, so no wallet holds one to
+  present.
 
 ## Age-verification credential
 
@@ -370,22 +383,31 @@ covered.
 **Neither map is keyed by credential type id, and that is the point.** They are
 keyed by what the copy actually varies with:
 
-- `CredentialKind` (`card | age`) for the face. One tile shows one badge for
-  both card formats, so there is nothing for a format to disagree about. Keying
-  by type id would duplicate every card string in both locales and let the two
-  drift for no reason a user could observe.
-- `IssuanceFlavour` (`card-eudi | card-google | age`) for the dialog, because a
-  dialog reading "Add card to EUDI Wallet" over a handover started from a Google
-  Wallet badge is a visible defect. The *title* names the wallet; the success
-  body deliberately does **not** — an OpenID4VCI offer can be answered by any
-  wallet on the device, so a title states a knowable intent while a success body
-  would state an unknowable outcome. There is no `age-google`: the age tile has
-  one button.
-- The card's `active` explain no longer names a wallet either, for the same
-  reason — it would be wrong half the time.
+- `CredentialKind` (`card | age | wero`) for the face. One tile shows one badge
+  for all of its formats, so there is nothing for a format to disagree about.
+  Keying by type id would duplicate every card string in both locales and let
+  the two drift for no reason a user could observe. `wero` is a kind of its own
+  rather than a third `card` format because it is a separate instrument with its
+  own tile and its own artwork, so its copy has to name it.
+- `IssuanceFlavour` (`card-eudi | card-google | age-eudi | age-google |
+  wero-eudi`) for the dialog, because a dialog reading "Add card to EUDI Wallet"
+  over a handover started from a Google Wallet badge is a visible defect. For
+  the `-google` flavours the *title* names the wallet and the success body
+  deliberately does **not** — an OpenID4VCI offer can be answered by any wallet
+  on the device, so a title states a knowable intent while a success body would
+  state an unknowable outcome. **`wero-eudi` is the exception and may name EUDI
+  Wallet in both**, exactly as `card-eudi` does: one handover, from one button.
+  There is deliberately no `wero-google` — that would be copy for a button that
+  does not exist.
+- **No** credential's `active` *face* explain names a wallet. For the card and
+  the age credential that is because either of two buttons could have delivered
+  it; for Wero, which has only one, it is because the bank still cannot observe
+  which app answered the offer.
 
-`CardTile` maps format → flavour through a `FLAVOUR` lookup rather than a
-ternary in JSX, so the button pressed and the dialog shown cannot mismatch.
+`CardTile` and `AgeCredentialTile` each map format → flavour through a `FLAVOUR`
+lookup rather than a ternary in JSX, so the button pressed and the dialog shown
+cannot mismatch. `WeroCredentialTile` has no such map: with one button there is
+nothing to look up, so it passes `"wero-eudi"` directly.
 
 **`badgeClass` is NOT part of `CardFaceCopy`.** It was extracted to a
 locale-independent `BADGE_CLASS: Record<CardFaceState, string>` in
@@ -394,8 +416,9 @@ locale-keyed record stored every value twice and let the two locales drift on a
 non-linguistic value.
 
 `IssuanceDialog` takes a `copy: IssuanceCopy` prop rather than a noun to
-substitute: German gender differs (`die Karte` against `der Altersnachweis`), so
-the article and possessive change with the noun, not just the noun.
+substitute: German gender differs (`die Karte` against `der Altersnachweis`
+against a bare neuter `Wero`), so the article and possessive change with the
+noun, not just the noun.
 `card-state.ts` no longer exports the `STATE_COPY` constant. It exports
 **`stateCopy(locale, state)`**, which reads `FACE_COPY[locale].card[state]` —
 still by identity, not a parallel copy, and a test asserts that identity so the
@@ -414,10 +437,12 @@ what reports state; and it is sized by height alone (`h-11 w-auto`), because
 Google's brand guidelines forbid altering the badge's proportions or colours.
 Verified in headless Chrome: natural 199×55, rendered 159×44 — aspect preserved.
 
-The `offered` explanation is **deliberately identical** for both kinds
+The `offered` explanation is **deliberately identical** for all three kinds
 (`Bestätigen Sie das Angebot in Ihrer Wallet-App.` / `Confirm the offer in your
 wallet app.`) — the instruction genuinely does not depend on what is being
-offered. A test pins it **in each language independently**, so neither
+offered. The badges are shared for the same reason: "is it in a wallet" is the
+same question whatever the credential, and a third wording would be drift rather
+than information. A test pins it **in each language independently**, so neither
 language's sharing can drift unnoticed. The plan's original assertion that all
 three states differ was unsatisfiable against the plan's own copy table.
 
@@ -426,6 +451,76 @@ The AV face is `.card-object-av`, overriding only `background-image` and
 Sparkasse `--color-primary` (`#EA0016`). Nothing is drawn over it and it gets no
 `EuStars`: `.card-stars` is positioned top-right, exactly where the artwork
 prints its wordmark.
+
+The Wero face is `.card-object-wero` and overrides one thing more: `color`.
+`.card-object` sets `#fff` for the girocard's white-on-red printing and `EuStars`
+draws in `currentColor`, so white stars on `#fdf494` would be invisible —
+`#1d1c1c` is the wordmark's own tone. That override is what lets this face draw
+`.card-stars` where the AV face cannot: `public/wero-face.svg` places the
+wordmark left of centre (measured by rasterising it: box x 40→224, y 98→140 of
+380×239) so the top-right corner is clear ground.
+
+## Wero credential
+
+A fourth credential type: the bank's account-to-account payment instrument, on
+its own tile, offered for the EUDI Wallet **only**.
+
+- **No new route and no new issuance function.** It posts to the card route,
+  `POST /api/cards/{id}/credential` with `{"credentialTypeId":"wero"}`. Admitting
+  `wero` to `PAYMENT_CREDENTIAL_TYPE_IDS` is the entire mechanism: the route's
+  existing parser asks `isPaymentCredentialType`, and `startIssuance`'s non-DPC
+  branch already does everything Wero needs. `issuance.ts`, `credential-id.ts`
+  and `payment-claims.ts` gained **zero** lines of implementation — only tests
+  pinning that Wero lands in those branches, so a future edit to a branch
+  condition cannot silently give it the DPC's shape.
+- **It reuses the Sparkasse card's claim set**, `{ sub, masked_iban, psu_id }`,
+  join key in `psu_id` as a bare `randomUUID()`. That is an **assumption**, not a
+  verified contract: no foundry config declares `wero`, so nothing has confirmed
+  what its vct wants. Wero being account-to-account makes a masked IBAN plus a
+  PSU id the coherent shape, which is the whole of the reasoning.
+- **The row carries a card even though no Wero claim mentions one.** Wero is
+  drawn on the account, but `processPayment` resolves the account *through* the
+  card, so the row needs one. Consequently the tile renders only when the user
+  has a card — `cards[0]?.id` in `app/page.tsx` — rather than showing a button
+  that could only ever fail.
+- **`getWeroCredentialState` has no `formats` map.** The card and age DTOs carry
+  one because two buttons can lie to each other about what the other issued.
+  There is one button here, so there is nothing to disagree with. Same
+  `pickLiveCredential`/`stateOf` rule, applied at one scope instead of two.
+- **Never send `offer_display` or `credential_response_display`.** Same hard
+  guard as `sparkassencard` and the age credential: `sendsDpcDisplayMetadata` is
+  already false for it, and a test pins that per type rather than trusting the
+  negation, because the cost of getting it wrong is a `failed` row.
+  `public/wero-face.svg` is the bank's own UI artwork that the wallet never sees.
+- **The face is `.card-object-wero`, and it overrides `color` as well as the
+  image and fallback colour.** `.card-object` sets `color: #fff` and `EuStars`
+  draws in `currentColor`, so white stars on `#fdf494` would be invisible;
+  `#1d1c1c` is the wordmark's own tone. Unlike `.card-object-av` this face **does**
+  draw `.card-stars` — the wordmark is placed left of centre so the top-right
+  corner is free. Nothing else is drawn over it: no IBAN, no holder.
+- **The heading is a hardcoded `"Wero"`.** A proper noun identical in both
+  locales, so catalogueing it would trip `messages.test.ts`' no-leaf-identical-
+  across-locales rule — the same reason `Sparkasse` and `EUDI Wallet` are
+  hardcoded.
+- **The copy is a new `CredentialKind` (`wero`) and one new flavour
+  (`wero-eudi`).** There is deliberately no `wero-google`. Its dialog names EUDI
+  Wallet in both the title *and* the success body, which the `-google` flavours
+  may not — legitimate here for the same reason it is on `card-eudi`: one
+  handover, from one button. Its `active` *face* explain still names no wallet,
+  because the bank cannot observe which app answered the offer.
+- **The happy path has never run.** Verified 2026-08-24 against the running local
+  foundry with the exact payload the bank sends: **HTTP 400**
+  `{"error":"unknown credential_type_id 'wero'"}`. The local
+  `../foundry/config.yaml` declares only `pid`, `com.emvco.dpc.card` and
+  `eu.europa.ec.av.1`; the string `wero` does not appear in it. In a real browser
+  the click produces the tile's inline `Angebot konnte nicht erstellt werden.`
+  and **no dialog**, and the dev database gained a `failed` `wero` row carrying
+  `card_anna` and a bare-UUID join key. That rejection is the whole of what has
+  been exercised.
+- **The merchant cannot request it either**, so even a successful issuance could
+  not complete a checkout: foundry's `payment` / `payment_av` named queries
+  declare only `dpc` and `sparkassencard`. `processPayment` *would* debit a Wero
+  credential — there is a test — but nothing would ever present one.
 
 ## i18n
 
@@ -475,7 +570,14 @@ type, not copy).
 
 ## Testing
 
-`pnpm test` → **251 tests**. `pnpm typecheck` must also be clean. (This line
+`pnpm test` → **327 tests**. `pnpm typecheck` must also be clean. (It read
+`280` before the Wero work, which added 47: +12 in `queries.test.ts`, +10 in
+`issuance.test.ts`, +8 in `credential-copy.test.ts`, +7 in
+`credential-types.test.ts`, +4 in `payment-claims.test.ts`, +3 in
+`payments.test.ts`, +2 in `credential-id.test.ts` and +1 in `schema.test.ts`.
+Measured per file, not projected. Several existing tests changed rather than
+being added, because assertions that named two payment ids now iterate
+`PAYMENT_CREDENTIAL_TYPE_IDS`.) (This line
 read `188` before the two-card-format work, which added 55: 11 in the new
 `credential-types.test.ts`, 12 in the new `payment-claims.test.ts`, 3 in
 `credential-id.test.ts`, 10 in `issuance.test.ts`, 9 in `queries.test.ts`, 3 in

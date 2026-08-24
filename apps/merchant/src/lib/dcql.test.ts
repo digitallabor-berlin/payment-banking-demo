@@ -15,8 +15,18 @@ describe("isAgeRestricted", () => {
 
   it("is false for every other seeded product", () => {
     const ordinary = [
-      "tomatoes", "avocado", "berries", "sourdough", "milk", "yogurt",
-      "cheese", "pasta", "olive-oil", "chocolate", "chips", "water",
+      "tomatoes",
+      "avocado",
+      "berries",
+      "sourdough",
+      "milk",
+      "yogurt",
+      "cheese",
+      "pasta",
+      "olive-oil",
+      "chocolate",
+      "chips",
+      "water",
     ];
     for (const id of ordinary) {
       expect(isAgeRestricted(id)).toBe(false);
@@ -24,34 +34,35 @@ describe("isAgeRestricted", () => {
   });
 
   it("agrees with selectNamedQuery — one source of truth", () => {
-    // The shelf tag and the dpc -> dpc_av escalation must never disagree.
+    // The shelf tag and the payment -> payment_av escalation must never
+    // disagree.
     for (const id of ["beer", "wine", "aperitif", "cheese", "water"]) {
-      expect(selectNamedQuery([id]) === "dpc_av").toBe(isAgeRestricted(id));
+      expect(selectNamedQuery([id]) === "payment_av").toBe(isAgeRestricted(id));
     }
   });
 });
 
 describe("selectNamedQuery", () => {
-  it("asks for dpc when nothing in the basket is age-restricted", () => {
-    expect(selectNamedQuery(["cheese", "berries", "water"])).toBe("dpc");
+  it("asks for payment when nothing in the basket is age-restricted", () => {
+    expect(selectNamedQuery(["cheese", "berries", "water"])).toBe("payment");
   });
 
-  it("asks for dpc_av when the basket contains lager", () => {
-    expect(selectNamedQuery(["cheese", "beer"])).toBe("dpc_av");
+  it("asks for payment_av when the basket contains lager", () => {
+    expect(selectNamedQuery(["cheese", "beer"])).toBe("payment_av");
   });
 
-  it("asks for dpc_av when the basket contains riesling", () => {
-    expect(selectNamedQuery(["wine"])).toBe("dpc_av");
+  it("asks for payment_av when the basket contains riesling", () => {
+    expect(selectNamedQuery(["wine"])).toBe("payment_av");
   });
 
-  it("asks for dpc_av when the basket contains the aperitif", () => {
-    expect(selectNamedQuery(["aperitif", "chips"])).toBe("dpc_av");
+  it("asks for payment_av when the basket contains the aperitif", () => {
+    expect(selectNamedQuery(["aperitif", "chips"])).toBe("payment_av");
   });
 
-  it("asks for dpc for an empty basket", () => {
+  it("asks for payment for an empty basket", () => {
     // Not a real checkout — createOrder rejects an empty cart — but the
     // fail-safe direction here is the *narrower* query, never the broader one.
-    expect(selectNamedQuery([])).toBe("dpc");
+    expect(selectNamedQuery([])).toBe("payment");
   });
 
   it("names exactly the three restricted products", () => {
@@ -75,7 +86,7 @@ describe("buildTransactionData", () => {
     expect(buildTransactionData(payment)).toEqual([
       {
         type: "urn:eudi:sca:payment:1",
-        credential_ids: ["dpc"],
+        credential_ids: ["dpc", "sparkassencard"],
         transaction_data_hashes_alg: ["sha-256"],
         payload: {
           payee: { name: "Rock Legends", id: "Payee-id-123" },
@@ -86,13 +97,16 @@ describe("buildTransactionData", () => {
     ]);
   });
 
-  it("binds to the dpc credential regardless of which named query was used", () => {
-    // `dpc` and `dpc_av` both declare a credential with id `dpc`; the age
-    // attestation is never what the money is bound to.
+  it("binds to both payment credentials and to neither age credential", () => {
+    // `payment` and `payment_av` both declare `dpc` and `sparkassencard` as the
+    // two options of one required credential_set, and the holder picks which to
+    // answer with. Naming only one would leave the amount unbound whenever the
+    // wallet answered with the other. `payment_av`'s `av_sdjwt`/`av_mdoc` are
+    // deliberately absent: an age attestation is not what moves money.
     const [entry] = buildTransactionData(payment) as Array<{
       credential_ids: string[];
     }>;
-    expect(entry?.credential_ids).toEqual(["dpc"]);
+    expect(entry?.credential_ids).toEqual(["dpc", "sparkassencard"]);
   });
 
   it("renders a whole-euro amount without dropping decimals", () => {

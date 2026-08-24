@@ -2,13 +2,25 @@
 const BINDING_CHECK = "transaction_data_binding";
 
 /**
- * The DCQL credential query id of the payment credential, in both the `dpc` and
- * `dpc_av` named queries. Also what `transaction_data.credential_ids` names.
+ * The claim each payment format spells its join-key-to-the-bank with, keyed by
+ * the DCQL credential query id that answers for it in the `payment` and
+ * `payment_av` named queries. Also what `transaction_data.credential_ids` names.
+ *
+ * A map rather than a fallback chain, and the key order is the resolution
+ * preference. Both formats are payable and their claim sets are disjoint — the
+ * DPC declares `credential_id`/`network`/`card_id`, the Sparkassen Card
+ * declares `sub`/`masked_iban`/`psu_id` — so reading "whichever key is present"
+ * would let a claim-name collision pick who gets debited. Each query id may
+ * only ever yield the claim its own vct declares.
  */
-const PAYMENT_QUERY_ID = "dpc";
+const PAYMENT_JOIN_KEY_CLAIM = {
+ dpc: "credential_id",
+ sparkassencard: "psu_id",
+} as const;
 
-/** The DCQL credential query id of the EU Proof of Age attestation in `dpc_av`. */
-const AGE_QUERY_ID = "av";
+const PAYMENT_QUERY_IDS = Object.keys(
+ PAYMENT_JOIN_KEY_CLAIM,
+) as (keyof typeof PAYMENT_JOIN_KEY_CLAIM)[];
 
 /**
  * ISO 18013-5 namespace of the EU Age Verification attestation. An mdoc DCQL
@@ -19,6 +31,30 @@ const AGE_QUERY_ID = "av";
 const AGE_NAMESPACE = "eu.europa.ec.av.1";
 
 const AGE_ELEMENT = "age_over_18";
+
+/**
+ * Where `age_over_18` sits, per age format, keyed by the DCQL credential query
+ * id that answers for it in `payment_av`. Its second `credential_sets` option
+ * list accepts either format, so this gate has to as well.
+ *
+ * The two nestings are a consequence of the formats, not a guess: a `dc+sd-jwt`
+ * disclosure lands at the top level of that credential's own claims object —
+ * the same shape the DPC's claims arrive in — while an `mso_mdoc` element is
+ * nested under its namespace. Neither is searched for in the other's shape,
+ * because accepting both shapes for both formats would make a wallet that put
+ * the element in the wrong place pass a check it should fail.
+ *
+ * Deliberately does NOT include `av`, the id `dpc_av` used. Nothing answers it
+ * now, and a verdict stored under the old query must not clear the new gate.
+ */
+const AGE_QUERY_NESTING = {
+ av_sdjwt: "flat",
+ av_mdoc: "namespaced",
+} as const;
+
+const AGE_QUERY_IDS = Object.keys(
+ AGE_QUERY_NESTING,
+) as (keyof typeof AGE_QUERY_NESTING)[];
 
 /**
  * One entry of foundry's `VerificationResult.credentials`, narrowed from
@@ -60,6 +96,31 @@ function findCredential(
  return null;
 }
 
+/**
+ * Resolves the ONE credential that authorized this payment, by a fixed
+ * preference order over `PAYMENT_JOIN_KEY_CLAIM`'s keys.
+ *
+ * Both `payment` and `payment_av` declare two payment options and a
+ * `credential_sets` entry that requires exactly one of them, so at most one
+ * normally answers — but a wallet holding both may present both, and then the
+ * choice has to be made here rather than independently by each caller. That is
+ * the load-bearing part: `passedTransactionDataBinding` and
+ * `extractCredentialId` both read off THIS entry, so the amount can never be
+ * bound to one card while the debit is keyed to another. It also means there is
+ * no "try the next payment credential" fallback — a resolved credential whose
+ * binding check did not pass fails the gate outright.
+ */
+function findPaymentCredential(
+ credentials: unknown,
+): PresentedCredentialLike | null {
+ for (const queryId of PAYMENT_QUERY_IDS) {
+  const found = findCredential(credentials, queryId);
+  if (found !== null) return found;
+ }
+
+ return null;
+}
+
 function passedCheck(checks: unknown, name: string): boolean {
  if (!Array.isArray(checks)) return false;
  return checks.some(
@@ -81,13 +142,18 @@ function passedCheck(checks: unknown, name: string): boolean {
  * payment closed.
  */
 export function passedTransactionDataBinding(credentials: unknown): boolean {
- const payment = findCredential(credentials, PAYMENT_QUERY_ID);
+ const payment = findPaymentCredential(credentials);
  return payment !== null && passedCheck(payment.checks, BINDING_CHECK);
 }
 
 /**
- * Pulls `credential_id` — the join key to the bank — out of the payment
- * credential's own disclosed claims.
+ * Pulls the join key to the bank out of the payment credential's own disclosed
+ * claims — `credential_id` from an EMV DPC, `psu_id` from a Sparkassen Card.
+ * Both land in the bank's single `credential_id` column, so the caller does not
+ * need to know which format paid.
+ *
+ * Reads the SAME credential the binding gate did (see `findPaymentCredential`),
+ * and only the claim that credential's own vct declares.
  *
  * SD-JWT claims arrive flat (`{ credential_id, network, card_id }`): foundry
  * inserts each disclosed claim at the top level of that credential's own claims
@@ -97,15 +163,20 @@ export function passedTransactionDataBinding(credentials: unknown): boolean {
  * it, so the branch that does not occur is gone.
  */
 export function extractCredentialId(credentials: unknown): string | null {
- const payment = findCredential(credentials, PAYMENT_QUERY_ID);
+ const payment = findPaymentCredential(credentials);
  if (payment === null || !isObject(payment.claims)) return null;
 
- const value = payment.claims.credential_id;
+ const claim =
+  PAYMENT_JOIN_KEY_CLAIM[
+   payment.query_id as keyof typeof PAYMENT_JOIN_KEY_CLAIM
+  ];
+ const value = payment.claims[claim];
  return typeof value === "string" ? value : null;
 }
 
 /**
- * True only if the `av` credential was actually answered and disclosed
+ * True only if a Proof of Age credential — in either of the two formats
+ * `payment_av` accepts — was actually answered and disclosed
  * `age_over_18 === true`.
  *
  * Fails closed on absence, for the same reason `passedTransactionDataBinding`
@@ -116,16 +187,20 @@ export function extractCredentialId(credentials: unknown): string | null {
  * Strict `=== true`, never truthiness — `"false"` and `"no"` are both truthy
  * strings, and this is the one boolean the whole escalation exists to learn.
  *
- * Only meaningful for a session that presented `dpc_av`. The caller decides
+ * Only meaningful for a session that presented `payment_av`. The caller decides
  * whether to apply it; this function does not know which query was used and
  * would answer `false` for every ordinary basket.
  */
 export function passedAgeVerification(credentials: unknown): boolean {
- const age = findCredential(credentials, AGE_QUERY_ID);
- if (age === null || !isObject(age.claims)) return false;
+ return AGE_QUERY_IDS.some((queryId) => {
+  const age = findCredential(credentials, queryId);
+  if (age === null || !isObject(age.claims)) return false;
 
- const namespace = age.claims[AGE_NAMESPACE];
- if (!isObject(namespace)) return false;
+  if (AGE_QUERY_NESTING[queryId] === "flat") {
+   return age.claims[AGE_ELEMENT] === true;
+  }
 
- return namespace[AGE_ELEMENT] === true;
+  const namespace = age.claims[AGE_NAMESPACE];
+  return isObject(namespace) && namespace[AGE_ELEMENT] === true;
+ });
 }

@@ -52,7 +52,7 @@ is a snapshot of what was charged; the age-restriction decision deliberately is
 **not** snapshotted, and is re-derived from `product_id` every time a session
 starts.
 
-`payment_sessions.named_query_ref` (`dpc` | `dpc_av`) records which foundry
+`payment_sessions.named_query_ref` (`payment` | `payment_av`) records which foundry
 named query the session asked for. Recorded rather than recomputed, for the same
 reason `transport` is: the settle gate must know whether an age attestation was
 actually *requested* before it can treat a missing one as a failure, and
@@ -84,34 +84,57 @@ The merchant sends **`named_query_ref`, never an inline `dcql_query`**. foundry
 prefers an inline query when both are present, so sending both would silently
 ignore the named one.
 
-- `dpc` — the DPC card alone (`network`, `card_id`, `credential_id`).
-- `dpc_av` — the same card **plus** an `av` credential: an ISO mdoc EU Proof of
-  Age (`eu.europa.ec.av.1`) whose only requested element is `age_over_18`. So
-  the escalation asks for one extra boolean and never a birthdate.
+- `payment` — a payment credential, **either format**, via a `credential_sets`
+  entry that requires exactly one of two options: `dpc` (the EMV DPC, asking
+  `credential_id` + `network`) or `sparkassencard` (asking `sub` +
+  `masked_iban` + `psu_id`).
+- `payment_av` — the same, **plus** a second required set of two age formats:
+  `av_sdjwt` (an SD-JWT VC, `https://creds.digitallabor.dev/vct/av`) or
+  `av_mdoc` (an ISO mdoc EU Proof of Age, `eu.europa.ec.av.1`). Either way the
+  only requested element is `age_over_18`, so the escalation asks for one extra
+  boolean and never a birthdate.
 
-`selectNamedQuery` escalates to `dpc_av` when the basket contains any of
+Both replaced `dpc`/`dpc_av` on 2026-08-24. Those two still exist in the
+deployed config and are no longer referenced from here. **The rename was not a
+rename**: `dpc_av` declared exactly two mandatory credential queries, `dpc` and
+`av`, and nothing in a `payment_av` verdict ever answers `av` — so the swap had
+to re-key every gate in `checks.ts` or every age-restricted basket would have
+declined.
+
+`selectNamedQuery` escalates to `payment_av` when the basket contains any of
 `AGE_RESTRICTED_PRODUCT_IDS` = `beer`, `wine`, `aperitif` — **ids, not
 categories**: the whole `Drinks` aisle is not restricted (mineral water lives
 there). It takes product ids rather than an order id so the decision is pure and
 testable; the caller reads them from `order_items`, never from the browser.
 
-Both queries declare a credential with `id: dpc`, so `transaction_data`'s
-`credential_ids` is `["dpc"]` in both cases — the money binds to the card, never
-to the age attestation. **foundry validates this**: verified 2026-08-19 against
-the deployed instance, `credential_ids: ["card"]` (this app's old value) is a
-hard `400 transaction_data[0] references credential id 'card' which is not
-present in the DCQL query`.
+Both queries declare **both** payment credentials, so `transaction_data`'s
+`credential_ids` is `["dpc", "sparkassencard"]` in both cases — the money binds
+to whichever card the holder actually presents, and never to the age
+attestation. Naming only one would leave the amount unbound whenever the wallet
+answered with the other, which is a `verified: false` decline rather than an
+error. **foundry validates the ids**: verified 2026-08-19 against the deployed
+instance, `credential_ids: ["card"]` (this app's old value) is a hard `400
+transaction_data[0] references credential id 'card' which is not present in the
+DCQL query`.
 
 Both named queries live in foundry's config, not here. They are absent from
-`../foundry/config.yaml` (which has only `over18`) and present in the deployed
-`dl-infra-k8s/foundry/foundry_config.yml`, so **the age path cannot be exercised
-against a stock local foundry.**
+`../foundry/config.yaml` (which has only `over18` and `payment-age-loyalty`) and
+present in the deployed `dl-infra-k8s/foundry/foundry_config.yml`, so **neither
+path — not even a plain basket — can be exercised against a stock local
+foundry.** That is a change from the `dpc` era, where the ordinary path worked
+locally and only the age escalation did not.
 
 That deployed config carries a loud warning that `dpc_av` "CANNOT be fully
 verified" because foundry accepts one credential per `vp_token`. **That warning
-is stale.** The deployed openapi serves `VerificationResult.credentials[]` and
+is stale**, and `payment_av` depends on exactly the capability it says is
+missing. The deployed openapi serves `VerificationResult.credentials[]` and
 `verify.rs` has `select_presentations` (plural) with a test named *"several
 credential queries is the point, not an error"*.
+
+Because `payment`/`payment_av` carry `credential_sets`, the verdict reports
+`credential_sets_satisfied` rather than `requested_credentials_answered` — the
+two are mutually exclusive. No merchant code reads either; both gates read
+`result.credentials`, so this is a doc note, not a dependency.
 
 ## Money handling
 
@@ -138,11 +161,12 @@ whole point:
 1. Terminal states short-circuit — no re-polling, no double-charge.
 2. Poll foundry.
 3. Gate: `verified === true` **AND** `transaction_data_binding` passed on the
-   `dpc` credential. Reaching `verified` only means foundry finished checking.
-4. Age gate, **only when the row says `named_query_ref === "dpc_av"`**:
-   `age_over_18 === true` on the `av` credential, else
+   resolved payment credential. Reaching `verified` only means foundry finished
+   checking.
+4. Age gate, **only when the row says `named_query_ref === "payment_av"`**:
+   `age_over_18 === true` on `av_sdjwt` **or** `av_mdoc`, else
    `age_verification_failed`.
-5. Extract `credential_id`.
+5. Extract the bank's join key off that same payment credential.
 6. Write `verified`, then `settling`, then call the bank.
 
 **Everything in `src/lib/checks.ts` reads `result.credentials`, never
@@ -196,9 +220,16 @@ had never been observed. That is settled: the deployed foundry's openapi and
 claims sit **flat** inside that credential's own `claims` object. The dead
 branch is gone.
 
+The branching that remains is by *format*, not a guess about one: `av_mdoc`'s
+`age_over_18` is nested under `eu.europa.ec.av.1` because an mdoc DCQL claim
+path is `[namespace, element]`, while `av_sdjwt`'s is flat for the same reason
+the DPC's claims are. Each is pinned to its own shape.
+
 Still unobserved — and this is the part a wallet is needed for: no real
 presentation has ever been verified, so the *values* have never been seen, only
-the schema. In particular an `av` credential has never actually been returned.
+the schema. In particular no age credential in either format, and no
+`sparkassencard`, has ever actually been returned — the latter cannot be, since
+its issuance still fails at foundry.
 
 ## The payment sheet — a modal on `/checkout`, plus `/pay/{sessionId}`
 
@@ -264,7 +295,8 @@ types collapse into local state, and `EUDIPAY_REDIRECT` becomes a plain
   than EudiPay's — an age restriction is the grocer's obligation, not the
   payment brand's. `AGE_RESTRICTED_PRODUCT_IDS` in `lib/dcql.ts` is the single
   source of truth, read through `isAgeRestricted`, which `selectNamedQuery` also
-  calls — so the shelf tag and the `dpc` → `dpc_av` escalation cannot disagree.
+  calls — so the shelf tag and the `payment` → `payment_av` escalation cannot
+  disagree.
   There is no `products` column for this.
 
 ## API surface

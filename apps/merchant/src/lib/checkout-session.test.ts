@@ -46,7 +46,7 @@ describe("loadCheckoutSession", () => {
         state: "pending",
         openid4vpUri: "openid4vp://?request_uri=https%3A%2F%2Ffoundry.test%2Fr%2F1",
         transport: "request_uri",
-        namedQueryRef: "dpc",
+        namedQueryRef: "payment",
         createdAt: NOW,
       })
       .run();
@@ -72,7 +72,7 @@ describe("loadCheckoutSession", () => {
         state: "pending",
         openid4vpUri: "openid4vp://x",
         transport: "request_uri",
-        namedQueryRef: "dpc_av",
+        namedQueryRef: "payment_av",
         createdAt: NOW,
       })
       .run();
@@ -88,7 +88,7 @@ describe("loadCheckoutSession", () => {
         orderId: "ord_3",
         state: "pending",
         transport: "dc_api",
-        namedQueryRef: "dpc",
+        namedQueryRef: "payment",
         dcApiRequestJson: JSON.stringify({ response_mode: "dc_api.jwt" }),
         createdAt: NOW,
       })
@@ -109,7 +109,7 @@ describe("loadCheckoutSession", () => {
         state: "failed",
         failureReason: "insufficient_funds",
         transport: "request_uri",
-        namedQueryRef: "dpc",
+        namedQueryRef: "payment",
         createdAt: NOW,
       })
       .run();

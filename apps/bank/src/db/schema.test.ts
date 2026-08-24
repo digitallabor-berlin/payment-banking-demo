@@ -59,7 +59,11 @@ describe("seed", () => {
   it("links every card to an account owned by the same user", () => {
     seed(db);
     for (const card of db.select().from(cards).all()) {
-      const account = db.select().from(accounts).where(eq(accounts.id, card.accountId)).get();
+      const account = db
+        .select()
+        .from(accounts)
+        .where(eq(accounts.id, card.accountId))
+        .get();
       expect(account?.userId).toBe(card.userId);
     }
   });
@@ -82,9 +86,14 @@ describe("transactions.idempotency_key", () => {
       idempotencyKey: "sess_1",
     };
 
-    db.insert(transactions).values({ id: "t_1", ...row }).run();
+    db.insert(transactions)
+      .values({ id: "t_1", ...row })
+      .run();
     expect(() =>
-      db.insert(transactions).values({ id: "t_2", ...row }).run(),
+      db
+        .insert(transactions)
+        .values({ id: "t_2", ...row })
+        .run(),
     ).toThrowError(/UNIQUE/i);
   });
 
@@ -213,6 +222,33 @@ describe("credentials shape", () => {
     expect(row?.cardId).toBeNull();
     expect(row?.credentialId).toBeNull();
     expect(row?.credentialTypeId).toBe("av-sparkasse");
+  });
+
+  it("accepts a Wero credential with a card and a join key", () => {
+    // Wero is payable, so unlike the age credential it carries both: the card
+    // `processPayment` debits and the join key it is looked up by. The column is
+    // plain `text` with no CHECK, so widening the drizzle enum was the whole of
+    // what this row needed — no migration.
+    seed(db);
+    db.insert(credentials)
+      .values({
+        id: "cred_wero",
+        userId: "user_anna",
+        cardId: "card_anna",
+        credentialTypeId: "wero",
+        credentialId: "11111111-2222-3333-4444-555555555555",
+        state: "active",
+        createdAt: 1,
+      })
+      .run();
+    const row = db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.id, "cred_wero"))
+      .get();
+    expect(row?.credentialTypeId).toBe("wero");
+    expect(row?.cardId).toBe("card_anna");
+    expect(row?.credentialId).toBe("11111111-2222-3333-4444-555555555555");
   });
 
   it("permits several rows with a null credential id", () => {

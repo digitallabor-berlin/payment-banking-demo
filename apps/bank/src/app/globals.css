@@ -223,6 +223,28 @@ body {
   background-image: url("/av-face.svg");
 }
 
+/*
+ * Wero's face. Like .card-object-av it overrides the image and the load-time
+ * fallback colour — but unlike it, this one must also override `color`, and
+ * that is load-bearing rather than cosmetic: .card-object sets `color: #fff`
+ * for the girocard's white-on-red printing, EuStars draws in currentColor, and
+ * white stars on #fdf494 are invisible. #1D1C1C is the wordmark's own tone, so
+ * the stars match the artwork they sit on.
+ *
+ * #fdf494 is both the fallback and the artwork's ground, so a missing asset
+ * degrades to the right colour rather than a near-miss.
+ *
+ * This face DOES draw .card-stars, where the age face does not: the wordmark is
+ * placed left of centre precisely to leave that corner empty. The inherited
+ * box-shadow stays --color-primary-tinted, as the age face's does — the mix is
+ * 70% toward black, so it reads as a shadow rather than as Sparkasse red.
+ */
+.card-object-wero {
+  background-color: #fdf494;
+  background-image: url("/wero-face.svg");
+  color: #1d1c1c;
+}
+
 /* ---------------------------------------------------------- the ledger ---- */
 
 /*

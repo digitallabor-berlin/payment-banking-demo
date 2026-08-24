@@ -2,84 +2,102 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import { accounts, cards, credentials, transactions } from "../db/schema.js";
 import {
-  AGE_CREDENTIAL_TYPE_IDS,
-  PAYMENT_CREDENTIAL_TYPE_IDS,
-  type AgeCredentialTypeId,
-  type PaymentCredentialTypeId,
+ AGE_CREDENTIAL_TYPE_IDS,
+ CARD_FORMAT_TYPE_IDS,
+ WERO_CREDENTIAL_TYPE_ID,
+ type AgeCredentialTypeId,
+ type CardFormatTypeId,
 } from "./credential-types.js";
 
 export interface AccountDto {
-  id: string;
-  iban: string;
-  currency: string;
-  balanceCents: number;
+ id: string;
+ iban: string;
+ currency: string;
+ balanceCents: number;
 }
 
 /** "none" also covers a card whose only credential attempt failed. */
 export type CardCredentialState = "none" | "offered" | "active";
 
 export interface CardDto {
-  id: string;
-  accountId: string;
-  panLast4: string;
-  network: string;
-  cardAlias: string;
-  /**
-   * The card's state across ALL its formats — what the card face draws. The
-   * EU's stars belong on the artwork once the card is in a wallet at all; which
-   * format got it there is not something the face has an opinion about.
-   */
-  credentialState: CardCredentialState;
-  credentialRowId: string | null;
-  /**
-   * The same question asked per format, which is what each of the tile's two
-   * wallet buttons needs.
-   *
-   * Without this the buttons would lie to each other: adding the card through
-   * one of them would flip the other's label to "add again" for a credential
-   * that was never issued in that format.
-   */
-  formats: Record<PaymentCredentialTypeId, CardCredentialState>;
+ id: string;
+ accountId: string;
+ panLast4: string;
+ network: string;
+ cardAlias: string;
+ /**
+  * The card's state across ALL its formats — what the card face draws. The
+  * EU's stars belong on the artwork once the card is in a wallet at all; which
+  * format got it there is not something the face has an opinion about.
+  */
+ credentialState: CardCredentialState;
+ credentialRowId: string | null;
+ /**
+  * The same question asked per format, which is what each of the tile's two
+  * wallet buttons needs.
+  *
+  * Without this the buttons would lie to each other: adding the card through
+  * one of them would flip the other's label to "add again" for a credential
+  * that was never issued in that format.
+  *
+  * Keyed by `CardFormatTypeId`, not by every payment type: Wero is payable but
+  * it is a separate instrument with its own tile, and a key for it here would
+  * grow the card tile a button for something that is not this card.
+  */
+ formats: Record<CardFormatTypeId, CardCredentialState>;
+}
+
+/**
+ * The user's Wero credential, if any.
+ *
+ * Deliberately carries no `formats` map, unlike the card and the age
+ * credential. Those have one because two buttons can lie to each other about
+ * what the other issued; Wero is offered for the EUDI Wallet alone, so there is
+ * exactly one format and nothing for a second button to disagree with.
+ */
+export interface WeroCredentialDto {
+ state: CardCredentialState;
+ credentialRowId: string | null;
 }
 
 export interface AgeCredentialDto {
-  /**
-   * The credential's state across BOTH its formats — what the tile's badge and
-   * face draw. It is in a wallet or it is not; which wallet received it is not
-   * something the face has an opinion about.
-   */
-  state: CardCredentialState;
-  credentialRowId: string | null;
-  /**
-   * The same question asked per format, which is what each of the tile's two
-   * wallet buttons needs. Exactly `CardDto.formats`' reason for existing:
-   * without it, adding the credential through one button flips the other's
-   * label to "add again" for a format that was never issued.
-   */
-  formats: Record<AgeCredentialTypeId, CardCredentialState>;
+ /**
+  * The credential's state across BOTH its formats — what the tile's badge and
+  * face draw. It is in a wallet or it is not; which wallet received it is not
+  * something the face has an opinion about.
+  */
+ state: CardCredentialState;
+ credentialRowId: string | null;
+ /**
+  * The same question asked per format, which is what each of the tile's two
+  * wallet buttons needs. Exactly `CardDto.formats`' reason for existing:
+  * without it, adding the credential through one button flips the other's
+  * label to "add again" for a format that was never issued.
+  */
+ formats: Record<AgeCredentialTypeId, CardCredentialState>;
 }
 
 export interface TransactionDto {
-  id: string;
-  amountCents: number;
-  currency: string;
-  counterparty: string;
-  reference: string;
-  bookedAt: number;
-  paidWithWallet: boolean;
+ id: string;
+ amountCents: number;
+ currency: string;
+ counterparty: string;
+ reference: string;
+ bookedAt: number;
+ paidWithWallet: boolean;
 }
 
 export function listAccounts(db: Db, userId: string): AccountDto[] {
-  return db
-    .select({
-      id: accounts.id,
-      iban: accounts.iban,
-      currency: accounts.currency,
-      balanceCents: accounts.balanceCents,
-    })
-    .from(accounts)
-    .where(eq(accounts.userId, userId))
-    .all();
+ return db
+  .select({
+   id: accounts.id,
+   iban: accounts.iban,
+   currency: accounts.currency,
+   balanceCents: accounts.balanceCents,
+  })
+  .from(accounts)
+  .where(eq(accounts.userId, userId))
+  .all();
 }
 
 /**
@@ -104,9 +122,9 @@ export function listAccounts(db: Db, userId: string): AccountDto[] {
  * but must not differ in this rule.
  */
 function pickLiveCredential<T extends { state: string }>(
-  newestFirst: T[],
+ newestFirst: T[],
 ): T | undefined {
-  return newestFirst.find((row) => row.state === "active") ?? newestFirst[0];
+ return newestFirst.find((row) => row.state === "active") ?? newestFirst[0];
 }
 
 /**
@@ -119,60 +137,61 @@ function pickLiveCredential<T extends { state: string }>(
  * second rule for combining its own answers.
  */
 function stateOf(rows: Array<{ id: string; state: string }>): {
-  state: CardCredentialState;
-  rowId: string | null;
+ state: CardCredentialState;
+ rowId: string | null;
 } {
-  const credential = pickLiveCredential(rows);
-  // The caller's where(inArray(..., ["offered", "active"])) guarantees the
-  // state is never "failed" here, but Drizzle's inferred column type is still
-  // the full union — TS cannot see through a SQL predicate.
-  return {
-    state: credential ? (credential.state as "offered" | "active") : "none",
-    rowId: credential?.id ?? null,
-  };
+ const credential = pickLiveCredential(rows);
+ // The caller's where(inArray(..., ["offered", "active"])) guarantees the
+ // state is never "failed" here, but Drizzle's inferred column type is still
+ // the full union — TS cannot see through a SQL predicate.
+ return {
+  state: credential ? (credential.state as "offered" | "active") : "none",
+  rowId: credential?.id ?? null,
+ };
 }
 
 export function listCards(db: Db, userId: string): CardDto[] {
-  const rows = db.select().from(cards).where(eq(cards.userId, userId)).all();
+ const rows = db.select().from(cards).where(eq(cards.userId, userId)).all();
 
-  return rows.map((card) => {
-    // Scoped to the payment types explicitly, though a row with a card_id can
-    // only be one today — the age credential is issued to the person and has no
-    // card. Naming them keeps that an assertion rather than an accident.
-    const live = db
-      .select()
-      .from(credentials)
-      .where(
-        and(
-          eq(credentials.cardId, card.id),
-          inArray(credentials.credentialTypeId, [
-            ...PAYMENT_CREDENTIAL_TYPE_IDS,
-          ]),
-          inArray(credentials.state, ["offered", "active"]),
-        ),
-      )
-      .orderBy(desc(credentials.createdAt))
-      .all();
+ return rows.map((card) => {
+  // Scoped to the GIROCARD's formats, not to every payment type. That
+  // distinction is load-bearing since Wero: a Wero row is payable, so it
+  // carries a card_id and this card-scoped query would sweep it in, and the
+  // girocard's face would then read "In wallet" for a credential that is not
+  // a girocard at all. (An age credential could never be swept in — it has no
+  // card — so for that one the filter is merely an assertion.)
+  const live = db
+   .select()
+   .from(credentials)
+   .where(
+    and(
+     eq(credentials.cardId, card.id),
+     inArray(credentials.credentialTypeId, [...CARD_FORMAT_TYPE_IDS]),
+     inArray(credentials.state, ["offered", "active"]),
+    ),
+   )
+   .orderBy(desc(credentials.createdAt))
+   .all();
 
-    const combined = stateOf(live);
-    const formats = Object.fromEntries(
-      PAYMENT_CREDENTIAL_TYPE_IDS.map((typeId) => [
-        typeId,
-        stateOf(live.filter((row) => row.credentialTypeId === typeId)).state,
-      ]),
-    ) as Record<PaymentCredentialTypeId, CardCredentialState>;
+  const combined = stateOf(live);
+  const formats = Object.fromEntries(
+   CARD_FORMAT_TYPE_IDS.map((typeId) => [
+    typeId,
+    stateOf(live.filter((row) => row.credentialTypeId === typeId)).state,
+   ]),
+  ) as Record<CardFormatTypeId, CardCredentialState>;
 
-    return {
-      id: card.id,
-      accountId: card.accountId,
-      panLast4: card.panLast4,
-      network: card.network,
-      cardAlias: card.cardAlias,
-      credentialState: combined.state,
-      credentialRowId: combined.rowId,
-      formats,
-    } satisfies CardDto;
-  });
+  return {
+   id: card.id,
+   accountId: card.accountId,
+   panLast4: card.panLast4,
+   network: card.network,
+   cardAlias: card.cardAlias,
+   credentialState: combined.state,
+   credentialRowId: combined.rowId,
+   formats,
+  } satisfies CardDto;
+ });
 }
 
 /**
@@ -190,67 +209,101 @@ export function listCards(db: Db, userId: string): CardDto[] {
  * as the Google Wallet format.
  */
 export function getAgeCredentialState(
-  db: Db,
-  userId: string,
+ db: Db,
+ userId: string,
 ): AgeCredentialDto {
-  const live = db
-    .select()
-    .from(credentials)
-    .where(
-      and(
-        eq(credentials.userId, userId),
-        inArray(credentials.credentialTypeId, [...AGE_CREDENTIAL_TYPE_IDS]),
-        inArray(credentials.state, ["offered", "active"]),
-      ),
-    )
-    .orderBy(desc(credentials.createdAt))
-    .all();
+ const live = db
+  .select()
+  .from(credentials)
+  .where(
+   and(
+    eq(credentials.userId, userId),
+    inArray(credentials.credentialTypeId, [...AGE_CREDENTIAL_TYPE_IDS]),
+    inArray(credentials.state, ["offered", "active"]),
+   ),
+  )
+  .orderBy(desc(credentials.createdAt))
+  .all();
 
-  const combined = stateOf(live);
-  const formats = Object.fromEntries(
-    AGE_CREDENTIAL_TYPE_IDS.map((typeId) => [
-      typeId,
-      stateOf(live.filter((row) => row.credentialTypeId === typeId)).state,
-    ]),
-  ) as Record<AgeCredentialTypeId, CardCredentialState>;
+ const combined = stateOf(live);
+ const formats = Object.fromEntries(
+  AGE_CREDENTIAL_TYPE_IDS.map((typeId) => [
+   typeId,
+   stateOf(live.filter((row) => row.credentialTypeId === typeId)).state,
+  ]),
+ ) as Record<AgeCredentialTypeId, CardCredentialState>;
 
-  return {
-    state: combined.state,
-    credentialRowId: combined.rowId,
-    formats,
-  };
+ return {
+  state: combined.state,
+  credentialRowId: combined.rowId,
+  formats,
+ };
+}
+
+/**
+ * The user's Wero credential, if any.
+ *
+ * Scoped by user and type rather than by card. Wero is drawn on the account,
+ * not on a card — the row references one only because `processPayment` needs a
+ * card to debit — so a user has one Wero credential however many cards they
+ * hold.
+ *
+ * Same rule as `listCards` and `getAgeCredentialState`, through the same two
+ * helpers: a live credential outranks an open offer, the newest wins within a
+ * state, and a failed attempt is not a credential. Only one scope here, because
+ * there is only one format.
+ */
+export function getWeroCredentialState(
+ db: Db,
+ userId: string,
+): WeroCredentialDto {
+ const live = db
+  .select()
+  .from(credentials)
+  .where(
+   and(
+    eq(credentials.userId, userId),
+    eq(credentials.credentialTypeId, WERO_CREDENTIAL_TYPE_ID),
+    inArray(credentials.state, ["offered", "active"]),
+   ),
+  )
+  .orderBy(desc(credentials.createdAt))
+  .all();
+
+ const { state, rowId } = stateOf(live);
+ return { state, credentialRowId: rowId };
 }
 
 export function listTransactions(
-  db: Db,
-  userId: string,
-  limit: number,
-  offset: number,
+ db: Db,
+ userId: string,
+ limit: number,
+ offset: number,
 ): TransactionDto[] {
-  const owned = db
-    .select({ id: accounts.id })
-    .from(accounts)
-    .where(eq(accounts.userId, userId))
-    .all()
-    .map((row) => row.id);
+ const owned = db
+  .select({ id: accounts.id })
+  .from(accounts)
+  .where(eq(accounts.userId, userId))
+  .all()
+  .map((row) => row.id);
 
-  if (owned.length === 0) return [];
+ if (owned.length === 0) return [];
 
-  return db
-    .select()
-    .from(transactions)
-    .where(inArray(transactions.accountId, owned))
-    .orderBy(desc(transactions.bookedAt))
-    .limit(limit)
-    .offset(offset)
-    .all()
-    .map((row) => ({
-      id: row.id,
-      amountCents: row.amountCents,
-      currency: row.currency,
-      counterparty: row.counterparty,
-      reference: row.reference,
-      bookedAt: row.bookedAt,
-      paidWithWallet: row.credentialId !== null,
-    }));
+ return db
+  .select()
+  .from(transactions)
+  .where(inArray(transactions.accountId, owned))
+  .orderBy(desc(transactions.bookedAt))
+  .limit(limit)
+  .offset(offset)
+  .all()
+  .map((row) => ({
+   id: row.id,
+   amountCents: row.amountCents,
+   currency: row.currency,
+   counterparty: row.counterparty,
+   reference: row.reference,
+   bookedAt: row.bookedAt,
+   paidWithWallet: row.credentialId !== null,
+  }));
 }

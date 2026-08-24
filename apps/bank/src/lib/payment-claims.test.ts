@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   DPC_CREDENTIAL_TYPE_ID,
+  PAYMENT_CREDENTIAL_TYPE_IDS,
   SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
+  WERO_CREDENTIAL_TYPE_ID,
 } from "./credential-types.js";
 import { buildPaymentClaims, maskIban } from "./payment-claims.js";
 
@@ -77,14 +79,52 @@ describe("buildPaymentClaims", () => {
     expect(claims.masked_iban).toBeUndefined();
   });
 
+  it("gives Wero the account-shaped claim set", () => {
+    // Wero is account-to-account, so a masked IBAN and a PSU id are the
+    // coherent shape — the same one the Sparkasse card declares. This is an
+    // assumption about foundry's `wero` type, which declares nothing here yet:
+    // see AGENTS.md.
+    expect(buildPaymentClaims(WERO_CREDENTIAL_TYPE_ID, INPUT)).toEqual({
+      sub: "5f7c2f3e-0a1b-4c2d-8e3f-9a0b1c2d3e4f",
+      masked_iban: "DE** **** 2051",
+      psu_id: "join_key_value",
+    });
+  });
+
+  it("gives Wero no card-shaped claim", () => {
+    // A card_id or a network on an account-to-account credential would be a
+    // claim its vct never declared, which foundry rejects outright — a `failed`
+    // row, not a missing field.
+    const claims = buildPaymentClaims(WERO_CREDENTIAL_TYPE_ID, INPUT);
+    expect(claims.credential_id).toBeUndefined();
+    expect(claims.card_id).toBeUndefined();
+    expect(claims.network).toBeUndefined();
+  });
+
+  it("puts the join key in psu_id for Wero too", () => {
+    // Same single-lookup guarantee as the Sparkasse card: whatever the format
+    // calls it, the value is the one in the row's credential_id column.
+    expect(buildPaymentClaims(WERO_CREDENTIAL_TYPE_ID, INPUT).psu_id).toBe(
+      "join_key_value",
+    );
+  });
+
   it("never discloses a full IBAN", () => {
-    for (const typeId of [
-      DPC_CREDENTIAL_TYPE_ID,
-      SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
-    ] as const) {
+    // Asked of every payment type, so a new instrument cannot be added without
+    // this negative being asked of it.
+    for (const typeId of PAYMENT_CREDENTIAL_TYPE_IDS) {
       const serialized = JSON.stringify(buildPaymentClaims(typeId, INPUT));
       expect(serialized).not.toContain(IBAN);
     }
+  });
+
+  it("propagates the IBAN failure for Wero as well", () => {
+    expect(() =>
+      buildPaymentClaims(WERO_CREDENTIAL_TYPE_ID, {
+        ...INPUT,
+        iban: "DE0212030000000020AB",
+      }),
+    ).toThrow(/four digits/);
   });
 
   it("propagates the IBAN failure for the Sparkasse card", () => {
