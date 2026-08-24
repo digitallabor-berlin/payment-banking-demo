@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DC_API_ISSUANCE_PROTOCOL,
   DC_API_PRESENTATION_PROTOCOL,
+  invokeDcCreate,
   isDcApiNotSupportedError,
   prepareDcApiRequest,
   supportsDcApi,
@@ -13,13 +14,17 @@ function fullSupport(allows = true): DcApiGlobals {
   return {
     isSecureContext: true,
     DigitalCredential: { userAgentAllowsProtocol: () => allows },
-    navigator: { credentials: { get: () => undefined, create: () => undefined } },
+    navigator: {
+      credentials: { get: () => undefined, create: () => undefined },
+    },
   };
 }
 
 describe("supportsDcApi", () => {
   it("is true for get when every condition holds", () => {
-    expect(supportsDcApi("get", DC_API_PRESENTATION_PROTOCOL, fullSupport())).toBe(true);
+    expect(
+      supportsDcApi("get", DC_API_PRESENTATION_PROTOCOL, fullSupport()),
+    ).toBe(true);
   });
 
   it("is false outside a secure context", () => {
@@ -47,7 +52,9 @@ describe("supportsDcApi", () => {
   });
 
   it("is false when userAgentAllowsProtocol says no", () => {
-    expect(supportsDcApi("get", DC_API_PRESENTATION_PROTOCOL, fullSupport(false))).toBe(false);
+    expect(
+      supportsDcApi("get", DC_API_PRESENTATION_PROTOCOL, fullSupport(false)),
+    ).toBe(false);
   });
 
   it("is false when userAgentAllowsProtocol throws", () => {
@@ -77,7 +84,9 @@ describe("supportsDcApi", () => {
   it("still requires a secure context and DigitalCredential for create", () => {
     const noSecure = fullSupport();
     noSecure.isSecureContext = false;
-    expect(supportsDcApi("create", DC_API_ISSUANCE_PROTOCOL, noSecure)).toBe(false);
+    expect(supportsDcApi("create", DC_API_ISSUANCE_PROTOCOL, noSecure)).toBe(
+      false,
+    );
 
     const noDc = fullSupport();
     delete noDc.DigitalCredential;
@@ -98,7 +107,9 @@ describe("isDcApiNotSupportedError", () => {
   });
 
   it("recognises a CredentialContainer message", () => {
-    expect(isDcApiNotSupportedError(new Error("CredentialContainer has no get"))).toBe(true);
+    expect(
+      isDcApiNotSupportedError(new Error("CredentialContainer has no get")),
+    ).toBe(true);
   });
 
   it("rejects an unrelated error", () => {
@@ -106,7 +117,9 @@ describe("isDcApiNotSupportedError", () => {
   });
 
   it("rejects a plain TypeError with an unrelated message", () => {
-    expect(isDcApiNotSupportedError(new TypeError("x is undefined"))).toBe(false);
+    expect(isDcApiNotSupportedError(new TypeError("x is undefined"))).toBe(
+      false,
+    );
   });
 
   it("tolerates non-Error inputs", () => {
@@ -128,5 +141,58 @@ describe("protocol constants", () => {
   it("uses the exact identifiers foundry and Chrome expect", () => {
     expect(DC_API_ISSUANCE_PROTOCOL).toBe("openid4vci-v1");
     expect(DC_API_PRESENTATION_PROTOCOL).toBe("openid4vp-v1-unsigned");
+  });
+});
+/**
+ * Regression: Safari 26 ships the DC API for PRESENTATION only, so it has both
+ * `DigitalCredential` and (via WebAuthn) `navigator.credentials.create` — which
+ * is everything `supportsDcApi("create", …)` looks at before its lenient
+ * short-circuit. The bank therefore renders the DC API button, and the click
+ * resolved with `null` instead of throwing. Measured in real Safari 26.5.2:
+ * `CREATE RESOLVED: null`. With non-throw treated as success that click was a
+ * silent no-op forever — no error, and never the QR fallback.
+ */
+describe("invokeDcCreate", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubCreate(impl: () => Promise<unknown>) {
+    vi.stubGlobal("navigator", { credentials: { create: impl } });
+  }
+
+  const req = prepareDcApiRequest({}, DC_API_ISSUANCE_PROTOCOL);
+
+  it("rejects when create resolves null, so the QR fallback can fire", async () => {
+    stubCreate(() => Promise.resolve(null));
+    await expect(invokeDcCreate(req)).rejects.toThrow();
+  });
+
+  it("reports a null resolution as unsupported rather than cancelled", async () => {
+    stubCreate(() => Promise.resolve(null));
+    const err = await invokeDcCreate(req).catch((e: unknown) => e);
+    expect(isDcApiNotSupportedError(err)).toBe(true);
+  });
+
+  it("rejects when create resolves undefined", async () => {
+    stubCreate(() => Promise.resolve(undefined));
+    await expect(invokeDcCreate(req)).rejects.toThrow();
+  });
+
+  /**
+   * Load-bearing: the assertion must stay a null check and never become a
+   * return-SHAPE assertion like invokeDcGet's. Chrome's documented issuance
+   * example ignores create()'s return value, so demanding a `DigitalCredential`
+   * here would manufacture failures on a successful handover.
+   */
+  it("resolves for any non-null return, whatever its shape", async () => {
+    stubCreate(() => Promise.resolve({ nothing: "recognisable" }));
+    await expect(invokeDcCreate(req)).resolves.toBeUndefined();
+  });
+
+  it("propagates a genuine throw unchanged", async () => {
+    const boom = new DOMException("no wallet", "NotAllowedError");
+    stubCreate(() => Promise.reject(boom));
+    await expect(invokeDcCreate(req)).rejects.toBe(boom);
   });
 });

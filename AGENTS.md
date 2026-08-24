@@ -53,8 +53,22 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**673 tests** (450 bank + 181 merchant + 11 foundry-client + 31 ui), measured
+**678 tests** (450 bank + 181 merchant + 11 foundry-client + 36 ui), measured
 2026-08-24.
+
+That was **673** before the Safari issuance fix, which added 5, all in
+`packages/ui`: a whole new `invokeDcCreate` describe in `dcApi.test.ts`. Note
+what that number reveals — `invokeDcCreate` and `invokeDcGet` had **no tests at
+all** before it, which is exactly how a silent no-op shipped: `dcApi.test.ts`
+covered `supportsDcApi`, `isDcApiNotSupportedError`, `prepareDcApiRequest` and
+the protocol constants, i.e. everything *except* the two functions that touch
+`navigator`. They were untested because they read the real global rather than
+taking injected `globals` like `supportsDcApi` does; `vi.stubGlobal("navigator",
+…)` is all it took. Only 3 of the 5 were red — the two that pin the *limits* of
+the fix (a non-null return of any shape still resolves; a genuine throw
+propagates unchanged) passed before the implementation existed, and are there to
+stop the null check being "tidied" into a return-shape assertion. No plan; the
+work was a reported bug.
 
 That was **591** before the wallet-login work, which added 82, all in
 `apps/bank`: 33 in the new `login-sessions.test.ts`, 22 in the new
@@ -868,7 +882,45 @@ them without reading the linked reasoning first.
   leniency is currently doing no work. It is kept because `openid4vci-v1` is a
   Chrome origin-trial identifier behind
   `chrome://flags/#web-identity-digital-credentials-creation`, not a shipped
-  protocol, and a browser that can issue may still answer `false`.
+  protocol, and a browser that can issue may still answer `false`. The claim
+  that "the leniency is currently doing no work" was true only of Chrome —
+  see the Safari bullet below, where it does plenty and all of it harmful.
+
+- **Safari has the DC API but CANNOT issue, and `create()` reports that by
+  resolving `null` rather than throwing.** This was a reported bug: in Safari the
+  dialog's "Add to EUDI Wallet" button did nothing at all, on every credential,
+  while Chrome fell back to a QR. Safari 26 ships the Digital Credentials API for
+  **presentation only** (`get`, protocol `org-iso-mdoc`); issuance is not
+  implemented. But it therefore *has* `window.DigitalCredential`, and it has
+  `navigator.credentials.create` because WebAuthn does — which is the whole of
+  what `supportsDcApi("create", …)` inspects before its lenient short-circuit.
+  So `dcSupported` is `true`, the dialog renders the DC API button instead of the
+  QR, and the click goes to a browser that will not issue. Per Credential
+  Management, `create()` resolves with `null` when the options carry no
+  credential type it recognises, and `invokeDcCreate` used to treat non-throw as
+  success outright — so the click was a permanent silent no-op: no error copy, no
+  `dcFailed`, and never the QR fallback. Measured in real Safari 26.5.2 by
+  monkey-patching `navigator.credentials.create` on the deployed bank:
+  `CREATE RESOLVED: null`.
+
+  The fix is a null/undefined check in `invokeDcCreate`, raised as a
+  `DOMException` named `NotSupportedError` so `isDcApiNotSupportedError` routes
+  it to the "this browser cannot" copy rather than "you cancelled". It must stay
+  a **null check** and never grow into a return-SHAPE assertion like
+  `invokeDcGet`'s: Chrome's documented issuance example ignores `create()`'s
+  return value, so demanding a `DigitalCredential` would manufacture failures on
+  a successful handover. "Nothing was created" is strictly weaker than "not the
+  type I wanted", and only the former is safe to assert. Two tests exist purely
+  to pin that boundary.
+
+  The gate was deliberately **not** tightened. Reading
+  `userAgentAllowsProtocol` for `create` would reintroduce exactly the false
+  negative the leniency was written to avoid, and the accepted cost of the
+  lenient gate — "a false positive costing one visible click" — is now actually
+  paid rather than hypothetical: a Safari user clicks once, gets the unsupported
+  message, and the QR appears beneath it. Note this also means Safari never had a
+  working issuance path and still does not; what changed is that it now degrades
+  to the cross-device QR instead of appearing broken.
 - **`useDcApiSupport` returning `null` is not `false`.** It means "not yet
   known". Rendering the QR fallback on `null` flashes a QR on Android.
 - **A `dc_api` session can never be re-rendered as a QR.** It is bound to
