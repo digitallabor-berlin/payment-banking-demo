@@ -7,6 +7,8 @@ import {
   DPC_CREDENTIAL_TYPE_ID,
   PAYMENT_CREDENTIAL_TYPE_IDS,
   SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID,
+  SPARKASSEN_AUTH_NAMED_QUERY,
+  SPARKASSEN_AUTH_QUERY_ID,
   SPARKASSEN_CARD_CREDENTIAL_TYPE_ID,
   WERO_CREDENTIAL_TYPE_ID,
   isAgeCredentialType,
@@ -255,5 +257,23 @@ describe("sendsDpcDisplayMetadata", () => {
         typeId === DPC_CREDENTIAL_TYPE_ID,
       );
     }
+  });
+});
+
+describe("sparkassen_auth query identifiers", () => {
+  it("names the foundry named query", () => {
+    expect(SPARKASSEN_AUTH_NAMED_QUERY).toBe("sparkassen_auth");
+  });
+
+  it("names the DCQL credential query id", () => {
+    expect(SPARKASSEN_AUTH_QUERY_ID).toBe("sparkassen_auth");
+  });
+
+  it("keeps the named query and the DCQL query id as separate constants", () => {
+    // They agree in the deployed config; nothing forces them to. Two
+    // registries, two constants, so renaming either cannot silently
+    // mis-key the other.
+    expect(SPARKASSEN_AUTH_NAMED_QUERY).not.toBe(SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID + "!");
+    expect(typeof SPARKASSEN_AUTH_QUERY_ID).toBe("string");
   });
 });

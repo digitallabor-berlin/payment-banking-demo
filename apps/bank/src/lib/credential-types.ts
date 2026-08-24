@@ -63,6 +63,29 @@ export const SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID =
  "sparkassen_auth" satisfies CredentialTypeId;
 
 /**
+ * The foundry NAMED QUERY the bank presents when authenticating a customer.
+ *
+ * Deliberately a separate constant from `SPARKASSEN_AUTH_QUERY_ID` below, even
+ * though the deployed config spells both the same. A named query lives in
+ * foundry's `named_queries` registry; a DCQL credential query id lives inside
+ * that query's own `dcql.credentials[]`. Nothing makes them agree — the
+ * merchant's `payment` query answers `dpc`, `sparkassencard` and `wero`, none
+ * of which is its own name — so one constant serving both roles would make a
+ * rename of either silently mis-key the other.
+ */
+export const SPARKASSEN_AUTH_NAMED_QUERY = "sparkassen_auth";
+
+/**
+ * The DCQL credential query id inside that named query — the value
+ * `PresentedCredential.query_id` carries for an authenticator presentation.
+ *
+ * Every read of a login verdict is keyed by THIS, never by the presence of a
+ * `sub` claim: `sparkassencard` and `wero` both declare `sub`, and a
+ * claim-name collision must never decide who gets logged in.
+ */
+export const SPARKASSEN_AUTH_QUERY_ID = "sparkassen_auth";
+
+/**
  * The age-verification attestation, in the bank's own format. NOT
  * `eu.europa.ec.av.1` — that is the mdoc docType configured on foundry's side;
  * this is the credential type id the admin API takes.
