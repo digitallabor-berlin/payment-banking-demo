@@ -60,10 +60,17 @@ export const credentials = sqliteTable("credentials", {
   * format. Widening this list is free — the column is plain `text` and the
   * 0001 migration emits no CHECK constraint, so the enum is a TypeScript claim
   * about the data, not a database one. `wero` was added on exactly those
-  * terms, with no migration.
+  * terms, with no migration, and `sparkassen_auth` after it.
   */
  credentialTypeId: text("credential_type_id", {
-  enum: ["com.emvco.dpc.card", "sparkassencard", "wero", "av", "av-sparkasse"],
+  enum: [
+   "com.emvco.dpc.card",
+   "sparkassencard",
+   "wero",
+   "sparkassen_auth",
+   "av",
+   "av-sparkasse",
+  ],
  })
   .notNull()
   .default("com.emvco.dpc.card"),

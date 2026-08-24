@@ -9,10 +9,12 @@ import {
   AGE_CREDENTIAL_TYPE_IDS,
   AV_CREDENTIAL_TYPE_ID,
   AV_GOOGLE_CREDENTIAL_TYPE_ID,
+  SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID,
   type AgeCredentialTypeId,
 } from "./credential-types.js";
 import {
   getAgeCredentialState,
+  getAuthenticatorCredentialState,
   getWeroCredentialState,
   listAccounts,
   listCards,
@@ -463,6 +465,151 @@ describe("getWeroCredentialState", () => {
     expect(getWeroCredentialState(db, "user_anna")).not.toHaveProperty(
       "formats",
     );
+  });
+});
+
+describe("getAuthenticatorCredentialState", () => {
+  /**
+   * Inserts one authenticator credential for anna. Unlike Wero it has NO card
+   * and no join key: it attests the person rather than an instrument, and it
+   * cannot pay.
+   */
+  function insertAuth(
+    id: string,
+    state: "offered" | "active" | "failed",
+    createdAt: number,
+  ) {
+    db.insert(credentials)
+      .values({
+        id,
+        userId: "user_anna",
+        cardId: null,
+        credentialTypeId: SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID,
+        credentialId: null,
+        state,
+        issuedAt: state === "active" ? createdAt : null,
+        createdAt,
+      })
+      .run();
+  }
+
+  it("reports 'none' when the user has no authenticator credential", () => {
+    expect(getAuthenticatorCredentialState(db, "user_anna")).toEqual({
+      state: "none",
+      credentialRowId: null,
+    });
+  });
+
+  it("reports 'offered' for an open offer", () => {
+    insertAuth("cred_auth", "offered", 10);
+    expect(getAuthenticatorCredentialState(db, "user_anna")).toEqual({
+      state: "offered",
+      credentialRowId: "cred_auth",
+    });
+  });
+
+  it("reports 'active' once the credential is issued", () => {
+    insertAuth("cred_auth", "active", 10);
+    expect(getAuthenticatorCredentialState(db, "user_anna")).toEqual({
+      state: "active",
+      credentialRowId: "cred_auth",
+    });
+  });
+
+  it("does not let a newer offer mask a credential already in the wallet", () => {
+    // The same rule as every other tile: nothing in this project clears an
+    // offered row, so one abandoned re-add would otherwise pin the tile to
+    // "Not in wallet" forever.
+    insertAuth("cred_active", "active", 10);
+    insertAuth("cred_offer", "offered", 30);
+    expect(getAuthenticatorCredentialState(db, "user_anna")).toEqual({
+      state: "active",
+      credentialRowId: "cred_active",
+    });
+  });
+
+  it("prefers the newest row within one state, so a re-issue supersedes", () => {
+    insertAuth("cred_old", "active", 10);
+    insertAuth("cred_new", "active", 30);
+    expect(
+      getAuthenticatorCredentialState(db, "user_anna").credentialRowId,
+    ).toBe("cred_new");
+  });
+
+  it("ignores failed rows, so a failed attempt reads as 'none'", () => {
+    // Today's only reachable outcome: no foundry config declares
+    // `sparkassen_auth`, so a real click writes exactly this row.
+    insertAuth("cred_bad", "failed", 10);
+    expect(getAuthenticatorCredentialState(db, "user_anna").state).toBe("none");
+  });
+
+  it("ignores every payment credential, however active", () => {
+    for (const [id, typeId] of [
+      ["cred_dpc", "com.emvco.dpc.card"],
+      ["cred_sk", "sparkassencard"],
+      ["cred_wero", "wero"],
+    ] as const) {
+      db.insert(credentials)
+        .values({
+          id,
+          userId: "user_anna",
+          cardId: "card_anna",
+          credentialTypeId: typeId,
+          credentialId: `key_${id}`,
+          state: "active",
+          issuedAt: 1,
+          createdAt: 50,
+        })
+        .run();
+    }
+    expect(getAuthenticatorCredentialState(db, "user_anna")).toEqual({
+      state: "none",
+      credentialRowId: null,
+    });
+  });
+
+  it("ignores both age formats, which share its card-less shape", () => {
+    // The nearest miss: an age credential also has no card and no join key, so
+    // only the type filter separates the two.
+    for (const [id, typeId] of [
+      ["cred_av_eudi", AV_CREDENTIAL_TYPE_ID],
+      ["cred_av_google", AV_GOOGLE_CREDENTIAL_TYPE_ID],
+    ] as const) {
+      db.insert(credentials)
+        .values({
+          id,
+          userId: "user_anna",
+          cardId: null,
+          credentialTypeId: typeId,
+          credentialId: null,
+          state: "active",
+          issuedAt: 1,
+          createdAt: 50,
+        })
+        .run();
+    }
+    expect(getAuthenticatorCredentialState(db, "user_anna").state).toBe("none");
+  });
+
+  it("never reports another user's authenticator credential", () => {
+    insertAuth("cred_auth", "active", 10);
+    expect(getAuthenticatorCredentialState(db, "user_ben").state).toBe("none");
+  });
+
+  it("exposes no per-format map, because the authenticator has one format", () => {
+    // One EUDI button and no Google Wallet handover, exactly as with Wero.
+    insertAuth("cred_auth", "active", 10);
+    expect(getAuthenticatorCredentialState(db, "user_anna")).not.toHaveProperty(
+      "formats",
+    );
+  });
+
+  it("is invisible to the card and age queries", () => {
+    // The reverse direction. A card-less, unpayable credential must not reach
+    // the girocard's face or the age tile's badge.
+    insertAuth("cred_auth", "active", 10);
+    expect(listCards(db, "user_anna")[0]?.credentialState).toBe("none");
+    expect(getAgeCredentialState(db, "user_anna").state).toBe("none");
   });
 });
 

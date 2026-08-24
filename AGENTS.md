@@ -53,8 +53,24 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**546 tests** (327 bank + 177 merchant + 11 foundry-client + 31 ui), measured
+**587 tests** (368 bank + 177 merchant + 11 foundry-client + 31 ui), measured
 2026-08-24.
+
+That was **546** before the Sparkassen Authenticator work, which added 41, all
+in `apps/bank`: +11 in the new `authenticator-issuance.test.ts`, +11 in
+`queries.test.ts` (a whole `getAuthenticatorCredentialState` describe), +9 in
+`credential-types.test.ts` (the new id, the new `isAuthenticatorCredentialType`
+block, and two exclusions in the existing predicates' describes), +8 in
+`credential-copy.test.ts`, +1 in `payments.test.ts` and +1 in
+`schema.test.ts`. Note the trap in that arithmetic: `credential-types.test.ts`
+held **26** tests at HEAD, not the 29 an intermediate red run's "29 passed of
+35" suggests — three of the nine additions passed before the implementation
+existed, because they only assert that a plain string is rejected by predicates
+that already existed. Two existing tests changed rather than being added: the
+`FACE_COPY` keyed-by-kind assertion, which now compares against the test file's
+own `KINDS` array instead of a hardcoded three-element list, and nothing else —
+every `KINDS`/`FLAVOURS` loop picked the new kind up for free. No plan; the work
+was a bounded request.
 
 That was **499** before the Wero work, which added 47, all in `apps/bank`, and
 the per-file split was measured rather than projected: +12 in `queries.test.ts`
@@ -229,10 +245,77 @@ them without reading the linked reasoning first.
   printed the mark twice.
 
 - **The bank dashboard's first section is *Payments*, not *Cards*.** It holds the
-  girocard tiles and the Wero tile; *Credentials* holds the age attestation
-  alone. The catalog key was **renamed** `dashboard.cards` → `dashboard.payments`
+  girocard tiles and the Wero tile; *Credentials* holds the age attestation and
+  the Sparkassen Authenticator. The catalog key was **renamed**
+  `dashboard.cards` → `dashboard.payments`
   rather than re-worded in place — a key called `cards` holding "Payments" is the
   drift this catalog is strict about. en `Payments`, de `Zahlungsmittel`.
+
+- **The Sparkassen Authenticator is the THIRD disjoint capability, and its
+  claim set is ONE claim.** `sparkassen_auth` (underscore — foundry's spelling,
+  not a choice) attests that the holder is an authenticated customer and nothing
+  else: `{ sub: randomUUID() }`, minted per issuance, sent, and never persisted,
+  so two of these credentials cannot be correlated to each other. It is in
+  **none** of `CARD_FORMAT_TYPE_IDS`, `PAYMENT_CREDENTIAL_TYPE_IDS` or
+  `AGE_CREDENTIAL_TYPE_IDS`; `isAuthenticatorCredentialType` is its predicate
+  and `credential-types.test.ts` pins the disjointness in both directions
+  against both other predicates. That matters because one of the three gates
+  money: `payments.test.ts` proves an `active` `sparkassen_auth` row carrying a
+  non-NULL `credential_id` is still refused with `unknown_credential`.
+
+  Unlike Wero it needed its own route and its own issuance function.
+  `POST /api/credentials/authenticator` and `startAuthenticatorIssuance` exist
+  because Wero could reuse the card route only by virtue of being *payable* —
+  a Wero row hangs off a `card_id` so `processPayment` can resolve an account.
+  This credential has no card at all (`cardId: null`, `credentialId: null`,
+  the age credential's row shape), so the card route would reject it and
+  `startIssuance`'s IBAN join has nothing to do. Its route deliberately has **no
+  body parser**: one format means nothing to name, so a parser would add a 400
+  branch no caller can reach.
+
+  The claim set is an **assumption**, exactly as Wero's is — nothing declares
+  `sparkassen_auth`, so no vct has confirmed it wants `sub` or wants only `sub`.
+
+- **`#EA0016` is NOT `--color-primary`, despite what this file's CSS said for
+  months.** Measured 2026-08-24: `--color-primary` is
+  `oklch(0.6279 0.2576 29)` ≈ **`#ff0004`**, while `#EA0016` is
+  `oklch(0.5892 0.2405 27.5)` — visibly darker and less saturated. The comment
+  above `.card-object-av` asserted the token *was* `#EA0016`; it has been
+  corrected. The consequence is load-bearing: `.card-object-auth` states the hex
+  literally and must never be "simplified" to `var(--color-primary)`, which
+  would silently change the card's colour. `.card-object-av`'s `#ff0000` is
+  nearly the token by coincidence, not by intent.
+
+- **`.card-object-auth` needs exactly TWO declarations beyond the colour, and
+  both are the lessons Wero's face already taught.** `background-image: none`,
+  because omitting the property does not clear `.card-object`'s
+  `url("/card-face.webp")` and the girocard's photograph would show through the
+  red; and `filter: none` on `[data-state="none"]`, because `saturate(0.82)`
+  sits back a *photograph* on the girocard but merely dulls a flat brand colour.
+  Nothing else is overridden — unlike Wero's face, the inherited white `color`
+  is correct on this ground and the inherited box-shadow's red cast is this
+  instrument's *own* colour rather than a borrowed one.
+
+- **The authenticator face reuses the `SparkasseLogo` component, not a new
+  `public/` asset.** The mark is drawn in `currentColor` inside `.card-brand`,
+  and `.card-object` sets `color: #fff`, so it is already white on the red
+  ground; a white-filled copy of the same path in `public/` would be a second
+  source of truth for one glyph. (Contrast `wero-logo.svg`, which is an `<img>`
+  precisely *because* inlining it would expose two `<linearGradient>` ids to
+  collision — this glyph has no gradients.) Height-only sizing, since the mark
+  is portrait at 0.769. Being a brand mark, it takes the corner the EU stars
+  would occupy, so this face carries **no stars** and `active` is reported by
+  the badge alone — the same trade Wero and the age face already make.
+
+  The name is drawn as *type*, in the opposite corner: `.card-wordmark`
+  (top-left) prints "Authenticator" as real text, because unlike the girocard
+  (photograph) and the age credential (SVG) this face has no artwork to carry a
+  name. That is also the one wordmark in this app a screen reader can reach. It
+  is deliberately NOT `.card-label`, which is a 0.62-alpha field caption — a
+  wordmark set as a caption reads as a label for whatever sits below it. Beyond
+  that, only the holder's name is drawn over the ground: no IBAN, because this
+  credential attests an identity and printing an account number would claim
+  something it does not carry.
 
 - **The girocard is issued in TWO payment formats, and they share no claims.**
   `com.emvco.dpc.card` declares `{ credential_id, network, card_id }`;
@@ -273,14 +356,17 @@ them without reading the linked reasoning first.
 - **`credential_type_id` has NO CHECK constraint, so widening it needs no
   migration.** The column is plain `text`; the drizzle `enum:` is a TypeScript
   claim about the data, not a database one. Verified against
-  `0001_even_bloodscream.sql`. Adding `sparkassencard`, `av-sparkasse` and later
-  `wero` was a one-line schema edit and zero SQL each time.
+  `0001_even_bloodscream.sql`. Adding `sparkassencard`, `av-sparkasse`, then
+  `wero`, then `sparkassen_auth` was a one-line schema edit and zero SQL each
+  time.
 
 - **The copy maps are keyed by what the copy varies with, NOT by credential type
-  id.** `FACE_COPY` is keyed by `CredentialKind` (`card | age | wero`) because
+  id.** `FACE_COPY` is keyed by `CredentialKind`
+  (`card | age | wero | authenticator`) because
   one tile shows one badge for all of its formats; `DIALOG_COPY` is keyed by
   `IssuanceFlavour`
-  (`card-eudi | card-google | age-eudi | age-google | wero-eudi`) because
+  (`card-eudi | card-google | age-eudi | age-google | wero-eudi |
+  authenticator-eudi`) because
   a dialog reading "Add card to EUDI Wallet" over a handover started from a
   Google Wallet badge is a visible defect. Keying either by type id would
   duplicate every string in both locales and let the formats drift. `wero` is a
@@ -305,7 +391,8 @@ them without reading the linked reasoning first.
 
 - **A `credentials` row needs neither a card nor a `credential_id`.**
   `credentialTypeId`
-  (`com.emvco.dpc.card | sparkassencard | wero | av | av-sparkasse`)
+  (`com.emvco.dpc.card | sparkassencard | wero | sparkassen_auth | av |
+  av-sparkasse`)
   is the discriminator and defaults to the DPC type, so an insert that forgets
   it silently becomes a payment credential. `processPayment` refuses anything
   that is not a *payment* row with a card — three independent ways, one of which
@@ -368,23 +455,30 @@ them without reading the linked reasoning first.
   which makes its absence as a *credential type* easy to misread as present.
   They are different registries; a named query naming `av` does not declare it.
 
-- **None of `sparkassencard`, `wero`, `av-sparkasse` or `av` is declared by any
+- **None of `sparkassencard`, `wero`, `sparkassen_auth`, `av-sparkasse` or `av`
+  is declared by any
   foundry config.** Verified 2026-08-21 for the first, and 2026-08-24 for all
-  four, against the running local foundry with the exact payload the bank sends:
-  each is HTTP **400**, `{"error":"unknown credential_type_id '<id>'"}`. The
+  five, against the running local foundry with the exact payload the bank sends:
+  each is HTTP **400**, `{"error":"unknown credential_type_id '<id>'"}` —
+  including `sparkassen_auth` with its real `{ sub }` claim, measured against
+  `POST /admin/issuance/offers`, the endpoint `createIssuanceOffer` posts to.
+  The
   local `../foundry/config.yaml` declares exactly three credential types — `pid`,
-  `com.emvco.dpc.card` and `eu.europa.ec.av.1` — and the string `wero` does not
-  appear in it at all. So the bank's Sparkasse-card, Wero and both age happy
+  `com.emvco.dpc.card` and `eu.europa.ec.av.1` — and neither `wero` nor
+  `sparkassen_auth` appears in it at all. So the bank's Sparkasse-card, Wero,
+  authenticator and both age happy
   paths have never run, and a real attempt degrades to a visible `failed` row —
   confirmed in the dev database, where clicking each of the age tile's two
   buttons wrote one `failed` row of the matching type, and clicking Wero's one
   button wrote a `failed` `wero` row carrying `card_anna` and a bare-UUID join
   key. In the browser that surfaces as the tile's own inline
   `Angebot konnte nicht erstellt werden.` with **no dialog** — `IssuanceDialog`
-  only mounts once a 2xx offer exists. `com.emvco.dpc.card` IS declared and its issuance was
+  only mounts once a 2xx offer exists. The authenticator tile behaves the same
+  way by construction (same `AddToWalletButton`, same inline error), though that
+  has not been observed in a browser. `com.emvco.dpc.card` IS declared and its issuance was
   verified end-to-end: HTTP 200, a real `openid-credential-offer://` deep link,
   and the display metadata echoed back in `credential_offer.display`. Adding the
-  four missing types is the operator's task.
+  five missing types is the operator's task.
 
 - **The merchant now accepts EITHER payment format, and the join key is
   per-format.** `selectNamedQuery` resolves foundry's `payment` / `payment_av`

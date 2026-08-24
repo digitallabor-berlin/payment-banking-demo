@@ -25,8 +25,14 @@ import { MESSAGES } from "./i18n/messages.js";
  * separate instrument with its own tile and its own artwork, so its copy has to
  * name it. That it happens to be payable, like the girocard, is a fact about
  * `PAYMENT_CREDENTIAL_TYPE_IDS`, not about what a tile says.
+ *
+ * `authenticator` is a kind for the same reason: its own tile, its own artwork,
+ * and copy that has to name it. What it is NOT is a second `age` — both attest
+ * something about the person and neither can pay, but one asserts an age and
+ * the other an identity, and a shared string would say the wrong thing about
+ * one of them.
  */
-export type CredentialKind = "card" | "age" | "wero";
+export type CredentialKind = "card" | "age" | "wero" | "authenticator";
 
 /**
  * One issuance conversation — a kind plus the wallet it targets.
@@ -40,7 +46,8 @@ export type IssuanceFlavour =
   | "card-google"
   | "age-eudi"
   | "age-google"
-  | "wero-eudi";
+  | "wero-eudi"
+  | "authenticator-eudi";
 
 /** The copy the issuance dialog needs, which differs by grammatical gender. */
 export interface IssuanceCopy {
@@ -121,6 +128,27 @@ export const FACE_COPY: Record<
           "Wero is in your wallet and ready for payments. You can add it again at any time.",
       },
     },
+    authenticator: {
+      none: {
+        badge: "Not in wallet",
+        // Says what it is FOR — signing in — rather than what it contains. Its
+        // only claim is an opaque `sub`, so there is nothing else to describe.
+        explain:
+          "Add the Sparkassen Authenticator to your EUDI Wallet to prove it is you online.",
+      },
+      offered: {
+        badge: "Being added…",
+        explain: "Confirm the offer in your wallet app.",
+      },
+      active: {
+        badge: "In wallet",
+        // Names no wallet, for the reason every other active string here does
+        // not: an OpenID4VCI offer is answered by whichever wallet the device
+        // hands it to, and the bank never learns which.
+        explain:
+          "The Sparkassen Authenticator is in your wallet and ready to use. You can add it again at any time.",
+      },
+    },
   },
   de: {
     card: {
@@ -171,6 +199,22 @@ export const FACE_COPY: Record<
           "Wero ist in Ihrem Wallet und für Zahlungen bereit. Sie können es jederzeit erneut hinzufügen.",
       },
     },
+    authenticator: {
+      none: {
+        badge: "Nicht im Wallet",
+        explain:
+          "Fügen Sie den Sparkassen Authenticator Ihrem EUDI Wallet hinzu, um sich online auszuweisen.",
+      },
+      offered: {
+        badge: "Wird hinzugefügt…",
+        explain: "Bestätigen Sie das Angebot in Ihrer Wallet-App.",
+      },
+      active: {
+        badge: "Im Wallet",
+        explain:
+          "Der Sparkassen Authenticator ist in Ihrem Wallet und einsatzbereit. Sie können ihn jederzeit erneut hinzufügen.",
+      },
+    },
   },
 };
 
@@ -215,12 +259,23 @@ export const DIALOG_COPY: Record<
       failureBody: "The age verification could not be added.",
     },
     // No `wero-google` counterpart: Wero is offered for the EUDI Wallet alone,
-    // so a second flavour would be copy for a button that does not exist.
+    // so a second flavour would be copy for a button that does not exist. The
+    // authenticator below has no counterpart for exactly the same reason.
     "wero-eudi": {
       title: "Add Wero to EUDI Wallet",
       successTitle: "Wero added",
       successBody: "Wero is now in your EUDI Wallet.",
       failureBody: "Wero could not be added.",
+    },
+    "authenticator-eudi": {
+      title: "Add Sparkassen Authenticator to EUDI Wallet",
+      successTitle: "Sparkassen Authenticator added",
+      // Names EUDI Wallet legitimately, as card-eudi and wero-eudi do: this
+      // credential has exactly one handover and it was started from the EUDI
+      // button, so the sentence states an intent the bank actually had rather
+      // than an outcome it cannot observe.
+      successBody: "The Sparkassen Authenticator is now in your EUDI Wallet.",
+      failureBody: "The Sparkassen Authenticator could not be added.",
     },
   },
   de: {
@@ -253,6 +308,14 @@ export const DIALOG_COPY: Record<
       successTitle: "Wero hinzugefügt",
       successBody: "Wero ist jetzt in Ihrem EUDI Wallet.",
       failureBody: "Wero konnte nicht hinzugefügt werden.",
+    },
+    "authenticator-eudi": {
+      title: "Sparkassen Authenticator zum EUDI Wallet hinzufügen",
+      successTitle: "Sparkassen Authenticator hinzugefügt",
+      successBody:
+        "Der Sparkassen Authenticator ist jetzt in Ihrem EUDI Wallet.",
+      failureBody:
+        "Der Sparkassen Authenticator konnte nicht hinzugefügt werden.",
     },
   },
 };

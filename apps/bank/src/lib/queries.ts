@@ -4,6 +4,7 @@ import { accounts, cards, credentials, transactions } from "../db/schema.js";
 import {
  AGE_CREDENTIAL_TYPE_IDS,
  CARD_FORMAT_TYPE_IDS,
+ SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID,
  WERO_CREDENTIAL_TYPE_ID,
  type AgeCredentialTypeId,
  type CardFormatTypeId,
@@ -56,6 +57,19 @@ export interface CardDto {
  * exactly one format and nothing for a second button to disagree with.
  */
 export interface WeroCredentialDto {
+ state: CardCredentialState;
+ credentialRowId: string | null;
+}
+
+/**
+ * The user's Sparkassen Authenticator credential, if any.
+ *
+ * Structurally identical to `WeroCredentialDto` and for the same reason — one
+ * format, one button, nothing for a second button to disagree with — but a
+ * separate interface rather than a shared one. They describe different
+ * credentials, and merging them would invite a single query serving both.
+ */
+export interface AuthenticatorCredentialDto {
  state: CardCredentialState;
  credentialRowId: string | null;
 }
@@ -264,6 +278,39 @@ export function getWeroCredentialState(
    and(
     eq(credentials.userId, userId),
     eq(credentials.credentialTypeId, WERO_CREDENTIAL_TYPE_ID),
+    inArray(credentials.state, ["offered", "active"]),
+   ),
+  )
+  .orderBy(desc(credentials.createdAt))
+  .all();
+
+ const { state, rowId } = stateOf(live);
+ return { state, credentialRowId: rowId };
+}
+
+/**
+ * The user's Sparkassen Authenticator credential, if any.
+ *
+ * Scoped by user and type, like `getWeroCredentialState`, but for a stronger
+ * reason: this credential has no card at all, so there is no card to scope by.
+ * A user has one authenticator credential however many cards they hold.
+ *
+ * Same rule as every other tile, through the same two helpers: a live
+ * credential outranks an open offer, the newest wins within a state, and a
+ * failed attempt is not a credential. One scope only, because there is one
+ * format — no Google Wallet handover exists for this credential.
+ */
+export function getAuthenticatorCredentialState(
+ db: Db,
+ userId: string,
+): AuthenticatorCredentialDto {
+ const live = db
+  .select()
+  .from(credentials)
+  .where(
+   and(
+    eq(credentials.userId, userId),
+    eq(credentials.credentialTypeId, SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID),
     inArray(credentials.state, ["offered", "active"]),
    ),
   )

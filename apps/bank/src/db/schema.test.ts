@@ -251,6 +251,34 @@ describe("credentials shape", () => {
     expect(row?.credentialId).toBe("11111111-2222-3333-4444-555555555555");
   });
 
+  it("accepts a Sparkassen Authenticator credential with no card and no credential id", () => {
+    // The authenticator takes the age credential's shape rather than Wero's: it
+    // attests something about the person, so there is no card to debit and no
+    // join key for a merchant to present. Widening the drizzle enum was again
+    // the whole of what this row needed — the column is plain `text` with no
+    // CHECK constraint, so no migration.
+    seed(db);
+    db.insert(credentials)
+      .values({
+        id: "cred_auth",
+        userId: "user_anna",
+        cardId: null,
+        credentialTypeId: "sparkassen_auth",
+        credentialId: null,
+        state: "offered",
+        createdAt: 1,
+      })
+      .run();
+    const row = db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.id, "cred_auth"))
+      .get();
+    expect(row?.credentialTypeId).toBe("sparkassen_auth");
+    expect(row?.cardId).toBeNull();
+    expect(row?.credentialId).toBeNull();
+  });
+
   it("permits several rows with a null credential id", () => {
     // SQLite treats NULLs as distinct under a UNIQUE index. Two age credentials
     // must coexist even though neither has a join key.

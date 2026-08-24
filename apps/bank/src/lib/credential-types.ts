@@ -43,6 +43,26 @@ export const SPARKASSEN_CARD_CREDENTIAL_TYPE_ID =
 export const WERO_CREDENTIAL_TYPE_ID = "wero" satisfies CredentialTypeId;
 
 /**
+ * The Sparkassen Authenticator — a credential that attests the holder is an
+ * authenticated Sparkasse customer, and nothing else.
+ *
+ * Spelled with an underscore, unlike every other id here. That is foundry's
+ * spelling and not a choice.
+ *
+ * Deliberately in none of the lists below. It is not payable, so it must never
+ * reach `processPayment`; it is not an age attestation either. What it shares
+ * with the age credential is its *shape* rather than its meaning: no card, no
+ * join key, one claim about the person. Its only claim is a `sub` UUID minted
+ * per issuance and never persisted, so nothing about it is correlatable across
+ * issuances — see `authenticator-issuance.ts`.
+ *
+ * Offered for the EUDI Wallet only, so — like Wero — it has exactly one button
+ * and therefore no per-format tile state to track.
+ */
+export const SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID =
+ "sparkassen_auth" satisfies CredentialTypeId;
+
+/**
  * The age-verification attestation, in the bank's own format. NOT
  * `eu.europa.ec.av.1` — that is the mdoc docType configured on foundry's side;
  * this is the credential type id the admin API takes.
@@ -139,6 +159,28 @@ export function isAgeCredentialType(
  typeId: string,
 ): typeId is AgeCredentialTypeId {
  return (AGE_CREDENTIAL_TYPE_IDS as readonly string[]).includes(typeId);
+}
+
+/**
+ * Whether a value names the Sparkassen Authenticator.
+ *
+ * The third sibling of `isPaymentCredentialType` and `isAgeCredentialType`, and
+ * disjoint from both: the three gate three different capabilities, and an id
+ * answering true to two of them would let one credential do another's job —
+ * one of those jobs being to move money.
+ *
+ * Takes a plain `string` for the same reason the other two do: its caller
+ * validates a value that arrived over HTTP.
+ *
+ * A single-member predicate rather than an inline `=== SPARKASSEN_AUTH_…`
+ * because the comparison must be identical at every site that asks it, and
+ * because a second authenticator format — should one ever exist — then widens
+ * one function instead of every call site.
+ */
+export function isAuthenticatorCredentialType(
+ typeId: string,
+): typeId is typeof SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID {
+ return typeId === SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID;
 }
 
 /**

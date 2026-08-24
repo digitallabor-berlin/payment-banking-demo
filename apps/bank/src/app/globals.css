@@ -187,6 +187,30 @@ body {
 }
 
 /*
+ * A wordmark set in type, top-LEFT — the opposite corner from .card-brand and
+ * .card-stars, which is what lets a face carry a glyph and a name at once
+ * without the two competing for the one corner that fits a single mark.
+ *
+ * Only the authenticator's face uses it. The girocard's name is printed in its
+ * photograph and the age credential's in its SVG; this face has no artwork to
+ * carry one, so the name is real text — which also means a screen reader that
+ * reaches the face gets it, unlike a name baked into a background image.
+ *
+ * Larger and fully opaque, unlike .card-label: that class is a field caption at
+ * 0.62 alpha, and a wordmark rendered as a caption reads as a label for the
+ * thing below it rather than as the name of the card.
+ */
+.card-wordmark {
+  position: absolute;
+  top: 0.9rem;
+  left: 1.25rem;
+  z-index: 10;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/*
  * The IBAN, which on this card takes the place a PAN would occupy. Set in mono
  * with tabular figures and grouped in fours by formatIban; the tracking is
  * looser than body text but tighter than the old PAN's, because 22 grouped
@@ -224,9 +248,14 @@ body {
 /*
  * The age credential's face. Only the image and the load-time fallback colour
  * differ from .card-object — geometry, radius, shadow and the not-yet-issued
- * desaturation are all inherited. #ff0000 is the artwork's OWN red, not
- * Sparkasse's --color-primary (#EA0016), so a missing asset degrades to the
- * right colour rather than a near-miss.
+ * desaturation are all inherited. #ff0000 is the artwork's OWN red, declared
+ * here rather than inherited so a missing asset degrades to the right colour.
+ *
+ * This comment used to call --color-primary "#EA0016". That was wrong:
+ * oklch(0.6279 0.2576 29) converts to roughly #ff0004, so the token is very
+ * nearly this artwork's pure red rather than the darker Sparkasse hex. The
+ * distinction matters to .card-object-auth below, which needs the real #EA0016
+ * and therefore cannot inherit the token.
  *
  * Nothing is drawn over this face. The artwork already carries the
  * "Altersnachweis / Proof of Age" wordmark top-right and the Sparkasse logo
@@ -304,6 +333,43 @@ body {
 
 .card-object-wero .card-iban {
   text-shadow: none;
+}
+
+/*
+ * The Sparkassen Authenticator's face: a flat #EA0016 ground with the Sparkasse
+ * mark top-right and the holder's name drawn over it.
+ *
+ * The colour is stated literally and must NOT be replaced with
+ * var(--color-primary). Measured 2026-08-24: the token is
+ * oklch(0.6279 0.2576 29) ≈ #ff0004, while #EA0016 is oklch(0.5892 0.2405 27.5)
+ * — a visibly darker, less saturated red. The two are not the same colour, and
+ * a comment in this file asserted they were for months.
+ *
+ * `background-image: none` is REQUIRED and must never be dropped as redundant.
+ * Omitting the property does not clear it — .card-object sets
+ * url("/card-face.webp"), so the girocard's photograph shows through under the
+ * red and the ground is not #EA0016 at all. That exact removal was a real
+ * reported defect on the Wero face.
+ *
+ * Nothing else is overridden. .card-object's white `color` is correct on this
+ * ground, and its box-shadow mixes --color-primary toward black — a red cast
+ * under a red card, which is this instrument's own colour rather than a
+ * borrowed one, so unlike Wero's face this one keeps it.
+ */
+.card-object-auth {
+  background-color: #EA0016;
+  background-image: none;
+}
+
+/*
+ * The not-yet-issued desaturation is dropped here for the same reason it is on
+ * Wero's face: `filter: saturate(0.82)` applies to the rendered element, so it
+ * sits back a *photograph* on the girocard but merely dulls a flat brand colour
+ * here. The affordance it provides is carried by the badge and the button copy
+ * instead.
+ */
+.card-object-auth[data-state="none"] {
+  filter: none;
 }
 
 /* ---------------------------------------------------------- the ledger ---- */

@@ -163,6 +163,42 @@ describe("processPayment", () => {
     ).toBeUndefined();
   });
 
+  it("refuses to settle against a Sparkassen Authenticator credential", () => {
+    // Given a non-null credential_id for the same reason the age case is: the
+    // schema permits one, so this isolates the credential-type guard rather
+    // than passing on a NULL that could never have matched. Proving who you
+    // are is not authorizing a debit.
+    db.insert(credentials)
+      .values({
+        id: "cred_auth_active",
+        userId: "user_anna",
+        cardId: "card_anna",
+        credentialTypeId: "sparkassen_auth",
+        credentialId: "auth_pretending_to_be_a_card",
+        state: "active",
+        issuedAt: 1,
+        createdAt: 1,
+      })
+      .run();
+
+    const result = processPayment(
+      db,
+      baseInput({
+        credentialId: "auth_pretending_to_be_a_card",
+        idempotencyKey: "idem_auth_1",
+      }),
+    );
+
+    expect(result).toEqual({ ok: false, reason: "unknown_credential" });
+    expect(
+      db
+        .select()
+        .from(transactions)
+        .where(eq(transactions.idempotencyKey, "idem_auth_1"))
+        .get(),
+    ).toBeUndefined();
+  });
+
   it("settles against a Sparkasse card credential", () => {
     // The girocard is issued in two formats and both authorize money to move.
     // The join key arrived in this row's credential_id column as a `psu_id`

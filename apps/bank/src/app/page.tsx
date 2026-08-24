@@ -4,6 +4,7 @@ import { AccountPanel } from "@/components/AccountPanel.js";
 import { AgeCredentialTile } from "@/components/AgeCredentialTile.js";
 import { AppHeader } from "@/components/AppHeader.js";
 import { CardTile } from "@/components/CardTile.js";
+import { SparkassenAuthTile } from "@/components/SparkassenAuthTile.js";
 import { TransactionLedger } from "@/components/TransactionLedger.js";
 import { WeroCredentialTile } from "@/components/WeroCredentialTile.js";
 import { getDb } from "@/db/index.js";
@@ -11,6 +12,7 @@ import { MESSAGES } from "@/lib/i18n/messages.js";
 import { getLocale } from "@/lib/i18n/server.js";
 import {
   getAgeCredentialState,
+  getAuthenticatorCredentialState,
   getWeroCredentialState,
   listAccounts,
   listCards,
@@ -31,6 +33,7 @@ export default async function DashboardPage() {
   const cards = listCards(db, session.userId);
   const recent = listTransactions(db, session.userId, 5, 0);
   const ageCredential = getAgeCredentialState(db, session.userId);
+  const authenticator = getAuthenticatorCredentialState(db, session.userId);
   const wero = getWeroCredentialState(db, session.userId);
   // Wero is payable, and `processPayment` resolves an account through a card, so
   // a Wero credential cannot be issued without one to hang the row on. No card,
@@ -97,6 +100,14 @@ export default async function DashboardPage() {
             <AgeCredentialTile
               credentialState={ageCredential.state}
               formats={ageCredential.formats}
+              locale={locale}
+            />
+            {/* Needs no card, unlike the Wero tile above: this credential is
+                not payable, so there is no account to resolve through and the
+                tile is unconditional. */}
+            <SparkassenAuthTile
+              credentialState={authenticator.state}
+              holder={session.displayName}
               locale={locale}
             />
           </div>

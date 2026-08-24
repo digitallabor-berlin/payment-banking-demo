@@ -13,13 +13,14 @@ import { stateCopy, type CardFaceState } from "./card-state.js";
 import { MESSAGES } from "./i18n/messages.js";
 
 const STATES: CardFaceState[] = ["none", "offered", "active"];
-const KINDS: CredentialKind[] = ["card", "age", "wero"];
+const KINDS: CredentialKind[] = ["card", "age", "wero", "authenticator"];
 const FLAVOURS: IssuanceFlavour[] = [
   "card-eudi",
   "card-google",
   "age-eudi",
   "age-google",
   "wero-eudi",
+  "authenticator-eudi",
 ];
 
 describe("FACE_COPY", () => {
@@ -45,8 +46,8 @@ describe("FACE_COPY", () => {
     // The girocard is issued in two formats behind ONE tile with ONE badge.
     // Keying this by type id would duplicate every card string and let the two
     // formats' copy drift apart for no reason a user could ever observe.
-    expect(Object.keys(FACE_COPY.de).sort()).toEqual(["age", "card", "wero"]);
-    expect(Object.keys(FACE_COPY.en).sort()).toEqual(["age", "card", "wero"]);
+    expect(Object.keys(FACE_COPY.de).sort()).toEqual([...KINDS].sort());
+    expect(Object.keys(FACE_COPY.en).sort()).toEqual([...KINDS].sort());
   });
 
   it("describes Wero as its own instrument, not as a card", () => {
@@ -68,6 +69,52 @@ describe("FACE_COPY", () => {
     for (const state of ["none", "active"] as const) {
       for (const locale of ["de", "en"] as const) {
         expect(faceCopy(locale, "wero", state).explain).toMatch(/Wero/);
+      }
+    }
+  });
+
+  it("describes the authenticator as neither a card nor an age credential", () => {
+    // The nearest miss is the age credential: both attest the person and
+    // neither can pay. One asserts an age and the other an identity, so a
+    // shared sentence would be wrong about one of them.
+    for (const state of ["none", "active"] as const) {
+      for (const locale of ["de", "en"] as const) {
+        for (const other of ["card", "age", "wero"] as const) {
+          expect(faceCopy(locale, "authenticator", state).explain).not.toBe(
+            faceCopy(locale, other, state).explain,
+          );
+        }
+      }
+    }
+  });
+
+  it("names the Sparkassen Authenticator in its own explanations, in both languages", () => {
+    for (const state of ["none", "active"] as const) {
+      for (const locale of ["de", "en"] as const) {
+        expect(faceCopy(locale, "authenticator", state).explain).toMatch(
+          /Sparkassen Authenticator/,
+        );
+      }
+    }
+  });
+
+  it("shares the offered instruction with the authenticator too", () => {
+    // A fourth copy of a sentence that does not name its subject would be
+    // pointless drift waiting to happen.
+    expect(faceCopy("en", "authenticator", "offered").explain).toBe(
+      "Confirm the offer in your wallet app.",
+    );
+    expect(faceCopy("de", "authenticator", "offered").explain).toBe(
+      "Bestätigen Sie das Angebot in Ihrer Wallet-App.",
+    );
+  });
+
+  it("reuses the shared badges for the authenticator as well", () => {
+    for (const state of STATES) {
+      for (const locale of ["de", "en"] as const) {
+        expect(faceCopy(locale, "authenticator", state).badge).toBe(
+          faceCopy(locale, "card", state).badge,
+        );
       }
     }
   });
@@ -263,6 +310,51 @@ describe("DIALOG_COPY", () => {
           expect(wero[key]).not.toBe(copy[key]);
         }
       }
+    }
+  });
+
+  it("names EUDI Wallet in the authenticator's title, in both languages", () => {
+    expect(dialogCopy("en", "authenticator-eudi").title).toBe(
+      "Add Sparkassen Authenticator to EUDI Wallet",
+    );
+    expect(dialogCopy("de", "authenticator-eudi").title).toBe(
+      "Sparkassen Authenticator zum EUDI Wallet hinzufügen",
+    );
+  });
+
+  it("may name EUDI Wallet in the authenticator's success body", () => {
+    // Legitimate for the same reason as wero-eudi and card-eudi: one handover,
+    // started from the EUDI button, so the sentence states an intent rather
+    // than an unobservable outcome.
+    for (const locale of ["de", "en"] as const) {
+      expect(dialogCopy(locale, "authenticator-eudi").successBody).toMatch(
+        /EUDI/,
+      );
+      expect(dialogCopy(locale, "authenticator-eudi").successBody).not.toMatch(
+        /Google/,
+      );
+    }
+  });
+
+  it("gives the authenticator its own subject in every dialog string", () => {
+    for (const locale of ["de", "en"] as const) {
+      const auth = DIALOG_COPY[locale]["authenticator-eudi"];
+      for (const other of ["card-eudi", "age-eudi", "wero-eudi"] as const) {
+        const copy = DIALOG_COPY[locale][other];
+        for (const key of Object.keys(auth) as (keyof typeof auth)[]) {
+          expect(auth[key]).not.toBe(copy[key]);
+        }
+      }
+    }
+  });
+
+  it("has no Google flavour for the authenticator either", () => {
+    // Offered for the EUDI Wallet only, so a second flavour would be copy for
+    // a button that does not exist.
+    for (const locale of ["de", "en"] as const) {
+      expect(Object.keys(DIALOG_COPY[locale])).not.toContain(
+        "authenticator-google",
+      );
     }
   });
 
