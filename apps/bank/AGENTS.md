@@ -564,6 +564,126 @@ its own tile, offered for the EUDI Wallet **only**.
   declare only `dpc` and `sparkassencard`. `processPayment` *would* debit a Wero
   credential — there is a test — but nothing would ever present one.
 
+## Wallet login
+
+The bank became a **verifier** here, for the first time. A customer presents a
+`sparkassen_auth` credential instead of typing a password.
+
+- **The authenticator's `sub` IS persisted now**, to `credentials.credential_id`.
+  It was deliberately not, until this existed. Persisting it is the entire
+  mechanism by which a presentation resolves back to a customer, because a
+  `sparkassen_auth` presentation discloses `sub` and nothing else identifying.
+  The privacy property that choice protected survives — the value is still fresh
+  per issuance, so two of these credentials still cannot be correlated to each
+  other by anyone. What changed is that the *bank* can link a presentation to the
+  customer it issued to. **Permanent consequence: a credential issued before this
+  change has an unrecoverable `sub` and can never log in.** There is no backfill,
+  because the value was never stored. That is what the `unknown_credential`
+  failure copy names a remedy for — add it to the wallet again.
+
+  Note this is NOT the same claim as `sparkassencard`'s `sub` under **Two card
+  formats**, which genuinely is still minted, sent and never persisted.
+
+- **Two constants, not one.** `SPARKASSEN_AUTH_NAMED_QUERY` is foundry's
+  `named_queries` key; `SPARKASSEN_AUTH_QUERY_ID` is the DCQL credential query id
+  *inside* it, and it is what `PresentedCredential.query_id` carries. The
+  deployed config spells both the same and nothing forces it to — the merchant's
+  `payment` query answers `dpc`, `sparkassencard` and `wero`, none of which is
+  its own name. One constant serving both roles would let a rename of either
+  silently mis-key the other.
+
+- **The gate is keyed by DCQL query id, never by claim name.** `login-checks.ts`
+  finds the credential whose `query_id` is `sparkassen_auth` and reads its `sub`.
+  `sparkassencard` and `wero` both declare a `sub` claim, so a claim-name match
+  could let a *payment* credential authenticate a customer. Today the query
+  requests exactly one credential, so a laxer rule would be observationally
+  identical — the rule exists so widening the query later cannot silently promote
+  a payment credential's `sub` into an authentication subject. It fails closed on
+  every malformed shape: no credential, non-object claims, missing/empty/
+  non-string `sub`.
+
+- **Four routes, all unauthenticated by necessity** — the caller is by definition
+  not logged in. `POST /api/auth/wallet-login` opens it, `GET …/{id}` polls,
+  `POST …/{id}/claim` mints the cookie, `POST …/{id}/dc-api-response` relays.
+  The session id is therefore a **bearer token**, which is what the 5-minute TTL
+  and the single-use rule exist to bound.
+
+- **The poll is a GET that mints nothing; the cookie comes from a POST.** A GET
+  that minted an authenticated session would be consumed by a prefetch, a
+  double-poll, or React StrictMode, with no user action at all. That split is the
+  reason `/claim` exists as a separate route rather than the poll returning a
+  cookie when it happens to see `verified`.
+
+- **`verified` and `consumed` are separate states**, exactly as the merchant
+  splits `verified` from `settling`. Collapsing them makes "the credential
+  checked out" indistinguishable from "someone already got a session out of
+  this", and that distinction is the whole of what makes a login single-use.
+
+- **There is no `expired` state — expiry is a failure *reason* on `failed`,**
+  computed from `created_at` at read time. Nothing in this project runs a
+  background sweep, so a fifth state would be one nothing could ever write.
+
+- **Single-use is a guarded UPDATE, not a read-then-write.**
+  `claimLoginSession` updates `WHERE id = ? AND state = 'verified'` and checks
+  `.changes === 1`; that is what decides which of two concurrent claims won.
+  Reading the state and then updating unconditionally would let both mint a
+  cookie. It is synchronous because better-sqlite3 is, and that is load-bearing
+  rather than incidental.
+
+- **The claim deliberately does NOT require the local credential row to be
+  `active`.** foundry's verdict is the authority that the credential is real,
+  holder-bound and unrevoked; the row only answers *whose*. Nothing in this
+  project clears an `offered` row, so requiring `active` would lock a customer
+  out of a credential demonstrably in their wallet.
+
+- **The cookie options are byte-identical to `/api/auth/login`'s**, on purpose: a
+  wallet session must be indistinguishable from a password session, so anything
+  that differed would be a way to tell them apart. `SessionPayload` is untouched
+  — the login *method* is not surfaced anywhere.
+
+- **`refreshLoginSessionState` orders its checks to stop costing traffic:**
+  terminal, then expiry, then already-verified, and only then foundry. An
+  abandoned tab stops generating admin-API calls the moment its window shuts. A
+  foundry that throws leaves the session `pending` so a later poll recovers —
+  only the client's consecutive-failure counter decides when to give up.
+
+- **The dialog's decisions live in `lib/login-dialog-state.ts`,** not in the
+  `.tsx`. Same reason as `card-state.ts`: vitest is `environment: "node"` with
+  `include: ["src/**/*.test.ts"]`, so a ternary in a component is untested.
+  `selectLoginPhase` treats `verified` as still *waiting* — the claim is in
+  flight and no cookie exists yet, so showing success would navigate to a page
+  that redirects straight back to `/login`.
+
+- **Detection lives in `WalletLoginButton`, not the dialog.** The transport is
+  fixed when the session is created — foundry returns either a URI or an inline
+  request object, never both — and creating the session on the click is what lets
+  `dcApiRequest` be a prop before the dialog's wallet button is pressed. Chrome
+  consumes a click's transient activation, so no `await` may run between that
+  handler starting and `navigator.credentials.get()`.
+
+- **Known gap: a refused `/claim` leaves the dialog on its waiting face.** The
+  poll is already terminal on `verified`, so nothing re-drives it. Reaching that
+  branch needs the state to change between the poll reading it and the POST — the
+  race the route's 409 exists to close — so it is rare rather than impossible.
+  Flagged inline in `WalletLoginDialog.tsx`.
+
+- **Verified 2026-08-24 against the DEPLOYED foundry**, port-forwarded:
+  `POST /admin/verification/requests` with `named_query_ref: sparkassen_auth` is
+  **HTTP 200** with a real `openid4vp://` URI, and the **control** — a bogus
+  named query — is **HTTP 400** `unknown named_query_ref`, so the 200 is
+  evidence. The request object served at `request_uri` carries DCQL
+  `id: sparkassen_auth`, vct `https://creds.digitallabor.dev/vct/sparkassen_auth`
+  and claim path `sub`, **flat** — which is what pins `extractAuthSubject`'s
+  shape to config rather than to assumption.
+
+  **Trap worth knowing:** a local foundry owns `127.0.0.1:9000` (IPv4) while
+  `kubectl port-forward` may bind only `[::1]:9000`. A curl to `127.0.0.1:9000`
+  then hits the *local* server and answers 401 with the deployed key. Forward to
+  a distinct port (9100) instead of trusting the address.
+
+- **NOT verified: no wallet has ever answered this query.** No device here. The
+  disclosed-claim shape is pinned by foundry's config, not by observation.
+
 ## i18n
 
 A hand-rolled catalog under `src/lib/i18n/`. No library, no middleware, no URL
@@ -612,7 +732,21 @@ type, not copy).
 
 ## Testing
 
-`pnpm test` → **327 tests**. `pnpm typecheck` must also be clean. (It read
+`pnpm test` → **450 tests**. `pnpm typecheck` must also be clean. (It read
+`368` before the wallet-login work, which added 82: 33 in the new
+`login-sessions.test.ts`, 22 in the new `login-dialog-state.test.ts`, 12 in the
+new `login-checks.test.ts`, 4 in the new `dc-api-relay.test.ts`, 3 in the new
+`transport.test.ts`, +3 in `credential-types.test.ts`, +3 in `schema.test.ts`
+and +2 in `authenticator-issuance.test.ts`. Note two traps in that arithmetic:
+`messages.test.ts` gained **zero** despite two locales growing a whole new copy
+block — its invariants (identical key sets, no empty leaf, no leaf identical
+across locales) cover new leaves without new cases, and a missing key is a
+*compile* error rather than a test failure. And two existing tests in
+`authenticator-issuance.test.ts` **changed** rather than being added: both
+pinned the old "never persisted" contract directly, so the +2 is net of a
+rewrite. This file's own count had also drifted badly — it read `327` while the
+suite was actually at 368, so the pre-work figure here is measured, not the one
+that was written down.) (It read
 `280` before the Wero work, which added 47: +12 in `queries.test.ts`, +10 in
 `issuance.test.ts`, +8 in `credential-copy.test.ts`, +7 in
 `credential-types.test.ts`, +4 in `payment-claims.test.ts`, +3 in

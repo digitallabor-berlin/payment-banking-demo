@@ -53,8 +53,29 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**591 tests** (368 bank + 181 merchant + 11 foundry-client + 31 ui), measured
+**673 tests** (450 bank + 181 merchant + 11 foundry-client + 31 ui), measured
 2026-08-24.
+
+That was **591** before the wallet-login work, which added 82, all in
+`apps/bank`: 33 in the new `login-sessions.test.ts`, 22 in the new
+`login-dialog-state.test.ts`, 12 in the new `login-checks.test.ts`, 4 in the new
+`dc-api-relay.test.ts`, 3 in the new `transport.test.ts`, +3 in
+`credential-types.test.ts`, +3 in `schema.test.ts` and +2 in
+`authenticator-issuance.test.ts`. Two traps in that arithmetic. First,
+`messages.test.ts` added **zero** despite both locales gaining an entire
+`walletLogin` block plus two `login` keys — its invariants (identical key sets,
+no empty leaf, no leaf byte-identical across locales) cover new leaves without
+new cases, and a key present in one catalog and missing from the other is a
+*compile* error rather than a test failure, so `pnpm typecheck` is the real gate
+for copy and the test count is silent on it. Second, the +2 in
+`authenticator-issuance.test.ts` is net of a rewrite: two existing tests
+(`never persists the sub it sent`, and the join-key assertion in
+`writes an offered row…`) pinned the old contract *directly* and had to be
+inverted, because persisting the `sub` is the change. `payments.test.ts` was the
+load-bearing cross-check there and did **not** change — it still proves an
+`active` `sparkassen_auth` row, now carrying a non-NULL `credential_id`, is
+refused a debit. No plan projection to compare against: the plan deliberately
+refused to project one and said measure.
 
 That was **587** before the Wero-payment fix, which added 4, all in
 `apps/merchant`: +2 in `checks.test.ts` (a Wero-only binding pass and a Wero
@@ -270,8 +291,12 @@ them without reading the linked reasoning first.
 - **The Sparkassen Authenticator is the THIRD disjoint capability, and its
   claim set is ONE claim.** `sparkassen_auth` (underscore — foundry's spelling,
   not a choice) attests that the holder is an authenticated customer and nothing
-  else: `{ sub: randomUUID() }`, minted per issuance, sent, and never persisted,
-  so two of these credentials cannot be correlated to each other. It is in
+  else: `{ sub: randomUUID() }`, minted per issuance, sent, **and — since wallet
+  login — persisted** to `credential_id`. Still fresh per issuance, so two of
+  these credentials cannot be correlated to each other by anyone; what changed is
+  that the *bank* can now link a presentation to the customer it issued to, which
+  is exactly what logging in requires. A credential issued **before** that change
+  has an unrecoverable `sub` and can never log in — there is no backfill. It is in
   **none** of `CARD_FORMAT_TYPE_IDS`, `PAYMENT_CREDENTIAL_TYPE_IDS` or
   `AGE_CREDENTIAL_TYPE_IDS`; `isAuthenticatorCredentialType` is its predicate
   and `credential-types.test.ts` pins the disjointness in both directions
@@ -289,8 +314,16 @@ them without reading the linked reasoning first.
   body parser**: one format means nothing to name, so a parser would add a 400
   branch no caller can reach.
 
-  The claim set is an **assumption**, exactly as Wero's is — nothing declares
-  `sparkassen_auth`, so no vct has confirmed it wants `sub` or wants only `sub`.
+  The claim set is **confirmed** as of 2026-08-24, and is no longer the
+  assumption this file recorded. `dl-infra-k8s/foundry/foundry_config.yml`
+  declares `sparkassen_auth` with vct
+  `https://creds.digitallabor.dev/vct/sparkassen_auth` and exactly one claim —
+  `path: [sub]`, `required: true`, `selectively_disclosable: false` — so it wants
+  `sub` and wants only `sub`. It is also the subject of
+  `SPARKASSEN_AUTH_QUERY_ID` and `login-checks.ts`: the same id names a *named
+  query* whose DCQL credential query id is likewise `sparkassen_auth`, and the
+  bank keeps those as two separate constants because nothing forces the two
+  registries to agree.
 
 - **`#EA0016` is NOT `--color-primary`, despite what this file's CSS said for
   months.** Measured 2026-08-24: `--color-primary` is
@@ -800,8 +833,14 @@ them without reading the linked reasoning first.
   (`packages/ui`) is shared. The bank's locale machinery is likewise **not**
   shared — it lives in `apps/bank/src/lib/i18n/`, because the merchant has no
   second language to switch to.
-- **No revocation anywhere.** foundry exposes no revoke endpoint; credentials
-  expire on their 12-hour lifetime.
+- **No revocation anywhere.** foundry exposes no revoke endpoint. Credentials
+  expire on their configured lifetime, which is **per credential type and is not
+  12 hours** — this file asserted a blanket 12h until 2026-08-24 and that was
+  wrong. Measured from `dl-infra-k8s/foundry/foundry_config.yml`:
+  `sparkassen_auth` and `sparkassencard` both carry
+  `validity_seconds: 31536000`, i.e. **365 days**. The 12h figure is the *bank
+  session cookie's* TTL (`session.ts`), which is a different thing entirely.
+  Read the config for the type you care about rather than repeating a number.
 - **TDD.** Write the failing test, run it, confirm it fails for the right
   reason, then implement. Both plans were executed this way.
 - **Verify against real services, not mocks**, wherever it is possible. Unit
@@ -843,6 +882,16 @@ them without reading the linked reasoning first.
   payment fails `transaction_data_binding` *as a payment decline*, not as a
   transport error — nothing throws in the browser, so the "Show QR code"
   recovery never appears. `config.yaml` is gitignored in `../foundry`.
+- **OPERATOR DEPENDENCY, open: the BANK's origin is not in
+  `dc_api_expected_origins`.** Measured 2026-08-24 from
+  `dl-infra-k8s/foundry/foundry_config.yml`, which reads
+  `["https://foundry-admin.digitallabor.dev", "https://larder-shop.digitallabor.dev"]`
+  — the merchant is listed, the bank is **not**. Wallet login now makes the bank
+  a verifier too, so `https://sparkasse-musterstadt.digitallabor.dev` must be
+  added or a same-device (DC API) wallet login **declines silently**: the KB-JWT
+  audience is the browsing-context Origin, foundry rejects it, and the failure
+  surfaces as an ordinary failed verification rather than as a transport error.
+  Cross-device (QR / `request_uri`) login is unaffected.
 
 ## Known-unverifiable
 
@@ -879,6 +928,27 @@ operator to re-run the Wero checkout before calling that path proven. The local
 `pnpm dev` setup still talks to a `localhost` foundry, which declares neither
 the named queries nor four of the five credential types, so none of this is
 reproducible locally.
+
+**No wallet has ever answered the `sparkassen_auth` query either**, as of
+2026-08-24 — wallet *login* is in exactly the same position as everything above.
+What is verified is the request leg, against the deployed foundry:
+`POST /admin/verification/requests` with `named_query_ref: sparkassen_auth`
+returns **HTTP 200** and a real `openid4vp://` URI, while a bogus named query
+returns **HTTP 400 `unknown named_query_ref`**, so the 200 is evidence rather
+than serde dropping a field. The request object served at `request_uri` carries
+DCQL `id: sparkassen_auth`, vct
+`https://creds.digitallabor.dev/vct/sparkassen_auth` and a **flat** `sub` claim
+path. So `extractAuthSubject`'s shape is pinned by foundry's config, not by
+observation — nothing has seen a `vp_token` answering it, and the whole path
+from the wallet's response through `refreshLoginSessionState` to a minted cookie
+is unexercised.
+
+A trap when checking any of this against the deployed admin API: a **local**
+foundry may own `127.0.0.1:9000` (IPv4) while `kubectl port-forward svc/foundry
+9000:9000` binds only `[::1]:9000`. A curl to `127.0.0.1:9000` then silently hits
+the *local* server and answers 401 with the deployed key, which reads as a bad
+secret. Forward to a distinct port (e.g. `9100:9000`) rather than trusting the
+address.
 
 Do not fake this. If a change depends on real wallet behaviour, say so.
 
