@@ -115,9 +115,58 @@ export const transactions = sqliteTable(
  ],
 );
 
+/**
+ * One row per wallet-login attempt.
+ *
+ * `state` is a superset of foundry's own verification state, for the reason
+ * the merchant's `payment_sessions` is: foundry knows pending/verified/failed
+ * and cannot know WHOSE login this resolved to, nor whether a cookie has
+ * already been minted from it.
+ *
+ * `consumed` is a distinct state from `verified` rather than a boolean beside
+ * it, exactly as the merchant splits `verified` from `settling`: collapsing
+ * them makes "the credential checked out" indistinguishable from "someone
+ * already got a session out of this", and that distinction is the whole of
+ * what makes a login session single-use.
+ *
+ * There is no `expired` state. Expiry is a FAILURE REASON on `failed`,
+ * computed from `created_at` at read time — nothing in this project runs a
+ * background sweep, so a fifth state would be one nothing could ever write.
+ */
+export const loginSessions = sqliteTable("login_sessions", {
+ id: text("id").primaryKey(),
+ foundryVerificationId: text("foundry_verification_id"),
+ state: text("state", {
+  enum: ["pending", "verified", "consumed", "failed"],
+ })
+  .notNull()
+  .default("pending"),
+ openid4vpUri: text("openid4vp_uri"),
+ requestUri: text("request_uri"),
+ /**
+  * Recorded rather than inferred: `openid4vp_uri IS NULL` is ambiguous
+  * between a dc_api session and a foundry failure.
+  */
+ transport: text("transport", { enum: ["request_uri", "dc_api"] })
+  .notNull()
+  .default("request_uri"),
+ /** foundry's inline unsigned request object, verbatim. Only for dc_api. */
+ dcApiRequestJson: text("dc_api_request_json"),
+ /**
+  * Resolved by the gate when the state becomes `verified`; NULL before.
+  * `displayName` is deliberately NOT stored beside it — the claim re-reads
+  * it from `users`, so a name edited mid-flow cannot be served stale.
+  */
+ userId: text("user_id").references(() => users.id),
+ failureReason: text("failure_reason"),
+ createdAt: integer("created_at").notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Card = typeof cards.$inferSelect;
 export type Credential = typeof credentials.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
 export type CredentialState = Credential["state"];
+export type LoginSession = typeof loginSessions.$inferSelect;
+export type LoginSessionState = LoginSession["state"];

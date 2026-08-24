@@ -5,7 +5,14 @@ import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "./index.js";
-import { accounts, cards, credentials, transactions, users } from "./schema.js";
+import {
+  accounts,
+  cards,
+  credentials,
+  loginSessions,
+  transactions,
+  users,
+} from "./schema.js";
 import { seed } from "./seed.js";
 
 let dir: string;
@@ -315,5 +322,49 @@ describe("credentials shape", () => {
         .run();
     insert("cred_a");
     expect(() => insert("cred_b")).toThrow();
+  });
+});
+
+describe("login_sessions", () => {
+  it("defaults a new row to pending / request_uri with no user", () => {
+    db.insert(loginSessions)
+      .values({ id: "login_1", createdAt: 1000 })
+      .run();
+
+    const row = db.select().from(loginSessions).get();
+    expect(row?.state).toBe("pending");
+    expect(row?.transport).toBe("request_uri");
+    expect(row?.userId).toBeNull();
+    expect(row?.foundryVerificationId).toBeNull();
+    expect(row?.failureReason).toBeNull();
+  });
+
+  it("stores a resolved user and the dc_api transport", () => {
+    seed(db);
+    db.insert(loginSessions)
+      .values({
+        id: "login_2",
+        state: "verified",
+        transport: "dc_api",
+        userId: "user_anna",
+        dcApiRequestJson: '{"a":1}',
+        createdAt: 2000,
+      })
+      .run();
+
+    const row = db.select().from(loginSessions).get();
+    expect(row?.state).toBe("verified");
+    expect(row?.transport).toBe("dc_api");
+    expect(row?.userId).toBe("user_anna");
+    expect(row?.dcApiRequestJson).toBe('{"a":1}');
+  });
+
+  it("refuses a user_id that names no user", () => {
+    expect(() =>
+      db
+        .insert(loginSessions)
+        .values({ id: "login_3", userId: "nobody", createdAt: 3000 })
+        .run(),
+    ).toThrow();
   });
 });
