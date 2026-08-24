@@ -35,7 +35,15 @@ export default async function DashboardPage() {
   // Wero is payable, and `processPayment` resolves an account through a card, so
   // a Wero credential cannot be issued without one to hang the row on. No card,
   // no tile — rather than a tile whose button can only ever fail.
-  const weroCardId = cards[0]?.id;
+  const weroCard = cards[0];
+
+  /**
+   * Both faces print the account's IBAN, so the lookup is named once rather
+   * than written twice — the girocard and Wero are the same account rendered as
+   * two instruments, and a second copy of this could only ever drift.
+   */
+  const ibanFor = (accountId: string) =>
+    accounts.find((account) => account.id === accountId)?.iban;
 
   return (
     <>
@@ -56,34 +64,36 @@ export default async function DashboardPage() {
           ))}
         </section>
 
+        {/* Payment instruments, not cards: Wero is drawn on the account rather
+            than on a card, so the heading names what these do instead of what
+            they are. */}
         <section>
-          <h2 className="eyebrow">{t.dashboard.cards}</h2>
+          <h2 className="eyebrow">{t.dashboard.payments}</h2>
           <div className="mt-3 space-y-4">
             {cards.map((card) => (
               <CardTile
                 key={card.id}
                 card={card}
                 holder={session.displayName}
-                iban={
-                  accounts.find((account) => account.id === card.accountId)
-                    ?.iban
-                }
+                iban={ibanFor(card.accountId)}
                 locale={locale}
               />
             ))}
+            {weroCard ? (
+              <WeroCredentialTile
+                cardId={weroCard.id}
+                credentialState={wero.state}
+                holder={session.displayName}
+                iban={ibanFor(weroCard.accountId)}
+                locale={locale}
+              />
+            ) : null}
           </div>
         </section>
 
         <section>
           <h2 className="eyebrow">{t.dashboard.credentials}</h2>
           <div className="mt-3 space-y-4">
-            {weroCardId ? (
-              <WeroCredentialTile
-                cardId={weroCardId}
-                credentialState={wero.state}
-                locale={locale}
-              />
-            ) : null}
             <AgeCredentialTile
               credentialState={ageCredential.state}
               formats={ageCredential.formats}

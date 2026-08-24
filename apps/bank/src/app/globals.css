@@ -172,6 +172,21 @@ body {
 }
 
 /*
+ * A brand mark in that same free corner, for a face whose artwork does not
+ * print one of its own. Deliberately a sibling of .card-stars rather than a
+ * reuse of it: this one is present in every state, because it is branding and
+ * not a signal, and a class called "stars" holding a wordmark would be a lie.
+ *
+ * A card carries one or the other, never both — the corner only fits one.
+ */
+.card-brand {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  z-index: 10;
+}
+
+/*
  * The IBAN, which on this card takes the place a PAN would occupy. Set in mono
  * with tabular figures and grouped in fours by formatIban; the tracking is
  * looser than body text but tighter than the old PAN's, because 22 grouped
@@ -224,25 +239,71 @@ body {
 }
 
 /*
- * Wero's face. Like .card-object-av it overrides the image and the load-time
- * fallback colour — but unlike it, this one must also override `color`, and
- * that is load-bearing rather than cosmetic: .card-object sets `color: #fff`
- * for the girocard's white-on-red printing, EuStars draws in currentColor, and
- * white stars on #fdf494 are invisible. #1D1C1C is the wordmark's own tone, so
- * the stars match the artwork they sit on.
+ * Wero's face: a flat #fdf494 ground with the brand mark and the account's own
+ * details drawn over it, the way the girocard's face works.
  *
- * #fdf494 is both the fallback and the artwork's ground, so a missing asset
- * degrades to the right colour rather than a near-miss.
+ * `background-image: none` is REQUIRED and must never be dropped to "simplify"
+ * this rule. Omitting the property does not clear it — .card-object sets
+ * `url("/card-face.webp")`, so the girocard's photograph shows through under the
+ * yellow and the ground is not #fdf494 at all. That was a real defect, reported
+ * from a browser after exactly this property was removed as redundant.
  *
- * This face DOES draw .card-stars, where the age face does not: the wordmark is
- * placed left of centre precisely to leave that corner empty. The inherited
- * box-shadow stays --color-primary-tinted, as the age face's does — the mix is
- * 70% toward black, so it reads as a shadow rather than as Sparkasse red.
+ * This face used to carry a wero-face.svg whose wordmark sat left of centre —
+ * placed there so the EU stars had a free top-right corner. The wordmark now
+ * occupies that corner as a real element (.card-brand), so the artwork would
+ * only have printed it twice; the asset was deleted rather than left as a second
+ * source of truth for the same mark.
+ *
+ * `color` is overridden because .card-object sets #fff for the girocard's
+ * white-on-red printing, and white text on #fdf494 is invisible. #1d1c1c is the
+ * wordmark's own tone, so the IBAN and the holder match the mark above them.
+ *
+ * The box-shadow is overridden to a NEUTRAL near-black. The inherited one mixes
+ * --color-primary 70% toward black, which still casts red under a yellow card —
+ * Sparkasse red is the girocard's colour, not this instrument's. rgb(16 24 40)
+ * is the same ink the inherited contact shadow already uses, so the two layers
+ * agree rather than merely both being dark.
  */
 .card-object-wero {
   background-color: #fdf494;
-  background-image: url("/wero-face.svg");
+  background-image: none;
   color: #1d1c1c;
+  box-shadow:
+    0 1px 1px rgb(16 24 40 / 0.2),
+    0 18px 32px -18px rgb(16 24 40 / 0.55);
+}
+
+/*
+ * The not-yet-issued desaturation is dropped for this face alone.
+ *
+ * `filter: saturate(0.82)` is the second thing that stops the ground being
+ * #fdf494: it is applied to the rendered element, so it dulls the flat colour
+ * rather than sitting back a photograph the way it does on the girocard. This
+ * card's ground is a brand colour and must render as itself in every state.
+ *
+ * The affordance that filter provides — an inactive card reading as less
+ * present than an actionable one — is carried here by the badge and the button
+ * copy instead, which is where the age face already leaves it.
+ */
+.card-object-wero[data-state="none"] {
+  filter: none;
+}
+
+/*
+ * Both of these exist because .card-label and .card-iban are tuned for white
+ * printing on a dark red card, and this card is neither.
+ *
+ * .card-label's rgb(255 255 255 / 0.62) is invisible on #fdf494 — not merely
+ * low-contrast — so the same 0.62 weight is restated in the face's own ink.
+ * .card-iban's text-shadow lifts white type off a photograph; under dark type on
+ * a flat ground it only smears the glyphs.
+ */
+.card-object-wero .card-label {
+  color: rgb(29 28 28 / 0.62);
+}
+
+.card-object-wero .card-iban {
+  text-shadow: none;
 }
 
 /* ---------------------------------------------------------- the ledger ---- */

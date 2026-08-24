@@ -24,7 +24,7 @@ export const en: Messages = {
   },
   dashboard: {
     greeting: (name) => `Good day, ${name}`,
-    cards: "Cards",
+    payments: "Payments",
     credentials: "Credentials",
     recentTransactions: "Recent transactions",
     showAll: "Show all",

@@ -461,8 +461,9 @@ describe("startIssuance for Wero", () => {
     // on `ct.vct == "com.emvco.dpc.card"` and REJECTS them for anything else,
     // so sending them would turn every Wero issuance into a `failed` row rather
     // than a card missing its artwork. Wero's wallet appearance therefore comes
-    // entirely from foundry's own static `display:` config, and
-    // public/wero-face.svg is the bank's own UI artwork that no wallet sees.
+    // entirely from foundry's own static `display:` config, and the tile's own
+    // face — a flat ground plus public/wero-logo.svg — is the bank's UI, which
+    // no wallet ever sees.
     const sent = await sentFor("user_anna", "card_anna");
     expect(sent).not.toHaveProperty("offer_display");
     expect(sent).not.toHaveProperty("credential_response_display");

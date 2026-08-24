@@ -196,15 +196,43 @@ them without reading the linked reasoning first.
   `FLAVOUR` map: those exist on the other two tiles because two buttons can lie
   to each other about what the other issued, and there is no second button here.
 
-- **`.card-object-wero` must override `color`, and that is not cosmetic.**
-  `.card-object` sets `color: #fff` for the girocard's white-on-red printing and
-  `EuStars` draws in `currentColor`, so on `#fdf494` the twelve stars would be
-  invisible. `#1d1c1c` is the wordmark's own tone. This face *does* draw
-  `.card-stars`, unlike the age face — `public/wero-face.svg` places the
-  wordmark left of centre precisely so that corner is free. Verified by
-  rasterising the asset and sampling pixels: all four corners are exactly
-  `rgb(253,244,148)`, the wordmark's bounding box is x 40→224 / y 98→140 of 380×239,
-  and the star corner is clear ground.
+- **`.card-object-wero`'s overrides are corrections, not decoration.**
+  `.card-object` is tuned for white printing on dark red artwork, and Wero's face
+  is a flat `#fdf494` ground, so four of its declarations are wrong here rather
+  than merely off-key: `color: #fff` (invisible type), the `box-shadow`'s
+  `color-mix(--color-primary 70%, black)` (a **red** cast under a yellow card —
+  Sparkasse red is the girocard's colour, not this instrument's), `.card-label`'s
+  `rgb(255 255 255 / 0.62)` (invisible, not faint) and `.card-iban`'s
+  `text-shadow` (smears dark glyphs on a flat ground). The neutral shadow reuses
+  `rgb(16 24 40)`, the ink the inherited contact shadow already uses, so the two
+  layers agree rather than merely both being dark.
+
+- **A card face carries EU stars OR a brand mark, never both.** The corner fits
+  one. The girocard draws `.card-stars` there; Wero draws `.card-brand` — its
+  wordmark, `public/wero-logo.svg`, an `<img>` served verbatim because the file
+  carries two `<linearGradient>` ids that inlining would expose to collision. The
+  consequence is deliberate: a brand mark is present in *every* state, so Wero's
+  `active` is reported by the badge beside the tile alone, exactly as the age
+  credential's is. The age face has neither — its artwork prints its own wordmark
+  in that same corner.
+
+- **Wero's ground is `#fdf494` and nothing else, which takes TWO declarations
+  beyond the colour.** Both were defects reported from a browser, not
+  theory. `background-image: none` is required: omitting the property does not
+  clear it, and `.card-object` sets `url("/card-face.webp")`, so the girocard's
+  photograph shows through under the yellow. And
+  `.card-object-wero[data-state="none"]` must set `filter: none`, because the
+  shared `saturate(0.82)` sits back a *photograph* on the girocard but simply
+  dulls a flat brand colour here. The affordance that filter provided is carried
+  by the badge and the button copy instead — where the age face already leaves
+  it. There is no `wero-face.svg`: the deleted asset's wordmark would only have
+  printed the mark twice.
+
+- **The bank dashboard's first section is *Payments*, not *Cards*.** It holds the
+  girocard tiles and the Wero tile; *Credentials* holds the age attestation
+  alone. The catalog key was **renamed** `dashboard.cards` → `dashboard.payments`
+  rather than re-worded in place — a key called `cards` holding "Payments" is the
+  drift this catalog is strict about. en `Payments`, de `Zahlungsmittel`.
 
 - **The girocard is issued in TWO payment formats, and they share no claims.**
   `com.emvco.dpc.card` declares `{ credential_id, network, card_id }`;

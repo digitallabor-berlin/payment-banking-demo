@@ -24,7 +24,7 @@ export const de: Messages = {
   },
   dashboard: {
     greeting: (name) => `Guten Tag, ${name}`,
-    cards: "Karten",
+    payments: "Zahlungsmittel",
     credentials: "Nachweise",
     recentTransactions: "Letzte Umsätze",
     showAll: "Alle anzeigen",

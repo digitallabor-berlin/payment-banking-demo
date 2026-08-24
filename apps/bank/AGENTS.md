@@ -452,13 +452,46 @@ Sparkasse `--color-primary` (`#EA0016`). Nothing is drawn over it and it gets no
 `EuStars`: `.card-stars` is positioned top-right, exactly where the artwork
 prints its wordmark.
 
-The Wero face is `.card-object-wero` and overrides one thing more: `color`.
-`.card-object` sets `#fff` for the girocard's white-on-red printing and `EuStars`
-draws in `currentColor`, so white stars on `#fdf494` would be invisible —
-`#1d1c1c` is the wordmark's own tone. That override is what lets this face draw
-`.card-stars` where the AV face cannot: `public/wero-face.svg` places the
-wordmark left of centre (measured by rasterising it: box x 40→224, y 98→140 of
-380×239) so the top-right corner is clear ground.
+The Wero face is `.card-object-wero`: a flat `#fdf494` ground carrying the brand
+mark and the account's own details the way the girocard's face does. It overrides
+five things beyond the ground colour, and none of them is cosmetic:
+
+- **`background-image: none`**, which must never be dropped as redundant.
+  Omitting the property does **not** clear it — `.card-object` sets
+  `url("/card-face.webp")`, so the girocard's photograph shows through under the
+  yellow. Reported from a browser after exactly this property was removed.
+- **`filter: none` on `[data-state="none"]`**, because the shared
+  `saturate(0.82)` sits back a photograph on the girocard but merely dulls a flat
+  brand colour here. The "not yet issued reads as less present" affordance is
+  carried by the badge and the button copy instead, as it already is on the age
+  face.
+- `color`, because `.card-object` sets `#fff` for white-on-red printing and white
+  type on `#fdf494` is invisible. `#1d1c1c` is the wordmark's own tone.
+- the `box-shadow`, because the inherited one mixes `--color-primary` 70% toward
+  black and still casts **red** under a yellow card. Sparkasse red is the
+  girocard's colour, not this instrument's, so it is restated in a neutral
+  `rgb(16 24 40)` — the same ink the inherited contact shadow already uses, so
+  the two layers agree rather than merely both being dark.
+- `.card-label`'s colour and `.card-iban`'s `text-shadow`, scoped under the face.
+  Both are tuned for white type on a dark photograph: the label's
+  `rgb(255 255 255 / 0.62)` is *invisible* here rather than faint, and the
+  shadow smears dark glyphs on a flat ground.
+
+It draws **no** `.card-stars`. That corner holds `.card-brand` instead — the Wero
+wordmark, `public/wero-logo.svg`, served verbatim. A face carries one mark or the
+other, never both, because the corner fits one; and since the mark is branding
+rather than a signal it is present in every state, so `active` is reported by the
+badge beside the tile alone, exactly as on the AV face. `.card-brand` is a
+sibling of `.card-stars` rather than a reuse of it: a class called "stars"
+holding a wordmark would be a lie.
+
+The logo is an `<img>` rather than an inline component like `EuStars` or
+`SparkasseLogo`. Its source carries two `<linearGradient>` ids, and inlining it
+would put those ids in the document where a second instance could collide with
+them — the same served-verbatim treatment, for a related reason, as the Google
+Wallet badge. It is decorative (`alt=""`, `aria-hidden`): the tile's heading is
+already the credential's accessible name. Sized by height alone (`h-5 w-auto`),
+preserving the mark's own 3.22:1 proportions.
 
 ## Wero credential
 
@@ -481,8 +514,10 @@ its own tile, offered for the EUDI Wallet **only**.
 - **The row carries a card even though no Wero claim mentions one.** Wero is
   drawn on the account, but `processPayment` resolves the account *through* the
   card, so the row needs one. Consequently the tile renders only when the user
-  has a card — `cards[0]?.id` in `app/page.tsx` — rather than showing a button
-  that could only ever fail.
+  has a card — `cards[0]` in `app/page.tsx` — rather than showing a button that
+  could only ever fail. That same card supplies the IBAN its face prints, through
+  `ibanFor`, which is named once and used by both tiles so the girocard and Wero
+  cannot disagree about the account they are drawn on.
 - **`getWeroCredentialState` has no `formats` map.** The card and age DTOs carry
   one because two buttons can lie to each other about what the other issued.
   There is one button here, so there is nothing to disagree with. Same
@@ -490,14 +525,21 @@ its own tile, offered for the EUDI Wallet **only**.
 - **Never send `offer_display` or `credential_response_display`.** Same hard
   guard as `sparkassencard` and the age credential: `sendsDpcDisplayMetadata` is
   already false for it, and a test pins that per type rather than trusting the
-  negation, because the cost of getting it wrong is a `failed` row.
-  `public/wero-face.svg` is the bank's own UI artwork that the wallet never sees.
-- **The face is `.card-object-wero`, and it overrides `color` as well as the
-  image and fallback colour.** `.card-object` sets `color: #fff` and `EuStars`
-  draws in `currentColor`, so white stars on `#fdf494` would be invisible;
-  `#1d1c1c` is the wordmark's own tone. Unlike `.card-object-av` this face **does**
-  draw `.card-stars` — the wordmark is placed left of centre so the top-right
-  corner is free. Nothing else is drawn over it: no IBAN, no holder.
+  negation, because the cost of getting it wrong is a `failed` row. The tile's
+  face is the bank's own UI and no wallet ever sees it.
+- **The face draws the IBAN and the holder, and no EU stars.** See **Copy**
+  above for the four CSS overrides that requires — `color`, a neutral
+  `box-shadow`, `.card-label`'s colour and `.card-iban`'s `text-shadow` — each of
+  which exists because `.card-object` is tuned for white printing on dark red.
+  The top-right corner holds `.card-brand` (`public/wero-logo.svg`) where the
+  girocard holds `.card-stars`.
+- **It lives in the *Payments* section, beside the girocard, not in
+  *Credentials*.** Wero is a payment instrument; the age attestation is not, and
+  it now has that second section to itself. The heading is
+  `dashboard.payments` — renamed from `dashboard.cards` rather than merely
+  re-worded, because a key called `cards` holding "Payments" is exactly the drift
+  this catalog is strict about. **en `Payments`, de `Zahlungsmittel`**: one
+  heading has to cover a card and a credential drawn on the account itself.
 - **The heading is a hardcoded `"Wero"`.** A proper noun identical in both
   locales, so catalogueing it would trip `messages.test.ts`' no-leaf-identical-
   across-locales rule — the same reason `Sparkasse` and `EUDI Wallet` are
@@ -556,15 +598,15 @@ segment. Every load-bearing constraint below was a decision, not an accident:
   is statically prerendered now, which is what keeps a cookie-dependent
   `generateMetadata()` correct.
 - **The umlaut grep is not a sufficient check for leftover German.** It cannot
-  see `Anmelden`, `Karten`, `Girokonto` or `Im Wallet`, and it *does* match the
-  three deliberate umlaut-bearing comments (`layout.tsx`'s Fira Sans rationale,
-  and the `CardTile`/`AgeCredentialTile` notes on session-scoped
-  `Wird hinzugefügt…`). Exclude comment lines and enumerate capitalised literals
+  see `Anmelden`, `Zahlungsmittel`, `Girokonto` or `Im Wallet`, and it *does*
+  match the deliberate umlaut-bearing comments (`layout.tsx`'s Fira Sans
+  rationale, and the `CardTile` / `AgeCredentialTile` / `WeroCredentialTile`
+  notes on session-scoped `Wird hinzugefügt…`). Exclude comment lines and enumerate capitalised literals
   separately:
   `grep -rn '[äöüßÄÖÜ]' src --include=*.tsx | grep -vE ':[0-9]+:[[:space:]]*(\*|//|/\*)'`
 
 Strings that stay untranslated in both catalogs, and are therefore hardcoded in
-components rather than catalogued: `Sparkasse`, `Musterstadt`, `IBAN`,
+components rather than catalogued: `Sparkasse`, `Musterstadt`, `IBAN`, `Wero`,
 `EUDI Wallet`, and `anna / demo1234 · ben / demo1234` (that last one is data to
 type, not copy).
 
