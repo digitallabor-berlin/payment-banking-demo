@@ -40,6 +40,48 @@ export interface Messages {
           submitPending: string;
           demoLogins: string;
           failed: string;
+          /** The wallet button on the login screen. */
+          walletSubmit: string;
+          /** Separates the password form from the wallet button. */
+          walletDivider: string;
+     };
+     /**
+      * The wallet-login dialog.
+      *
+      * A block of its own rather than more keys under `login`, because it is a
+      * modal with its own lifecycle rather than more of the login form — the
+      * same reason `issuance` is separate from `credential`.
+      *
+      * The three failure strings are keyed by the `failure_reason` values
+      * `login-sessions.ts` writes, so a new reason there is a compile error
+      * here rather than a dialog that renders nothing.
+      */
+     walletLogin: {
+          title: string;
+          /** While DC API detection is unresolved. NOT the QR fallback. */
+          preparing: string;
+          approve: string;
+          confirmInApp: string;
+          openInWallet: string;
+          scanCode: string;
+          qrAlt: string;
+          waiting: string;
+          cancel: string;
+          close: string;
+          successTitle: string;
+          successBody: string;
+          failedTitle: string;
+          /** failure_reason `expired` */
+          expired: string;
+          /**
+           * failure_reason `unknown_credential` — a real, correctly-signed
+           * credential this bank cannot match to a customer. The commonest
+           * cause is a credential issued before the subject was persisted, so
+           * this copy must name the remedy: add it to the wallet again.
+           */
+          unknownCredential: string;
+          /** failure_reason `verification_failed` and `foundry_unavailable` */
+          verificationFailed: string;
      };
      dashboard: {
           greeting: (name: string) => string;
