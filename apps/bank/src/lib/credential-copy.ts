@@ -24,11 +24,15 @@ export type CredentialKind = "card" | "age";
 /**
  * One issuance conversation — a kind plus the wallet it targets.
  *
- * `card-google` exists because a dialog reading "Add card to EUDI Wallet" over
- * a handover the user started from a Google Wallet badge is simply wrong. There
- * is no `age-google`: the age tile offers one button.
+ * The `-google` flavours exist because a dialog reading "Add … to EUDI Wallet"
+ * over a handover the user started from a Google Wallet badge is simply wrong.
+ * Both tiles now offer both buttons, so both kinds have both flavours.
  */
-export type IssuanceFlavour = "card-eudi" | "card-google" | "age";
+export type IssuanceFlavour =
+  | "card-eudi"
+  | "card-google"
+  | "age-eudi"
+  | "age-google";
 
 /** The copy the issuance dialog needs, which differs by grammatical gender. */
 export interface IssuanceCopy {
@@ -84,8 +88,10 @@ export const FACE_COPY: Record<
       },
       active: {
         badge: "In wallet",
+        // Names no wallet, for the same reason the card's active state does not:
+        // the credential can arrive through either of the tile's two buttons.
         explain:
-          "Your age verification is in your EUDI Wallet and ready to use. You can add it again at any time.",
+          "Your age verification is in your wallet and ready to use. You can add it again at any time.",
       },
     },
   },
@@ -119,7 +125,7 @@ export const FACE_COPY: Record<
       active: {
         badge: "Im Wallet",
         explain:
-          "Ihr Altersnachweis ist in Ihrem EUDI Wallet und einsatzbereit. Sie können ihn jederzeit erneut hinzufügen.",
+          "Ihr Altersnachweis ist in Ihrem Wallet und einsatzbereit. Sie können ihn jederzeit erneut hinzufügen.",
       },
     },
   },
@@ -151,10 +157,18 @@ export const DIALOG_COPY: Record<
       successBody: "Your card is now in your wallet.",
       failureBody: "The card could not be added.",
     },
-    age: {
+    "age-eudi": {
       title: "Add age verification to EUDI Wallet",
       successTitle: "Age verification added",
       successBody: "Your age verification is now in your EUDI Wallet.",
+      failureBody: "The age verification could not be added.",
+    },
+    "age-google": {
+      title: "Add age verification to Google Wallet",
+      successTitle: "Age verification added",
+      // Names no wallet, exactly as card-google does not: the bank cannot
+      // observe which app answered the offer.
+      successBody: "Your age verification is now in your wallet.",
       failureBody: "The age verification could not be added.",
     },
   },
@@ -171,10 +185,16 @@ export const DIALOG_COPY: Record<
       successBody: "Ihre Karte ist jetzt in Ihrem Wallet.",
       failureBody: "Die Karte konnte nicht hinzugefügt werden.",
     },
-    age: {
+    "age-eudi": {
       title: "Altersnachweis zum EUDI Wallet hinzufügen",
       successTitle: "Altersnachweis hinzugefügt",
       successBody: "Ihr Altersnachweis ist jetzt in Ihrem EUDI Wallet.",
+      failureBody: "Der Altersnachweis konnte nicht hinzugefügt werden.",
+    },
+    "age-google": {
+      title: "Altersnachweis zu Google Wallet hinzufügen",
+      successTitle: "Altersnachweis hinzugefügt",
+      successBody: "Ihr Altersnachweis ist jetzt in Ihrem Wallet.",
       failureBody: "Der Altersnachweis konnte nicht hinzugefügt werden.",
     },
   },

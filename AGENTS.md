@@ -53,8 +53,19 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**460 tests** (251 bank + 167 merchant + 11 foundry-client + 31 ui), measured
-2026-08-21.
+**489 tests** (280 bank + 167 merchant + 11 foundry-client + 31 ui), measured
+2026-08-24.
+
+That was **460** before the two-age-format work, which added 29, all in
+`apps/bank`: +8 in `credential-types.test.ts` (the new `av` id and
+`isAgeCredentialType`), +9 in `av-issuance.test.ts`, +8 in `queries.test.ts`
+(a `getAgeCredentialState per format` block), and only +4 net in
+`credential-copy.test.ts` — that file gained seven `age-google` assertions but
+lost three, because two existing single-kind tests became loops over both kinds
+once the age copy stopped naming a wallet, and the age-dialog tests were re-keyed
+rather than duplicated. Existing tests changed rather than being added: every
+`getAgeCredentialState` DTO assertion gained `formats`, and the age active
+`explain` no longer names EUDI Wallet. No plan; the work was a bounded request.
 
 That was **405** before the two-card-format work, which added 55, all in
 `apps/bank`: 11 in the new `credential-types.test.ts`, 12 in the new
@@ -179,16 +190,19 @@ them without reading the linked reasoning first.
 
 - **The copy maps are keyed by what the copy varies with, NOT by credential type
   id.** `FACE_COPY` is keyed by `CredentialKind` (`card | age`) because one tile
-  shows one badge for both card formats; `DIALOG_COPY` is keyed by
-  `IssuanceFlavour` (`card-eudi | card-google | age`) because a dialog reading
-  "Add card to EUDI Wallet" over a handover started from a Google Wallet badge
-  is a visible defect. Keying either by type id would duplicate every card
-  string in both locales and let the two formats drift. The card's `active`
-  explain deliberately no longer names a wallet, for the same reason.
+  shows one badge for all of its formats; `DIALOG_COPY` is keyed by
+  `IssuanceFlavour` (`card-eudi | card-google | age-eudi | age-google`) because
+  a dialog reading "Add card to EUDI Wallet" over a handover started from a
+  Google Wallet badge is a visible defect. Keying either by type id would
+  duplicate every string in both locales and let the formats drift. **Neither**
+  credential's `active` explain names a wallet, for the same reason — each can
+  arrive through either of its tile's two buttons.
 
 - **The Google Wallet badge has no "add again" state.** It is Google's artwork
   and its text is drawn as SVG paths, so `walletActionLabel`'s three-way choice
-  has nowhere to render. `AddToGoogleWalletButton` is a sibling of
+  has nowhere to render. Both tiles carry one, so both have a format whose
+  button cannot report its own state; the tile's badge beside it is what does.
+  `AddToGoogleWalletButton` is a sibling of
   `AddToWalletButton` rather than a `variant` on it: that component's contract
   is a resolved `label` *string* inside `.btn.btn-primary`, and this one's
   `label` is the accessible name only (`aria-label` plus the image's `alt`).
@@ -202,23 +216,43 @@ them without reading the linked reasoning first.
   that is not a *payment* row with a card — three independent ways, one of which
   is that SQL never matches `credential_id = <string>` against NULL. That guard
   is `isPaymentCredentialType`, not a comparison against one id: widening it to
-  admit `sparkassencard` was the point, and a legacy `av` row is still refused
-  even though the column can hold it.
+  admit `sparkassencard` was the point, and both age formats are still refused
+  even though the column holds them.
 
-- **`credential_type_id` for age verification is `av-sparkasse`.** Not
-  `eu.europa.ec.av.1` — that is the mdoc docType configured on foundry's side,
-  not the id the admin API takes. It was `av` until the two card formats landed;
-  the old value stays in the schema enum so a pre-existing row still reads back,
-  but nothing issues it and `getAgeCredentialState` does not match it, so a
-  legacy row reads as "not in wallet" and the tile offers to add it again.
+- **The age credential is issued in TWO formats, and they share ALL their
+  claims.** `av-sparkasse` is the EUDI button's format; `av` is the Google
+  Wallet badge's. Neither is `eu.europa.ec.av.1` — that is the mdoc docType
+  configured on foundry's side, not an id the admin API takes. Unlike the two
+  card formats, which share no claims at all, these two send byte-identical
+  `AV_CLAIMS`: they are one attestation in two wrappers, which is why there is
+  no age equivalent of `payment-claims.ts` and why `startAvIssuance` takes the
+  type as a parameter rather than branching on it. `isAgeCredentialType` is the
+  predicate, deliberately disjoint from `isPaymentCredentialType` — an id
+  answering true to both would let an age attestation authorize a debit.
+
+- **`av` is no longer a legacy spelling — it is a live format.** It used to be
+  the pre-`av-sparkasse` id that nothing issued and `getAgeCredentialState`
+  ignored, so a leftover row read as "not in wallet". It now resolves as the
+  Google Wallet format, so a **pre-existing `av` row reads as in-wallet**. That
+  is a visible behaviour change on old data, and it is correct: the row does
+  describe an age credential in a wallet.
+
+- **The age tile's two buttons need per-format state, for the same reason the
+  card's do.** `AgeCredentialDto.formats` is a
+  `Record<AgeCredentialTypeId, CardCredentialState>` alongside the combined
+  `state`. Both come from `pickLiveCredential`/`stateOf` applied at two scopes,
+  exactly as `listCards` does it — not from a second rule for combining
+  per-format answers. The combined state is what the badge and the face draw:
+  the credential is in a wallet, and the face has no opinion about which one.
+  That is also why the age tile's `active` explain stopped naming EUDI Wallet.
 
 - **Issuance is repeatable, and an `active` row outranks a newer `offered`
   one.** Nothing behind the UI ever forbade a second issuance — neither route
   guards on state, and both `startIssuance` and `startAvIssuance` just insert
   another row — so the bank offers "add again" on a credential that is already
-  in the wallet. The two card formats are independent under this rule: neither
-  supersedes the other, and `CardDto.formats` is what keeps their buttons from
-  claiming credit for each other's work. `pickLiveCredential` in `lib/queries.ts` is what makes that
+  in the wallet. A credential's formats are independent under this rule: neither
+  supersedes the other, and `CardDto.formats` / `AgeCredentialDto.formats` are
+  what keep their buttons from claiming credit for each other's work. `pickLiveCredential` in `lib/queries.ts` is what makes that
   safe: the plain "newest non-failed row wins" rule it replaced meant one
   abandoned re-issue wrote an `offered` row that outranked the `active` one
   *forever* (nothing in this project clears an offered row), and the tile then
@@ -235,23 +269,21 @@ them without reading the linked reasoning first.
   disagree about the wording. It governs the EUDI button only — see the Google
   Wallet badge bullet above for why the badge has no label to choose.
 
-- **No foundry config declares an `av` credential type**, so the bank's
-  age-credential happy path has never run. Verified 2026-08-20 against a
-  freshly restarted local foundry: HTTP **400**,
-  `{"error":"unknown credential_type_id 'av'"}`. Adding the type is the
-  operator's task. Note the local config's *named queries* already reference
-  `av`, which makes the omission easy to misread as present.
+- **Note the local foundry config's *named queries* already reference `av`**,
+  which makes its absence as a *credential type* easy to misread as present.
+  They are different registries; a named query naming `av` does not declare it.
 
-- **Neither `sparkassencard` nor `av-sparkasse` is declared by any foundry
-  config either.** Verified 2026-08-21 against the running local foundry with
-  the exact payload the bank sends: both are HTTP **400**,
-  `{"error":"unknown credential_type_id '<id>'"}`. So the bank's Sparkasse-card
-  and age happy paths have never run, and a real attempt degrades to a visible
-  `failed` row — confirmed in the dev database. `com.emvco.dpc.card` IS declared
-  and its issuance was verified end-to-end the same day: HTTP 200, a real
-  `openid-credential-offer://` deep link, and the display metadata echoed back
-  in `credential_offer.display`. Adding the two missing types is the operator's
-  task.
+- **None of `sparkassencard`, `av-sparkasse` or `av` is declared by any foundry
+  config.** Verified 2026-08-21 for the first two and 2026-08-24 for all three,
+  against the running local foundry with the exact payload the bank sends: each
+  is HTTP **400**, `{"error":"unknown credential_type_id '<id>'"}`. So the
+  bank's Sparkasse-card and both age happy paths have never run, and a real
+  attempt degrades to a visible `failed` row — confirmed in the dev database,
+  where clicking each of the age tile's two buttons wrote one `failed` row of
+  the matching type. `com.emvco.dpc.card` IS declared and its issuance was
+  verified end-to-end: HTTP 200, a real `openid-credential-offer://` deep link,
+  and the display metadata echoed back in `credential_offer.display`. Adding the
+  three missing types is the operator's task.
 
 - **The merchant cannot request a `sparkassencard` presentation.**
   `selectNamedQuery` resolves foundry's `dpc` / `dpc_av` named queries, which

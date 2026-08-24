@@ -72,6 +72,7 @@ export default async function DashboardPage() {
           <div className="mt-3 space-y-4">
             <AgeCredentialTile
               credentialState={ageCredential.state}
+              formats={ageCredential.formats}
               locale={locale}
             />
           </div>

@@ -29,16 +29,41 @@ export const SPARKASSEN_CARD_CREDENTIAL_TYPE_ID =
  "sparkassencard" satisfies CredentialTypeId;
 
 /**
- * The age-verification attestation. NOT `eu.europa.ec.av.1` — that is the mdoc
- * docType configured on foundry's side; this is the credential type id the
- * admin API takes.
+ * The age-verification attestation, in the bank's own format. NOT
+ * `eu.europa.ec.av.1` — that is the mdoc docType configured on foundry's side;
+ * this is the credential type id the admin API takes.
  *
- * It was `av` until the two card formats landed. The old value survives in the
- * schema enum so a pre-existing row still reads back, but nothing issues it any
- * more and `getAgeCredentialState` does not match it — a legacy row simply
- * reads as "not in wallet", and the tile offers to add the credential again.
+ * The age tile's EUDI Wallet button issues this one.
  */
 export const AV_CREDENTIAL_TYPE_ID = "av-sparkasse" satisfies CredentialTypeId;
+
+/**
+ * The same age attestation, in the profile the Google Wallet badge hands over.
+ *
+ * This is the bare `av` id — the value the age credential was issued under
+ * before `av-sparkasse` existed. It is no longer a legacy spelling: it is a
+ * second live format alongside it, carrying the identical `AV_CLAIMS`, which is
+ * why `getAgeCredentialState` now resolves it instead of ignoring it. A
+ * pre-existing `av` row therefore reads as in-wallet in this format, where it
+ * previously read as "not in wallet".
+ */
+export const AV_GOOGLE_CREDENTIAL_TYPE_ID = "av" satisfies CredentialTypeId;
+
+/**
+ * The age-credential formats, in the order the age tile presents them: the
+ * bank's own EUDI button first, the Google Wallet badge second.
+ *
+ * Two formats for the same reason the girocard has two — one handover per
+ * wallet — but unlike the card these share their entire claim set, so there is
+ * no per-format claims module here. What they do NOT share is tile state: see
+ * `AgeCredentialDto.formats`.
+ */
+export const AGE_CREDENTIAL_TYPE_IDS = [
+ AV_CREDENTIAL_TYPE_ID,
+ AV_GOOGLE_CREDENTIAL_TYPE_ID,
+] as const;
+
+export type AgeCredentialTypeId = (typeof AGE_CREDENTIAL_TYPE_IDS)[number];
 
 /**
  * The credential types that authorize money to move, in the order the card tile
@@ -67,6 +92,20 @@ export function isPaymentCredentialType(
  typeId: string,
 ): typeId is PaymentCredentialTypeId {
  return (PAYMENT_CREDENTIAL_TYPE_IDS as readonly string[]).includes(typeId);
+}
+
+/**
+ * Whether a value names one of the age-credential formats.
+ *
+ * The sibling of `isPaymentCredentialType`, and deliberately disjoint from it:
+ * this one gates an attestation about a person, that one gates money moving.
+ * Takes a plain `string` for the same reason — its caller is the AV issuance
+ * route, validating a value that arrived over HTTP.
+ */
+export function isAgeCredentialType(
+ typeId: string,
+): typeId is AgeCredentialTypeId {
+ return (AGE_CREDENTIAL_TYPE_IDS as readonly string[]).includes(typeId);
 }
 
 /**

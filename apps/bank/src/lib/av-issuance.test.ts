@@ -8,6 +8,7 @@ import { createDb, type Db } from "../db/index.js";
 import { credentials } from "../db/schema.js";
 import { seed } from "../db/seed.js";
 import { startAvIssuance } from "./av-issuance.js";
+import { AGE_CREDENTIAL_TYPE_IDS } from "./credential-types.js";
 
 let dir: string;
 let db: Db;
@@ -53,21 +54,35 @@ function stubClient(
   });
 }
 
-const offerOk = {
-  status: 200,
-  body: {
-    transaction_id: "tx_av_1",
-    credential_offer_uri: "openid-credential-offer://?av=1",
-    dc_api_offer: {
-      credential_issuer: "https://foundry.example",
-      credential_configuration_ids: ["av-sparkasse"],
+function offerOkFor(typeId: string) {
+  return {
+    status: 200,
+    body: {
+      transaction_id: "tx_av_1",
+      credential_offer_uri: "openid-credential-offer://?av=1",
+      dc_api_offer: {
+        credential_issuer: "https://foundry.example",
+        credential_configuration_ids: [typeId],
+      },
     },
-  },
-};
+  };
+}
 
-describe("startAvIssuance", () => {
+/**
+ * Every assertion here holds for BOTH age formats, which is the point: the two
+ * differ only in the id sent to foundry, so parametrizing is what states that
+ * rather than leaving the Google path to a single spot check.
+ */
+describe.each(AGE_CREDENTIAL_TYPE_IDS)("startAvIssuance (%s)", (typeId) => {
+  const offerOk = offerOkFor(typeId);
+
   it("returns the offer URI and the DC API rendering of the same offer", async () => {
-    const result = await startAvIssuance(db, stubClient([], offerOk), "user_anna");
+    const result = await startAvIssuance(
+      db,
+      stubClient([], offerOk),
+      "user_anna",
+      typeId,
+    );
     expect(result).toEqual({
       ok: true,
       sessionId: expect.any(String),
@@ -76,16 +91,26 @@ describe("startAvIssuance", () => {
     });
   });
 
-  it("asks foundry for credential_type_id 'av-sparkasse'", async () => {
+  it("asks foundry for the credential_type_id it was given", async () => {
     const captures: Capture[] = [];
-    await startAvIssuance(db, stubClient(captures, offerOk), "user_anna");
+    await startAvIssuance(
+      db,
+      stubClient(captures, offerOk),
+      "user_anna",
+      typeId,
+    );
     expect(captures).toHaveLength(1);
-    expect(captures[0]?.body.credential_type_id).toBe("av-sparkasse");
+    expect(captures[0]?.body.credential_type_id).toBe(typeId);
   });
 
   it("sends exactly the two age booleans and nothing else", async () => {
     const captures: Capture[] = [];
-    await startAvIssuance(db, stubClient(captures, offerOk), "user_anna");
+    await startAvIssuance(
+      db,
+      stubClient(captures, offerOk),
+      "user_anna",
+      typeId,
+    );
     expect(captures[0]?.body.claims).toEqual({
       age_over_16: true,
       age_over_18: true,
@@ -97,13 +122,23 @@ describe("startAvIssuance", () => {
     // DPC's (create_offer.rs). Sending them would turn every AV issuance into
     // a failed row, so their absence is a requirement, not a tidiness point.
     const captures: Capture[] = [];
-    await startAvIssuance(db, stubClient(captures, offerOk), "user_anna");
+    await startAvIssuance(
+      db,
+      stubClient(captures, offerOk),
+      "user_anna",
+      typeId,
+    );
     expect(captures[0]?.body).not.toHaveProperty("offer_display");
     expect(captures[0]?.body).not.toHaveProperty("credential_response_display");
   });
 
-  it("writes an offered row with no card, no join key, and the av type", async () => {
-    const result = await startAvIssuance(db, stubClient([], offerOk), "user_anna");
+  it("writes an offered row with no card, no join key, and this format's type", async () => {
+    const result = await startAvIssuance(
+      db,
+      stubClient([], offerOk),
+      "user_anna",
+      typeId,
+    );
     if (!result.ok) throw new Error("expected the offer to succeed");
     const row = db
       .select()
@@ -113,13 +148,18 @@ describe("startAvIssuance", () => {
     expect(row?.userId).toBe("user_anna");
     expect(row?.cardId).toBeNull();
     expect(row?.credentialId).toBeNull();
-    expect(row?.credentialTypeId).toBe("av-sparkasse");
+    expect(row?.credentialTypeId).toBe(typeId);
     expect(row?.state).toBe("offered");
     expect(row?.issuedAt).toBeNull();
   });
 
   it("stores foundry's transaction id on the row", async () => {
-    const result = await startAvIssuance(db, stubClient([], offerOk), "user_anna");
+    const result = await startAvIssuance(
+      db,
+      stubClient([], offerOk),
+      "user_anna",
+      typeId,
+    );
     if (!result.ok) throw new Error("expected the offer to succeed");
     const row = db
       .select()
@@ -130,16 +170,59 @@ describe("startAvIssuance", () => {
   });
 
   it("leaves a failed row when foundry rejects the offer", async () => {
-    // The state a foundry with no `av-sparkasse` credential type configured produces.
+    // The state a foundry with neither age credential type configured produces
+    // — which, as of 2026-08-21, is every foundry config there is.
     const result = await startAvIssuance(
       db,
-      stubClient([], { status: 400, body: { error: "unknown_credential_type" } }),
+      stubClient([], {
+        status: 400,
+        body: { error: "unknown_credential_type" },
+      }),
       "user_anna",
+      typeId,
     );
     expect(result).toEqual({ ok: false, reason: "foundry_unavailable" });
     const rows = db.select().from(credentials).all();
     expect(rows).toHaveLength(1);
     expect(rows[0]?.state).toBe("failed");
+    expect(rows[0]?.credentialTypeId).toBe(typeId);
     expect(rows[0]?.foundryTxId).toBeNull();
+  });
+});
+
+describe("startAvIssuance across formats", () => {
+  it("sends byte-identical claims for both formats", async () => {
+    // A cross-format invariant no parametrized test can state: the two are the
+    // same attestation in two wrappers, so a claim added to one and not the
+    // other would mean the user's age reads differently per wallet.
+    const captures: Capture[] = [];
+    for (const typeId of AGE_CREDENTIAL_TYPE_IDS) {
+      await startAvIssuance(
+        db,
+        stubClient(captures, offerOkFor(typeId)),
+        "user_anna",
+        typeId,
+      );
+    }
+    expect(captures).toHaveLength(2);
+    expect(captures[0]?.body.claims).toEqual(captures[1]?.body.claims);
+    expect(captures[0]?.body.credential_type_id).not.toBe(
+      captures[1]?.body.credential_type_id,
+    );
+  });
+
+  it("writes one row per format, so neither supersedes the other", async () => {
+    for (const typeId of AGE_CREDENTIAL_TYPE_IDS) {
+      await startAvIssuance(
+        db,
+        stubClient([], offerOkFor(typeId)),
+        "user_anna",
+        typeId,
+      );
+    }
+    const rows = db.select().from(credentials).all();
+    expect(rows.map((row) => row.credentialTypeId).sort()).toEqual(
+      [...AGE_CREDENTIAL_TYPE_IDS].sort(),
+    );
   });
 });

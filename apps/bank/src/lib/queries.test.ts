@@ -6,10 +6,17 @@ import { createDb, type Db } from "../db/index.js";
 import { credentials, transactions } from "../db/schema.js";
 import { seed } from "../db/seed.js";
 import {
+  AGE_CREDENTIAL_TYPE_IDS,
+  AV_CREDENTIAL_TYPE_ID,
+  AV_GOOGLE_CREDENTIAL_TYPE_ID,
+  type AgeCredentialTypeId,
+} from "./credential-types.js";
+import {
   getAgeCredentialState,
   listAccounts,
   listCards,
   listTransactions,
+  type CardCredentialState,
 } from "./queries.js";
 
 let dir: string;
@@ -350,75 +357,87 @@ describe("listTransactions", () => {
   });
 });
 
-describe("getAgeCredentialState", () => {
-  /** Inserts an age-credential row; `state` and `createdAt` are what vary. */
-  function insertAv(
-    id: string,
-    state: "offered" | "active" | "failed",
-    createdAt: number,
-    userId = "user_anna",
-  ) {
-    db.insert(credentials)
-      .values({
-        id,
-        userId,
-        cardId: null,
-        credentialTypeId: "av-sparkasse",
-        credentialId: null,
-        state,
-        issuedAt: state === "active" ? createdAt : null,
-        createdAt,
-      })
-      .run();
-  }
+/** Both age formats absent, for spreading into an expected DTO. */
+const NO_AGE_FORMATS: Record<AgeCredentialTypeId, CardCredentialState> = {
+  [AV_CREDENTIAL_TYPE_ID]: "none",
+  [AV_GOOGLE_CREDENTIAL_TYPE_ID]: "none",
+};
 
+/** Inserts an age-credential row; type, state and createdAt are what vary. */
+function insertAv(
+  db: Db,
+  id: string,
+  state: "offered" | "active" | "failed",
+  createdAt: number,
+  userId = "user_anna",
+  credentialTypeId: AgeCredentialTypeId = AV_CREDENTIAL_TYPE_ID,
+) {
+  db.insert(credentials)
+    .values({
+      id,
+      userId,
+      cardId: null,
+      credentialTypeId,
+      credentialId: null,
+      state,
+      issuedAt: state === "active" ? createdAt : null,
+      createdAt,
+    })
+    .run();
+}
+
+describe("getAgeCredentialState", () => {
   it("reports 'none' when the user has no age credential", () => {
     expect(getAgeCredentialState(db, "user_anna")).toEqual({
       state: "none",
       credentialRowId: null,
+      formats: NO_AGE_FORMATS,
     });
   });
 
   it("reports 'offered' for an open offer", () => {
-    insertAv("av_1", "offered", 10);
+    insertAv(db, "av_1", "offered", 10);
     expect(getAgeCredentialState(db, "user_anna")).toEqual({
       state: "offered",
       credentialRowId: "av_1",
+      formats: { ...NO_AGE_FORMATS, [AV_CREDENTIAL_TYPE_ID]: "offered" },
     });
   });
 
   it("reports 'active' once the credential is issued", () => {
-    insertAv("av_1", "active", 10);
+    insertAv(db, "av_1", "active", 10);
     expect(getAgeCredentialState(db, "user_anna")).toEqual({
       state: "active",
       credentialRowId: "av_1",
+      formats: { ...NO_AGE_FORMATS, [AV_CREDENTIAL_TYPE_ID]: "active" },
     });
   });
 
   // Same correction as listCards, for the same reason: an abandoned re-issue
   // must not make an issued age credential look absent.
   it("does not let a newer offer mask a credential already in the wallet", () => {
-    insertAv("av_old", "active", 10);
-    insertAv("av_new", "offered", 20);
-    expect(getAgeCredentialState(db, "user_anna")).toEqual({
-      state: "active",
-      credentialRowId: "av_old",
-    });
+    insertAv(db, "av_old", "active", 10);
+    insertAv(db, "av_new", "offered", 20);
+    expect(getAgeCredentialState(db, "user_anna").state).toBe("active");
+    expect(getAgeCredentialState(db, "user_anna").credentialRowId).toBe(
+      "av_old",
+    );
   });
 
   it("prefers the newest row within one state, so a re-issue does supersede", () => {
-    insertAv("av_first", "active", 10);
-    insertAv("av_second", "active", 20);
+    insertAv(db, "av_first", "active", 10);
+    insertAv(db, "av_second", "active", 20);
     expect(getAgeCredentialState(db, "user_anna").credentialRowId).toBe(
       "av_second",
     );
   });
 
   it("ignores failed rows", () => {
-    insertAv("av_failed", "failed", 30);
+    insertAv(db, "av_failed", "failed", 30);
     expect(getAgeCredentialState(db, "user_anna")).toEqual({
       state: "none",
       credentialRowId: null,
+      formats: NO_AGE_FORMATS,
     });
   });
 
@@ -437,12 +456,126 @@ describe("getAgeCredentialState", () => {
     expect(getAgeCredentialState(db, "user_anna")).toEqual({
       state: "none",
       credentialRowId: null,
+      formats: NO_AGE_FORMATS,
     });
   });
 
   it("never reports another user's age credential", () => {
-    insertAv("av_ben", "active", 10, "user_ben");
+    insertAv(db, "av_ben", "active", 10, "user_ben");
     expect(getAgeCredentialState(db, "user_anna").state).toBe("none");
     expect(getAgeCredentialState(db, "user_ben").state).toBe("active");
+  });
+});
+
+describe("getAgeCredentialState per format", () => {
+  it("reports 'none' for both formats when nothing has been issued", () => {
+    expect(getAgeCredentialState(db, "user_anna").formats).toEqual(
+      NO_AGE_FORMATS,
+    );
+  });
+
+  it("does not report the other format as issued when one is", () => {
+    // The whole reason this field exists: the tile's two buttons must not claim
+    // credit for each other's work.
+    insertAv(db, "av_eudi", "active", 10, "user_anna", AV_CREDENTIAL_TYPE_ID);
+    expect(getAgeCredentialState(db, "user_anna").formats).toEqual({
+      ...NO_AGE_FORMATS,
+      [AV_CREDENTIAL_TYPE_ID]: "active",
+    });
+  });
+
+  it("resolves the Google Wallet format, which used to read as 'none'", () => {
+    // A bare `av` row was ignored entirely until this format became live, so a
+    // pre-existing one now correctly reads as in-wallet in the Google format.
+    insertAv(
+      db,
+      "av_google",
+      "active",
+      10,
+      "user_anna",
+      AV_GOOGLE_CREDENTIAL_TYPE_ID,
+    );
+    const dto = getAgeCredentialState(db, "user_anna");
+    expect(dto.formats).toEqual({
+      ...NO_AGE_FORMATS,
+      [AV_GOOGLE_CREDENTIAL_TYPE_ID]: "active",
+    });
+    expect(dto.state).toBe("active");
+  });
+
+  it("reports both when the credential is in a wallet twice", () => {
+    insertAv(db, "av_eudi", "active", 10, "user_anna", AV_CREDENTIAL_TYPE_ID);
+    insertAv(
+      db,
+      "av_google",
+      "offered",
+      20,
+      "user_anna",
+      AV_GOOGLE_CREDENTIAL_TYPE_ID,
+    );
+    expect(getAgeCredentialState(db, "user_anna").formats).toEqual({
+      [AV_CREDENTIAL_TYPE_ID]: "active",
+      [AV_GOOGLE_CREDENTIAL_TYPE_ID]: "offered",
+    });
+  });
+
+  it("applies 'active outranks offered' within a format, not across formats", () => {
+    // A newer abandoned EUDI offer must not demote the EUDI format's own active
+    // row, and must not touch the Google format's answer at all.
+    insertAv(db, "av_e_live", "active", 10, "user_anna", AV_CREDENTIAL_TYPE_ID);
+    insertAv(
+      db,
+      "av_e_open",
+      "offered",
+      30,
+      "user_anna",
+      AV_CREDENTIAL_TYPE_ID,
+    );
+    insertAv(
+      db,
+      "av_g_open",
+      "offered",
+      20,
+      "user_anna",
+      AV_GOOGLE_CREDENTIAL_TYPE_ID,
+    );
+    expect(getAgeCredentialState(db, "user_anna").formats).toEqual({
+      [AV_CREDENTIAL_TYPE_ID]: "active",
+      [AV_GOOGLE_CREDENTIAL_TYPE_ID]: "offered",
+    });
+  });
+
+  it("keys the record by exactly the two age formats", () => {
+    expect(
+      Object.keys(getAgeCredentialState(db, "user_anna").formats).sort(),
+    ).toEqual([...AGE_CREDENTIAL_TYPE_IDS].sort());
+  });
+
+  it("reports the combined state as live when either format is", () => {
+    // The tile's badge and face describe the credential, not a format — it is
+    // in a wallet, and the face has no opinion about which one.
+    insertAv(
+      db,
+      "av_google",
+      "offered",
+      10,
+      "user_anna",
+      AV_GOOGLE_CREDENTIAL_TYPE_ID,
+    );
+    expect(getAgeCredentialState(db, "user_anna").state).toBe("offered");
+  });
+
+  it("never mixes another user's formats in", () => {
+    insertAv(
+      db,
+      "av_ben",
+      "active",
+      10,
+      "user_ben",
+      AV_GOOGLE_CREDENTIAL_TYPE_ID,
+    );
+    expect(getAgeCredentialState(db, "user_anna").formats).toEqual(
+      NO_AGE_FORMATS,
+    );
   });
 });

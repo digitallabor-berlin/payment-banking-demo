@@ -2,8 +2,9 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import { accounts, cards, credentials, transactions } from "../db/schema.js";
 import {
-  AV_CREDENTIAL_TYPE_ID,
+  AGE_CREDENTIAL_TYPE_IDS,
   PAYMENT_CREDENTIAL_TYPE_IDS,
+  type AgeCredentialTypeId,
   type PaymentCredentialTypeId,
 } from "./credential-types.js";
 
@@ -42,8 +43,20 @@ export interface CardDto {
 }
 
 export interface AgeCredentialDto {
+  /**
+   * The credential's state across BOTH its formats — what the tile's badge and
+   * face draw. It is in a wallet or it is not; which wallet received it is not
+   * something the face has an opinion about.
+   */
   state: CardCredentialState;
   credentialRowId: string | null;
+  /**
+   * The same question asked per format, which is what each of the tile's two
+   * wallet buttons needs. Exactly `CardDto.formats`' reason for existing:
+   * without it, adding the credential through one button flips the other's
+   * label to "add again" for a format that was never issued.
+   */
+  formats: Record<AgeCredentialTypeId, CardCredentialState>;
 }
 
 export interface TransactionDto {
@@ -166,35 +179,45 @@ export function listCards(db: Db, userId: string): CardDto[] {
  * The user's age-verification credential, if any. One per user: there is no
  * per-card scoping because there is no card behind it.
  *
- * Same rule as `listCards`, through the same helper: a live credential
- * outranks an open offer, the newest wins within a state, and a failed attempt
- * is not a credential.
+ * Same rule as `listCards`, through the same two helpers, at the same two
+ * scopes: a live credential outranks an open offer, the newest wins within a
+ * state, a failed attempt is not a credential, and the combined answer is that
+ * rule asked of every format's rows rather than derived from the per-format
+ * answers.
+ *
+ * Both age formats are matched, so a bare `av` row — which this function
+ * deliberately ignored while `av` was merely a legacy spelling — now resolves
+ * as the Google Wallet format.
  */
 export function getAgeCredentialState(
   db: Db,
   userId: string,
 ): AgeCredentialDto {
-  const credential = pickLiveCredential(
-    db
-      .select()
-      .from(credentials)
-      .where(
-        and(
-          eq(credentials.userId, userId),
-          eq(credentials.credentialTypeId, AV_CREDENTIAL_TYPE_ID),
-          inArray(credentials.state, ["offered", "active"]),
-        ),
-      )
-      .orderBy(desc(credentials.createdAt))
-      .all(),
-  );
+  const live = db
+    .select()
+    .from(credentials)
+    .where(
+      and(
+        eq(credentials.userId, userId),
+        inArray(credentials.credentialTypeId, [...AGE_CREDENTIAL_TYPE_IDS]),
+        inArray(credentials.state, ["offered", "active"]),
+      ),
+    )
+    .orderBy(desc(credentials.createdAt))
+    .all();
 
-  // The inArray predicate above guarantees the state is never "failed", but
-  // Drizzle's inferred column type is still the full union — TS cannot see
-  // through a SQL predicate. Same cast, same reason, as in listCards.
+  const combined = stateOf(live);
+  const formats = Object.fromEntries(
+    AGE_CREDENTIAL_TYPE_IDS.map((typeId) => [
+      typeId,
+      stateOf(live.filter((row) => row.credentialTypeId === typeId)).state,
+    ]),
+  ) as Record<AgeCredentialTypeId, CardCredentialState>;
+
   return {
-    state: credential ? (credential.state as "offered" | "active") : "none",
-    credentialRowId: credential?.id ?? null,
+    state: combined.state,
+    credentialRowId: combined.rowId,
+    formats,
   };
 }
 

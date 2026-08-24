@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import type { FoundryClient } from "@demo/foundry-client";
 import type { Db } from "../db/index.js";
 import { credentials } from "../db/schema.js";
-import { AV_CREDENTIAL_TYPE_ID } from "./credential-types.js";
+import type { AgeCredentialTypeId } from "./credential-types.js";
 
 /**
  * The claims the age credential carries. Booleans, and only these two: an age
@@ -15,13 +15,13 @@ import { AV_CREDENTIAL_TYPE_ID } from "./credential-types.js";
  * what the deployed `av` named query asks for.
  */
 export const AV_CLAIMS = {
-  age_over_16: true,
-  age_over_18: true,
+     age_over_16: true,
+     age_over_18: true,
 } as const;
 
 export type StartAvIssuanceResult =
-  | { ok: true; sessionId: string; offerUri: string; dcApiOffer: unknown }
-  | { ok: false; reason: "foundry_unavailable" };
+     | { ok: true; sessionId: string; offerUri: string; dcApiOffer: unknown }
+     | { ok: false; reason: "foundry_unavailable" };
 
 /**
  * Offers the user an age-verification credential.
@@ -39,58 +39,66 @@ export type StartAvIssuanceResult =
  * the bank's own UI artwork and is never sent anywhere.
  *
  * The row is written BEFORE foundry is called, so a foundry outage — or a
- * foundry with no `av-sparkasse` credential type configured — leaves a visible `failed`
- * row rather than nothing at all.
+ * foundry with neither age credential type configured — leaves a visible
+ * `failed` row rather than nothing at all.
+ *
+ * `credentialTypeId` picks which of the two age formats to offer, and is the
+ * ONLY thing that differs between them: the claims are shared verbatim, because
+ * the two are one attestation in two wrappers rather than two attestations. It
+ * is a required parameter rather than a defaulted one so a caller that forgets
+ * it is a compile error instead of a silent EUDI issuance — the same reasoning
+ * that gives `startIssuance` its explicit format argument.
  */
 export async function startAvIssuance(
-  db: Db,
-  client: FoundryClient,
-  userId: string,
-  now: number = Date.now(),
+     db: Db,
+     client: FoundryClient,
+     userId: string,
+     credentialTypeId: AgeCredentialTypeId,
+     now: number = Date.now(),
 ): Promise<StartAvIssuanceResult> {
-  const rowId = `cred_${randomUUID()}`;
+     const rowId = `cred_${randomUUID()}`;
 
-  db.insert(credentials)
-    .values({
-      id: rowId,
-      userId,
-      // No card: this credential attests a property of the person.
-      cardId: null,
-      credentialTypeId: AV_CREDENTIAL_TYPE_ID,
-      // No payment join key, and none is disclosed to anyone.
-      credentialId: null,
-      foundryTxId: null,
-      state: "offered",
-      issuedAt: null,
-      createdAt: now,
-    })
-    .run();
+     db.insert(credentials)
+          .values({
+               id: rowId,
+               userId,
+               // No card: this credential attests a property of the person.
+               cardId: null,
+               credentialTypeId,
+               // No payment join key, and none is disclosed to anyone.
+               credentialId: null,
+               foundryTxId: null,
+               state: "offered",
+               issuedAt: null,
+               createdAt: now,
+          })
+          .run();
 
-  try {
-    const offer = await client.createIssuanceOffer({
-      credential_type_id: AV_CREDENTIAL_TYPE_ID,
-      claims: { ...AV_CLAIMS },
-    });
+     try {
+          const offer = await client.createIssuanceOffer({
+               credential_type_id: credentialTypeId,
+               claims: { ...AV_CLAIMS },
+          });
 
-    db.update(credentials)
-      .set({ foundryTxId: offer.transaction_id })
-      .where(eq(credentials.id, rowId))
-      .run();
+          db.update(credentials)
+               .set({ foundryTxId: offer.transaction_id })
+               .where(eq(credentials.id, rowId))
+               .run();
 
-    // Two renderings of ONE offer: the deep link and the DC API payload.
-    // dcApiOffer is deliberately not persisted — the offer is already recorded
-    // by foundryTxId, so a column would duplicate state.
-    return {
-      ok: true,
-      sessionId: rowId,
-      offerUri: offer.credential_offer_uri,
-      dcApiOffer: offer.dc_api_offer,
-    };
-  } catch {
-    db.update(credentials)
-      .set({ state: "failed" })
-      .where(eq(credentials.id, rowId))
-      .run();
-    return { ok: false, reason: "foundry_unavailable" };
-  }
+          // Two renderings of ONE offer: the deep link and the DC API payload.
+          // dcApiOffer is deliberately not persisted — the offer is already recorded
+          // by foundryTxId, so a column would duplicate state.
+          return {
+               ok: true,
+               sessionId: rowId,
+               offerUri: offer.credential_offer_uri,
+               dcApiOffer: offer.dc_api_offer,
+          };
+     } catch {
+          db.update(credentials)
+               .set({ state: "failed" })
+               .where(eq(credentials.id, rowId))
+               .run();
+          return { ok: false, reason: "foundry_unavailable" };
+     }
 }

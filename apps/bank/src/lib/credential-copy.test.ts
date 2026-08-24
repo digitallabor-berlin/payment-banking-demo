@@ -14,7 +14,12 @@ import { MESSAGES } from "./i18n/messages.js";
 
 const STATES: CardFaceState[] = ["none", "offered", "active"];
 const KINDS: CredentialKind[] = ["card", "age"];
-const FLAVOURS: IssuanceFlavour[] = ["card-eudi", "card-google", "age"];
+const FLAVOURS: IssuanceFlavour[] = [
+  "card-eudi",
+  "card-google",
+  "age-eudi",
+  "age-google",
+];
 
 describe("FACE_COPY", () => {
   it("covers every face state for both credential kinds", () => {
@@ -91,11 +96,14 @@ describe("FACE_COPY", () => {
     expect(faceCopy("de", "card", "active").badge).toBe("Im Wallet");
   });
 
-  it("does not name a single wallet in the card's active state", () => {
-    // The card can reach a wallet through either button, and the tile shows one
-    // badge for both. Saying "EUDI Wallet" here would be wrong half the time.
-    expect(faceCopy("en", "card", "active").explain).not.toMatch(/EUDI/);
-    expect(faceCopy("de", "card", "active").explain).not.toMatch(/EUDI/);
+  it("does not name a single wallet in either credential's active state", () => {
+    // Both credentials can reach a wallet through either of their tile's two
+    // buttons, and each tile shows one badge for both. Saying "EUDI Wallet"
+    // here would be wrong half the time.
+    for (const kind of KINDS) {
+      expect(faceCopy("en", kind, "active").explain).not.toMatch(/EUDI/);
+      expect(faceCopy("de", kind, "active").explain).not.toMatch(/EUDI/);
+    }
   });
 });
 
@@ -142,6 +150,45 @@ describe("DIALOG_COPY", () => {
     }
   });
 
+  it("names Google Wallet in the age credential's Google title too", () => {
+    expect(dialogCopy("en", "age-google").title).toBe(
+      "Add age verification to Google Wallet",
+    );
+    expect(dialogCopy("de", "age-google").title).toBe(
+      "Altersnachweis zu Google Wallet hinzufügen",
+    );
+  });
+
+  it("gives the two age flavours different titles but the same failure", () => {
+    for (const locale of ["de", "en"] as const) {
+      const eudi = dialogCopy(locale, "age-eudi");
+      const google = dialogCopy(locale, "age-google");
+      expect(eudi.title).not.toBe(google.title);
+      expect(eudi.failureBody).toBe(google.failureBody);
+    }
+  });
+
+  it("never claims a specific wallet received the age credential either", () => {
+    // Same reason as the card: an OpenID4VCI offer can be answered by any
+    // wallet on the device, so the success body cannot name one.
+    for (const locale of ["de", "en"] as const) {
+      expect(dialogCopy(locale, "age-google").successBody).not.toMatch(
+        /Google/,
+      );
+      expect(dialogCopy(locale, "age-google").successBody).not.toMatch(/EUDI/);
+    }
+  });
+
+  it("keeps the age and card subjects distinct in every Google-flavour string", () => {
+    for (const locale of ["de", "en"] as const) {
+      const card = DIALOG_COPY[locale]["card-google"];
+      const age = DIALOG_COPY[locale]["age-google"];
+      for (const key of Object.keys(card) as (keyof typeof card)[]) {
+        expect(card[key]).not.toBe(age[key]);
+      }
+    }
+  });
+
   it("covers every flavour in both locales", () => {
     for (const locale of ["de", "en"] as const) {
       expect(Object.keys(DIALOG_COPY[locale]).sort()).toEqual(
@@ -150,8 +197,7 @@ describe("DIALOG_COPY", () => {
     }
   });
 
-  it("never reuses a face string for the age credential's dialog", () => {
-    const age = dialogCopy("de", "age");
+  it("never reuses a face string for either age dialog", () => {
     const faceStrings = new Set(
       STATES.flatMap((state) => [
         faceCopy("de", "age", state).badge,
@@ -159,15 +205,17 @@ describe("DIALOG_COPY", () => {
       ]),
     );
     // A dialog string equal to a face string would mean one of them is wrong.
-    for (const value of Object.values(age)) {
-      expect(faceStrings.has(value)).toBe(false);
+    for (const flavour of ["age-eudi", "age-google"] as const) {
+      for (const value of Object.values(dialogCopy("de", flavour))) {
+        expect(faceStrings.has(value)).toBe(false);
+      }
     }
   });
 
   it("distinguishes the card and age subjects in every dialog string", () => {
     for (const locale of ["de", "en"] as const) {
       const card = DIALOG_COPY[locale]["card-eudi"];
-      const age = DIALOG_COPY[locale].age;
+      const age = DIALOG_COPY[locale]["age-eudi"];
       for (const key of Object.keys(card) as (keyof typeof card)[]) {
         expect(card[key]).not.toBe(age[key]);
       }
@@ -190,7 +238,7 @@ describe("English copy", () => {
 
   it("distinguishes the two subjects in the English dialog", () => {
     expect(dialogCopy("en", "card-eudi").successTitle).not.toBe(
-      dialogCopy("en", "age").successTitle,
+      dialogCopy("en", "age-eudi").successTitle,
     );
   });
 });

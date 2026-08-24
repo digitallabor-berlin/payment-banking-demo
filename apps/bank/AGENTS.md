@@ -63,10 +63,13 @@ table and never persists one — it only forwards a `credential_id` string.
   `0001` emits no CHECK constraint, so the enum is a TypeScript claim about the
   data rather than a database one. Adding `sparkassencard` and `av-sparkasse`
   was a one-line schema edit and zero SQL.
-- **`av` is legacy.** The age credential is `av-sparkasse` now. The old value
-  stays in the union so a pre-existing row still reads back, but nothing issues
-  it and `getAgeCredentialState` does not match it — a legacy row reads as "not
-  in wallet" and the tile offers to add it again.
+- **`av` is NOT legacy — it is the age credential's Google Wallet format.**
+  It once was: the age credential became `av-sparkasse`, nothing issued `av`,
+  and `getAgeCredentialState` ignored it, so a leftover row read as "not in
+  wallet". Both ids are now live and carry byte-identical `AV_CLAIMS`
+  (`AGE_CREDENTIAL_TYPE_IDS`, `isAgeCredentialType`), so a **pre-existing `av`
+  row now reads as in-wallet** in the Google format. `startAvIssuance` takes the
+  format as a required parameter, exactly like `startIssuance`.
 - `credentials.cardId` and `credentials.credentialId` are both **nullable**. An
   age credential has neither: it attests a property of the person, and it
   discloses no join key at all. SQLite treats NULLs as distinct under a UNIQUE
@@ -78,8 +81,10 @@ table and never persists one — it only forwards a `credential_id` string.
   `isPaymentCredentialType`, rejects a null `cardId` (compiler-forced by the
   nullable column), and its lookup is `where credential_id = <string>`, which
   SQL never matches against NULL. The first guard asks the predicate rather than
-  naming one id: both card formats authorize money to move, and a legacy `av`
-  row is still refused even though the column can hold it.
+  naming one id: both card formats authorize money to move, and both age
+  formats are refused even though the column holds them —
+  `isAgeCredentialType` and `isPaymentCredentialType` are deliberately disjoint,
+  and a test asserts they share no id.
 - **`drizzle-kit generate` emitted a broken `0001`.** The table rebuild's
   `INSERT … SELECT` listed `credential_type_id` on *both* sides, selecting a
   column the old table does not have (`no such column: "credential_type_id"`),
