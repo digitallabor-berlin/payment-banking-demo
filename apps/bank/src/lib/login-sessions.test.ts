@@ -5,11 +5,12 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FoundryClient } from "@demo/foundry-client";
 import { createDb, type Db } from "../db/index.js";
-import { credentials, loginSessions } from "../db/schema.js";
+import { credentials, loginSessions, users } from "../db/schema.js";
 import { seed } from "../db/seed.js";
 import { SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID } from "./credential-types.js";
 import {
   LOGIN_SESSION_TTL_MS,
+  claimLoginSession,
   getLoginSessionStatus,
   refreshLoginSessionState,
   startLoginSession,
@@ -506,5 +507,104 @@ describe("refreshLoginSessionState", () => {
       id,
     );
     expect(result).toMatchObject({ ok: true, status: { state: "verified" } });
+  });
+});
+
+describe("claimLoginSession", () => {
+  /** Drives a session all the way to `verified` for Anna. */
+  async function verifiedSession(): Promise<string> {
+    giveAnnaAuthenticator("sub-anna");
+    const id = await openSession();
+    await refreshLoginSessionState(db, verdictClient(authVerdict("sub-anna")), id);
+    return id;
+  }
+
+  it("reports not_found for an unknown id", () => {
+    expect(claimLoginSession(db, "login_nope")).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+  });
+
+  it("refuses a session that is still pending", async () => {
+    const id = await openSession();
+    expect(claimLoginSession(db, id)).toEqual({
+      ok: false,
+      reason: "not_verified",
+    });
+  });
+
+  it("refuses a failed session", async () => {
+    const id = await openSession();
+    await refreshLoginSessionState(
+      db,
+      verdictClient(authVerdict("never-issued")),
+      id,
+    );
+    expect(claimLoginSession(db, id)).toEqual({
+      ok: false,
+      reason: "not_verified",
+    });
+  });
+
+  it("returns the resolved user for a verified session", async () => {
+    const id = await verifiedSession();
+    const result = claimLoginSession(db, id);
+    expect(result).toEqual({
+      ok: true,
+      userId: "user_anna",
+      displayName: expect.any(String),
+    });
+  });
+
+  it("marks the session consumed", async () => {
+    const id = await verifiedSession();
+    claimLoginSession(db, id);
+    const row = db
+      .select()
+      .from(loginSessions)
+      .where(eq(loginSessions.id, id))
+      .get();
+    expect(row?.state).toBe("consumed");
+  });
+
+  it("refuses a second claim — the session is single-use", async () => {
+    const id = await verifiedSession();
+    expect(claimLoginSession(db, id).ok).toBe(true);
+    expect(claimLoginSession(db, id)).toEqual({
+      ok: false,
+      reason: "already_consumed",
+    });
+  });
+
+  it("refuses a verified session past its TTL and records why", async () => {
+    const id = await verifiedSession();
+    const result = claimLoginSession(
+      db,
+      id,
+      Date.now() + LOGIN_SESSION_TTL_MS + 1,
+    );
+
+    expect(result).toEqual({ ok: false, reason: "expired" });
+    const row = db
+      .select()
+      .from(loginSessions)
+      .where(eq(loginSessions.id, id))
+      .get();
+    expect(row?.state).toBe("failed");
+    expect(row?.failureReason).toBe("expired");
+  });
+
+  it("reads the display name at claim time rather than from the session", async () => {
+    const id = await verifiedSession();
+    db.update(users)
+      .set({ displayName: "Renamed Later" })
+      .where(eq(users.id, "user_anna"))
+      .run();
+
+    expect(claimLoginSession(db, id)).toMatchObject({
+      ok: true,
+      displayName: "Renamed Later",
+    });
   });
 });

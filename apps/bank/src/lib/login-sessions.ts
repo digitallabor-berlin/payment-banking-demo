@@ -5,6 +5,7 @@ import type { Db } from "../db/index.js";
 import {
   credentials,
   loginSessions,
+  users,
   type LoginSessionState,
 } from "../db/schema.js";
 import {
@@ -231,6 +232,69 @@ export async function refreshLoginSessionState(
     .run();
 
   return done();
+}
+
+export type ClaimLoginResult =
+  | { ok: true; userId: string; displayName: string }
+  | {
+      ok: false;
+      reason: "not_found" | "not_verified" | "already_consumed" | "expired";
+    };
+
+/**
+ * Exchanges a verified login session for the identity a cookie will be signed
+ * over. Consumes the session — it can never be claimed twice.
+ *
+ * Synchronous, because better-sqlite3 is. That is not incidental: the guarded
+ * UPDATE below is the whole single-use mechanism, and it is only meaningful as
+ * one statement rather than a read followed by a write.
+ *
+ * Deliberately does NOT sign the JWT or set the cookie. Those are the route's
+ * job, so this stays testable without Next's request plumbing.
+ */
+export function claimLoginSession(
+  db: Db,
+  sessionId: string,
+  now: number = Date.now(),
+): ClaimLoginResult {
+  const row = db
+    .select()
+    .from(loginSessions)
+    .where(eq(loginSessions.id, sessionId))
+    .get();
+  if (!row) return { ok: false, reason: "not_found" };
+
+  // Distinguished from `not_verified` so the caller can answer 410 rather than
+  // 409: a consumed session is gone for good, a pending one might yet arrive.
+  if (row.state === "consumed") return { ok: false, reason: "already_consumed" };
+  if (row.state !== "verified" || !row.userId) {
+    return { ok: false, reason: "not_verified" };
+  }
+
+  if (now - row.createdAt > LOGIN_SESSION_TTL_MS) {
+    failLogin(db, sessionId, "expired");
+    return { ok: false, reason: "expired" };
+  }
+
+  // A GUARDED WRITE, not a read-then-write. `.changes` is what decides whether
+  // THIS call won the race to consume the session; checking the state above
+  // and then updating unconditionally would let two concurrent claims both
+  // mint a cookie.
+  const consumed = db
+    .update(loginSessions)
+    .set({ state: "consumed" })
+    .where(
+      and(eq(loginSessions.id, sessionId), eq(loginSessions.state, "verified")),
+    )
+    .run();
+  if (consumed.changes !== 1) return { ok: false, reason: "already_consumed" };
+
+  // Read at claim time rather than stored on the session row, so a display
+  // name edited between verification and claim cannot be served stale.
+  const user = db.select().from(users).where(eq(users.id, row.userId)).get();
+  if (!user) return { ok: false, reason: "not_verified" };
+
+  return { ok: true, userId: user.id, displayName: user.displayName };
 }
 
 /** Terminal-with-a-reason. `expired` is a reason here, never a state. */
