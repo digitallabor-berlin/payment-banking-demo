@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { AuthCard } from "@/components/AuthCard.js";
 import { LocaleSwitcher } from "@/components/LocaleSwitcher.js";
 import { LoginForm } from "@/components/LoginForm.js";
+import { WalletLoginButton } from "@/components/WalletLoginButton.js";
 import { MESSAGES } from "@/lib/i18n/messages.js";
 import { getLocale } from "@/lib/i18n/server.js";
 import { getSession } from "@/lib/session.js";
@@ -23,6 +24,7 @@ export default async function LoginPage() {
       switcher={<LocaleSwitcher locale={locale} />}
     >
       <LoginForm locale={locale} />
+      <WalletLoginButton locale={locale} />
     </AuthCard>
   );
 }
