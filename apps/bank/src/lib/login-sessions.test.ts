@@ -88,16 +88,38 @@ describe("startLoginSession", () => {
     expect(captures[0]?.body["transport"]).toBe("request_uri");
   });
 
-  it("sends no transaction_data — a login binds no amount", () => {
-    // transaction_data binds an amount to a presentation. There is no amount
-    // in a login, so sending one would hash a value that means nothing.
+  it("binds the login datetime with transaction_data", async () => {
+    // transaction_data binds whatever the holder is approving — not only an
+    // amount. For a login that is the moment itself, which is what makes a
+    // captured vp_token non-replayable.
     const captures: Capture[] = [];
-    return startLoginSession(
+    await startLoginSession(
       db,
       stubClient(captures, REQUEST_URI_OK),
       false,
-    ).then(() => {
-      expect(captures[0]?.body).not.toHaveProperty("transaction_data");
+      Date.UTC(2026, 7, 25, 16, 45, 0, 123),
+    );
+
+    expect(captures[0]?.body["transaction_data"]).toEqual([
+      {
+        type: "urn:paso:sca:dev.digitallabor:login:1",
+        credential_ids: ["sparkassen_auth"],
+        transaction_data_hashes_alg: ["sha-256"],
+        payload: { login_datetime: "2026-08-25T16:45:00Z" },
+      },
+    ]);
+  });
+
+  it("binds the datetime of the injected instant, not of the clock", async () => {
+    const captures: Capture[] = [];
+    await startLoginSession(db, stubClient(captures, REQUEST_URI_OK), false, 0);
+
+    const [entry] = captures[0]?.body["transaction_data"] as Record<
+      string,
+      unknown
+    >[];
+    expect(entry?.payload).toEqual({
+      login_datetime: "1970-01-01T00:00:00Z",
     });
   });
 
@@ -240,7 +262,12 @@ function verdictClient(verdict: unknown, status = 200): FoundryClient {
   });
 }
 
-function authVerdict(sub: unknown, verified = true) {
+/**
+ * A normal good verdict: the authenticator answered AND signed over the login
+ * transaction_data. `bound: false` models a wallet that ignored the entry —
+ * the case the gate exists for.
+ */
+function authVerdict(sub: unknown, verified = true, bound = true) {
   return {
     id: "v_login_1",
     state: verified ? "verified" : "failed",
@@ -253,7 +280,9 @@ function authVerdict(sub: unknown, verified = true) {
           query_id: "sparkassen_auth",
           format: "dc+sd-jwt",
           claims: { sub },
-          checks: [],
+          checks: bound
+            ? [{ check: "transaction_data_binding", passed: true }]
+            : [],
         },
       ],
     },
@@ -476,6 +505,64 @@ describe("refreshLoginSessionState", () => {
     expect(result).toMatchObject({
       ok: true,
       status: { state: "failed", failureReason: "verification_failed" },
+    });
+  });
+
+  it("fails when the wallet did not sign over the login datetime", async () => {
+    giveAnnaAuthenticator("sub-anna");
+    const id = await openSession();
+
+    const result = await refreshLoginSessionState(
+      db,
+      verdictClient(authVerdict("sub-anna", true, false)),
+      id,
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      status: {
+        state: "failed",
+        failureReason: "transaction_data_binding_failed",
+      },
+    });
+  });
+
+  it("names no customer on an unbound presentation", async () => {
+    giveAnnaAuthenticator("sub-anna");
+    const id = await openSession();
+
+    await refreshLoginSessionState(
+      db,
+      verdictClient(authVerdict("sub-anna", true, false)),
+      id,
+    );
+
+    const row = db
+      .select()
+      .from(loginSessions)
+      .where(eq(loginSessions.id, id))
+      .get();
+    expect(row?.userId).toBeNull();
+  });
+
+  it("reports the missing binding rather than the unknown sub", async () => {
+    // Pins the ORDER: the binding gate runs before the customer lookup, so an
+    // unbound presentation never reaches the point of naming anyone. Both
+    // reasons are true here; only one is the reason to report.
+    const id = await openSession();
+
+    const result = await refreshLoginSessionState(
+      db,
+      verdictClient(authVerdict("never-issued", true, false)),
+      id,
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      status: {
+        state: "failed",
+        failureReason: "transaction_data_binding_failed",
+      },
     });
   });
 

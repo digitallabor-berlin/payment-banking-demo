@@ -53,8 +53,36 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**678 tests** (450 bank + 181 merchant + 11 foundry-client + 36 ui), measured
-2026-08-24.
+**702 tests** (474 bank + 181 merchant + 11 foundry-client + 36 ui), measured
+2026-08-25.
+
+That was **678** before the login-`transaction_data` work, which added 24, all
+in `apps/bank`: 12 in the new `login-transaction-data.test.ts`, +8 in
+`login-checks.test.ts` (a whole `passedLoginBinding` describe) and only **+4
+net** in `login-sessions.test.ts` — five added against one *deleted*. That
+deletion is the arithmetic's only trap and it is worth more than the number:
+`sends no transaction_data — a login binds no amount` pinned the old contract
+directly, in both its name and its comment, so it had to be inverted rather
+than extended. A grep for `transaction_data` in that file before starting would
+have found it; a grep for the feature name would not.
+
+Two changes that added **zero** tests and were load-bearing anyway. The
+`authVerdict` helper gained a third `bound = true` parameter carrying the
+binding check — without it every existing `verified` test fails once the gate
+lands, which reads as 6 regressions rather than one stale fixture. And
+`messages.test.ts` again added nothing: the new `transaction_data_binding_failed`
+reason needs no copy, because `loginFailureKey` falls everything it does not
+recognise through to `verificationFailed` deliberately.
+
+The gate's *placement* was wrong on the first attempt, and one existing test
+caught it. Putting `passedLoginBinding` before `extractAuthSubject` — which is
+what "fail before naming a customer" suggests — collapsed two distinct wallet
+failures into one reason and broke `fails when only a payment credential
+answered`. The gate belongs between reading the `sub` and *resolving* it: no
+authenticator answered at all is `verification_failed`, one that answered
+without signing the datetime is `transaction_data_binding_failed`. Reading a
+claim out of a JSON blob is inert; turning it into a customer is the act. No
+plan; the work was a bounded request.
 
 That was **673** before the Safari issuance fix, which added 5, all in
 `packages/ui`: a whole new `invokeDcCreate` describe in `dcApi.test.ts`. Note
@@ -338,6 +366,46 @@ them without reading the linked reasoning first.
   query* whose DCQL credential query id is likewise `sparkassen_auth`, and the
   bank keeps those as two separate constants because nothing forces the two
   registries to agree.
+
+- **The wallet login sends `transaction_data`, and REQUIRES the binding back.**
+  This file and `startLoginSession`'s docstring both used to say the opposite —
+  "no `transaction_data`, because that binds an AMOUNT to a presentation and a
+  login has none" — and the premise was wrong, not just the conclusion.
+  `transaction_data` binds *whatever the holder is approving*; OpenID4VP leaves
+  the `type` open precisely so a non-payment approval can name itself. For a
+  login the thing approved is the moment, so `buildLoginTransactionData`
+  (`lib/login-transaction-data.ts`) sends one entry of type
+  `urn:paso:sca:dev.digitallabor:login:1` carrying a single
+  `payload.login_datetime`.
+
+  Without it a verified `vp_token` is a bearer token for this bank's session
+  cookie for as long as the credential lives — **365 days** for
+  `sparkassen_auth`, not 12 hours. That is why `refreshLoginSessionState` gates
+  on `passedLoginBinding` and does not merely send the entry: sending a datetime
+  the bank never confirms was signed over buys exactly nothing. The accepted
+  cost is stated plainly — a wallet that ignores `transaction_data` can no
+  longer log in at all, and since no wallet has ever answered this query, that
+  risk ships unmeasured.
+
+  `credential_ids` is `["sparkassen_auth"]`, which is the *DCQL query id* and
+  reuses `SPARKASSEN_AUTH_QUERY_ID` rather than the credential type constant —
+  the two are deliberately separate constants that happen to share a spelling,
+  and foundry validates this list against the resolved query. The datetime is
+  `2026-08-25T16:45:00Z`: UTC, seconds precision, **truncated not rounded**, and
+  the `Z` is mandatory. It is hashed byte-for-byte, so `.999` must stay `:00`
+  rather than ticking forward; and a bare `2026-08-25T16:45:00` looks local
+  while being UTC, which is how a wallet shows a login an hour off. `loginDatetime`
+  takes the instant rather than reading the clock so the value is a pure
+  function of `startLoginSession`'s existing `now`.
+
+  Verified against the deployed foundry 2026-08-25, request leg only: the real
+  payload is HTTP **200**, a bogus `credential_ids` entry is HTTP **400**
+  `transaction_data[0] references credential id '<id>' which is not present in
+  the DCQL query` (so the 200 is evidence, not serde dropping a field), and the
+  request object served at `request_uri` carries the entry base64url-encoded,
+  decoding byte-exact to what was sent, against a DCQL query whose only
+  credential id is `sparkassen_auth`. Note what that last point confirms: we
+  send **plain JSON** and foundry does the OpenID4VP §8.4 encoding itself.
 
 - **`#EA0016` is NOT `--color-primary`, despite what this file's CSS said for
   months.** Measured 2026-08-24: `--color-primary` is
@@ -994,6 +1062,16 @@ path. So `extractAuthSubject`'s shape is pinned by foundry's config, not by
 observation — nothing has seen a `vp_token` answering it, and the whole path
 from the wallet's response through `refreshLoginSessionState` to a minted cookie
 is unexercised.
+
+That request leg was re-verified on 2026-08-25 with `transaction_data` added,
+and the same boundary holds: foundry accepts the login entry (200), rejects a
+bogus `credential_ids` (400), and serves it to the wallet base64url-encoded —
+but **no wallet has ever returned a `transaction_data_binding` check for it**.
+That matters more here than for the payment path, because the bank now *gates*
+on that check. A wallet that ignores `transaction_data` will fail login with
+`transaction_data_binding_failed` rather than degrading, and nothing in this
+environment can tell you whether the real wallet honours it. Ask the operator to
+run one wallet login before calling login working at all.
 
 A trap when checking any of this against the deployed admin API: a **local**
 foundry may own `127.0.0.1:9000` (IPv4) while `kubectl port-forward svc/foundry

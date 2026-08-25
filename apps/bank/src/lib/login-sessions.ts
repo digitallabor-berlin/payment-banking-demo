@@ -12,7 +12,8 @@ import {
   SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID,
   SPARKASSEN_AUTH_NAMED_QUERY,
 } from "./credential-types.js";
-import { extractAuthSubject } from "./login-checks.js";
+import { extractAuthSubject, passedLoginBinding } from "./login-checks.js";
+import { buildLoginTransactionData } from "./login-transaction-data.js";
 
 /**
  * How long a login session may be claimed for.
@@ -51,10 +52,19 @@ export interface LoginSessionStatusDto {
  * matters more here than usual: no local foundry declares the
  * `sparkassen_auth` named query, so a local run takes this path every time.
  *
- * Sends `named_query_ref` and nothing else. No `dcql_query`, because foundry
- * prefers an inline query and would silently ignore the named one; and no
- * `transaction_data`, because that binds an AMOUNT to a presentation and a
- * login has none.
+ * Sends `named_query_ref` and `transaction_data`. No `dcql_query`, because
+ * foundry prefers an inline query and would silently ignore the named one.
+ *
+ * `transaction_data` is NOT a payment mechanism — it binds whatever the holder
+ * is approving into the KB-JWT, and for a login that is the moment itself. That
+ * is what makes a captured `vp_token` non-replayable: without it, a verified
+ * presentation is a bearer credential for this bank's session cookie for as
+ * long as the credential lives (365 days for `sparkassen_auth`). The datetime
+ * is derived from this function's own `now`, so the value is deterministic
+ * under test rather than read off the clock inside the request builder.
+ *
+ * `refreshLoginSessionState` REQUIRES the resulting binding check to have
+ * passed. Sending the entry without gating on it would buy nothing at all.
  */
 export async function startLoginSession(
   db: Db,
@@ -73,6 +83,7 @@ export async function startLoginSession(
     const response = await client.createVerificationRequest({
       transport,
       named_query_ref: SPARKASSEN_AUTH_NAMED_QUERY,
+      transaction_data: buildLoginTransactionData(now),
     });
 
     // Under dc_api foundry returns neither uri — the request object is inlined
@@ -197,6 +208,24 @@ export async function refreshLoginSessionState(
     // not the customer being unknown — hence verification_failed, not
     // unknown_credential.
     failLogin(db, sessionId, "verification_failed");
+    return done();
+  }
+
+  // Between reading the subject and RESOLVING it, deliberately. Reading a
+  // claim out of a JSON blob is inert; turning it into a customer is the act,
+  // and an unbound presentation must never reach that point. A wallet that
+  // ignored the `transaction_data` entry yields a verdict that is
+  // `verified: true` and still worthless — nothing in it is tied to this login
+  // attempt, so the vp_token is replayable for the credential's whole life
+  // (365 days for `sparkassen_auth`).
+  //
+  // Its own reason rather than a second `verification_failed`, so an operator
+  // can tell "the wallet does not honour transaction_data" — the one failure
+  // this change can newly cause — apart from every other bad presentation.
+  // Both are generic `verificationFailed` copy to the holder; `loginFailureKey`
+  // only spells out reasons they can act on.
+  if (!passedLoginBinding(verdict.result.credentials)) {
+    failLogin(db, sessionId, "transaction_data_binding_failed");
     return done();
   }
 

@@ -1,6 +1,9 @@
 import type { PresentedCredential } from "@demo/foundry-client";
 import { SPARKASSEN_AUTH_QUERY_ID } from "./credential-types.js";
 
+/** foundry's name for the check that the KB-JWT signed over transaction_data. */
+const BINDING_CHECK = "transaction_data_binding";
+
 /**
  * The pure half of the login gate. A sibling of the merchant's `checks.ts` and
  * held to the same rule: everything is keyed by DCQL query id.
@@ -52,4 +55,41 @@ export function extractAuthSubject(
 
   const subject = (claims as Record<string, unknown>)["sub"];
   return typeof subject === "string" && subject.length > 0 ? subject : null;
+}
+
+/**
+ * True only if foundry explicitly reported `transaction_data_binding` as passed
+ * **on the credential that answered the authenticator query**.
+ *
+ * The twin of the merchant's `passedTransactionDataBinding`, and closed the
+ * same way: absence reads as failure. Sending a login datetime the bank never
+ * confirms was signed over buys nothing at all — an unbound `vp_token` is as
+ * replayable as one with no `transaction_data` in the request — so a foundry
+ * that stops reporting the check must lock logins out rather than wave them
+ * through.
+ *
+ * Reads `credentials[i].checks`, never the top-level `checks` array. That array
+ * is cross-cutting only (`jwe_decryption`, `requested_credentials_answered`)
+ * and structurally cannot hold this check; searching it would fail every login.
+ *
+ * Scoped through `findAuthenticatorCredential` rather than "any credential with
+ * the check", so a neighbouring payment credential's binding — bound to an
+ * amount, not to this login — can never satisfy the gate.
+ */
+export function passedLoginBinding(
+  credentials: PresentedCredential[] | undefined,
+): boolean {
+  const credential = findAuthenticatorCredential(credentials);
+  if (!credential) return false;
+
+  const checks: unknown = credential.checks;
+  if (!Array.isArray(checks)) return false;
+
+  return checks.some(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as Record<string, unknown>)["check"] === BINDING_CHECK &&
+      (entry as Record<string, unknown>)["passed"] === true,
+  );
 }

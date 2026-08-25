@@ -1,10 +1,24 @@
 import { describe, expect, it } from "vitest";
 import type { PresentedCredential } from "@demo/foundry-client";
-import { extractAuthSubject, findAuthenticatorCredential } from "./login-checks.js";
+import {
+  extractAuthSubject,
+  findAuthenticatorCredential,
+  passedLoginBinding,
+} from "./login-checks.js";
 
 function credential(queryId: string, claims: unknown): PresentedCredential {
   return { query_id: queryId, format: "dc+sd-jwt", claims, checks: [] };
 }
+
+/** A credential carrying an arbitrary set of foundry checks. */
+function checked(
+  queryId: string,
+  checks: PresentedCredential["checks"],
+): PresentedCredential {
+  return { query_id: queryId, format: "dc+sd-jwt", claims: { sub: "s" }, checks };
+}
+
+const BOUND = [{ check: "transaction_data_binding", passed: true }];
 
 describe("findAuthenticatorCredential", () => {
   it("returns null for undefined", () => {
@@ -83,5 +97,67 @@ describe("extractAuthSubject", () => {
         credential("sparkassen_auth", {}),
       ]),
     ).toBeNull();
+  });
+});
+
+describe("passedLoginBinding", () => {
+  it("passes when the authenticator credential reports the binding", () => {
+    expect(passedLoginBinding([checked("sparkassen_auth", BOUND)])).toBe(true);
+  });
+
+  it("fails when the binding check is absent", () => {
+    // Absence reads as failure on purpose: a foundry that stopped reporting
+    // the check must fail closed, or the whole point of sending
+    // transaction_data is silently lost.
+    expect(passedLoginBinding([checked("sparkassen_auth", [])])).toBe(false);
+  });
+
+  it("fails when the binding check did not pass", () => {
+    expect(
+      passedLoginBinding([
+        checked("sparkassen_auth", [
+          { check: "transaction_data_binding", passed: false },
+        ]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("ignores a binding that passed on a different credential", () => {
+    // The login must be bound on the credential that actually answered the
+    // authenticator query — never on whichever one happens to carry the check.
+    expect(
+      passedLoginBinding([
+        checked("sparkassencard", BOUND),
+        checked("sparkassen_auth", []),
+      ]),
+    ).toBe(false);
+  });
+
+  it("fails when no authenticator credential answered", () => {
+    expect(passedLoginBinding([checked("wero", BOUND)])).toBe(false);
+  });
+
+  it("fails for undefined credentials", () => {
+    expect(passedLoginBinding(undefined)).toBe(false);
+  });
+
+  it("fails when checks is not an array", () => {
+    // foundry's schema declares it required, but nothing here trusts a shape
+    // no wallet response has ever been observed producing.
+    const malformed = {
+      query_id: "sparkassen_auth",
+      format: "dc+sd-jwt",
+      claims: { sub: "s" },
+      checks: undefined,
+    } as unknown as PresentedCredential;
+    expect(passedLoginBinding([malformed])).toBe(false);
+  });
+
+  it("is not satisfied by some other check passing", () => {
+    expect(
+      passedLoginBinding([
+        checked("sparkassen_auth", [{ check: "dcql_match", passed: true }]),
+      ]),
+    ).toBe(false);
   });
 });
