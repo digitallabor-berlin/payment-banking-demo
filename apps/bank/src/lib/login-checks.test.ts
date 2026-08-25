@@ -15,7 +15,12 @@ function checked(
   queryId: string,
   checks: PresentedCredential["checks"],
 ): PresentedCredential {
-  return { query_id: queryId, format: "dc+sd-jwt", claims: { sub: "s" }, checks };
+  return {
+    query_id: queryId,
+    format: "dc+sd-jwt",
+    claims: { sub: "s" },
+    checks,
+  };
 }
 
 const BOUND = [{ check: "transaction_data_binding", passed: true }];
@@ -38,7 +43,9 @@ describe("findAuthenticatorCredential", () => {
     // sparkassencard and wero both declare `sub`. Keying on the claim name
     // rather than the query id would let a payment credential authenticate.
     expect(
-      findAuthenticatorCredential([credential("sparkassencard", { sub: "s1" })]),
+      findAuthenticatorCredential([
+        credential("sparkassencard", { sub: "s1" }),
+      ]),
     ).toBeNull();
     expect(
       findAuthenticatorCredential([credential("wero", { sub: "s1" })]),
@@ -84,7 +91,9 @@ describe("extractAuthSubject", () => {
   });
 
   it("returns null when claims is not an object", () => {
-    expect(extractAuthSubject([credential("sparkassen_auth", null)])).toBeNull();
+    expect(
+      extractAuthSubject([credential("sparkassen_auth", null)]),
+    ).toBeNull();
     expect(
       extractAuthSubject([credential("sparkassen_auth", "nope")]),
     ).toBeNull();

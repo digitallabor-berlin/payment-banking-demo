@@ -210,7 +210,11 @@ describe("startLoginSession", () => {
   });
 
   it("records the requested transport even on a failed row", async () => {
-    await startLoginSession(db, stubClient([], { status: 500, body: {} }), true);
+    await startLoginSession(
+      db,
+      stubClient([], { status: 500, body: {} }),
+      true,
+    );
     expect(db.select().from(loginSessions).get()?.transport).toBe("dc_api");
   });
 });
@@ -231,7 +235,11 @@ describe("getLoginSessionStatus", () => {
   });
 
   it("returns the failure reason when the row carries one", async () => {
-    await startLoginSession(db, stubClient([], { status: 500, body: {} }), false);
+    await startLoginSession(
+      db,
+      stubClient([], { status: 500, body: {} }),
+      false,
+    );
     const row = db.select().from(loginSessions).get();
     expect(getLoginSessionStatus(db, row?.id ?? "")).toEqual({
       state: "failed",
@@ -585,7 +593,11 @@ describe("refreshLoginSessionState", () => {
   it("does no further work once the session is terminal", async () => {
     giveAnnaAuthenticator("sub-anna");
     const id = await openSession();
-    await refreshLoginSessionState(db, verdictClient(authVerdict("sub-anna")), id);
+    await refreshLoginSessionState(
+      db,
+      verdictClient(authVerdict("sub-anna")),
+      id,
+    );
 
     // A second poll on a verified session must not re-query foundry.
     const result = await refreshLoginSessionState(
@@ -602,7 +614,11 @@ describe("claimLoginSession", () => {
   async function verifiedSession(): Promise<string> {
     giveAnnaAuthenticator("sub-anna");
     const id = await openSession();
-    await refreshLoginSessionState(db, verdictClient(authVerdict("sub-anna")), id);
+    await refreshLoginSessionState(
+      db,
+      verdictClient(authVerdict("sub-anna")),
+      id,
+    );
     return id;
   }
 

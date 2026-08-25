@@ -295,7 +295,8 @@ export function claimLoginSession(
 
   // Distinguished from `not_verified` so the caller can answer 410 rather than
   // 409: a consumed session is gone for good, a pending one might yet arrive.
-  if (row.state === "consumed") return { ok: false, reason: "already_consumed" };
+  if (row.state === "consumed")
+    return { ok: false, reason: "already_consumed" };
   if (row.state !== "verified" || !row.userId) {
     return { ok: false, reason: "not_verified" };
   }

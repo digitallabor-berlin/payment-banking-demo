@@ -17,7 +17,7 @@ import { SPARKASSEN_AUTH_QUERY_ID } from "./credential-types.js";
  * confirmation needs to know which shape it is looking at.
  */
 export const LOGIN_TRANSACTION_DATA_TYPE =
-  "urn:paso:sca:dev.digitallabor:login:1";
+ "urn:paso:sca:dev.digitallabor:login:1";
 
 /**
  * The instant, as seconds-precision UTC with an explicit zone marker:
@@ -39,7 +39,7 @@ export const LOGIN_TRANSACTION_DATA_TYPE =
  * function of `startLoginSession`'s existing `now` parameter.
  */
 export function loginDatetime(now: number): string {
-  return `${new Date(now).toISOString().slice(0, 19)}Z`;
+ return `${new Date(now).toISOString().slice(0, 19)}Z`;
 }
 
 /**
@@ -60,12 +60,12 @@ export function loginDatetime(now: number): string {
  * it is constructed instead of correct only by remote default.
  */
 export function buildLoginTransactionData(now: number): unknown[] {
-  return [
-    {
-      type: LOGIN_TRANSACTION_DATA_TYPE,
-      credential_ids: [SPARKASSEN_AUTH_QUERY_ID],
-      transaction_data_hashes_alg: ["sha-256"],
-      payload: { login_datetime: loginDatetime(now) },
-    },
-  ];
+ return [
+  {
+   type: LOGIN_TRANSACTION_DATA_TYPE,
+   credential_ids: [SPARKASSEN_AUTH_QUERY_ID],
+   transaction_data_hashes_alg: ["sha-256"],
+   payload: { login_datetime: loginDatetime(now) },
+  },
+ ];
 }

@@ -24,14 +24,14 @@ const BINDING_CHECK = "transaction_data_binding";
  * authentication subject.
  */
 export function findAuthenticatorCredential(
-  credentials: PresentedCredential[] | undefined,
+ credentials: PresentedCredential[] | undefined,
 ): PresentedCredential | null {
-  if (!credentials) return null;
-  return (
-    credentials.find(
-      (credential) => credential.query_id === SPARKASSEN_AUTH_QUERY_ID,
-    ) ?? null
-  );
+ if (!credentials) return null;
+ return (
+  credentials.find(
+   (credential) => credential.query_id === SPARKASSEN_AUTH_QUERY_ID,
+  ) ?? null
+ );
 }
 
 /**
@@ -45,16 +45,16 @@ export function findAuthenticatorCredential(
  * answering this query, so the shape is enforced rather than trusted.
  */
 export function extractAuthSubject(
-  credentials: PresentedCredential[] | undefined,
+ credentials: PresentedCredential[] | undefined,
 ): string | null {
-  const credential = findAuthenticatorCredential(credentials);
-  if (!credential) return null;
+ const credential = findAuthenticatorCredential(credentials);
+ if (!credential) return null;
 
-  const claims = credential.claims;
-  if (typeof claims !== "object" || claims === null) return null;
+ const claims = credential.claims;
+ if (typeof claims !== "object" || claims === null) return null;
 
-  const subject = (claims as Record<string, unknown>)["sub"];
-  return typeof subject === "string" && subject.length > 0 ? subject : null;
+ const subject = (claims as Record<string, unknown>)["sub"];
+ return typeof subject === "string" && subject.length > 0 ? subject : null;
 }
 
 /**
@@ -77,19 +77,19 @@ export function extractAuthSubject(
  * amount, not to this login — can never satisfy the gate.
  */
 export function passedLoginBinding(
-  credentials: PresentedCredential[] | undefined,
+ credentials: PresentedCredential[] | undefined,
 ): boolean {
-  const credential = findAuthenticatorCredential(credentials);
-  if (!credential) return false;
+ const credential = findAuthenticatorCredential(credentials);
+ if (!credential) return false;
 
-  const checks: unknown = credential.checks;
-  if (!Array.isArray(checks)) return false;
+ const checks: unknown = credential.checks;
+ if (!Array.isArray(checks)) return false;
 
-  return checks.some(
-    (entry) =>
-      typeof entry === "object" &&
-      entry !== null &&
-      (entry as Record<string, unknown>)["check"] === BINDING_CHECK &&
-      (entry as Record<string, unknown>)["passed"] === true,
-  );
+ return checks.some(
+  (entry) =>
+   typeof entry === "object" &&
+   entry !== null &&
+   (entry as Record<string, unknown>)["check"] === BINDING_CHECK &&
+   (entry as Record<string, unknown>)["passed"] === true,
+ );
 }
