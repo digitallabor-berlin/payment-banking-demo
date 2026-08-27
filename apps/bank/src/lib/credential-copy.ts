@@ -37,9 +37,15 @@ export type CredentialKind = "card" | "age" | "wero" | "authenticator";
 /**
  * One issuance conversation — a kind plus the wallet it targets.
  *
- * The `-google` flavours exist because a dialog reading "Add … to EUDI Wallet"
- * over a handover the user started from a Google Wallet badge is simply wrong.
- * Both tiles now offer both buttons, so both kinds have both flavours.
+ * The `-google` flavours exist because a dialog reading "Add … to Google
+ * Wallet" over a handover the user started from the plain wallet button is
+ * simply wrong, and vice versa. Both tiles offer both buttons, so both kinds
+ * have both flavours.
+ *
+ * The `-eudi` suffix is now a name for "the bank's own button" rather than a
+ * description of its copy: those flavours' strings say "wallet" and name no
+ * scheme. It is an internal id nothing renders, so it is left alone — renaming
+ * it would touch every tile and route for no user-visible gain.
  */
 export type IssuanceFlavour =
   | "card-eudi"
@@ -79,7 +85,7 @@ export const FACE_COPY: Record<
     card: {
       none: {
         badge: "Not in wallet",
-        explain: "Add this card to your EUDI Wallet to pay online.",
+        explain: "Add this card to your wallet to pay online.",
       },
       offered: {
         badge: "Being added…",
@@ -95,7 +101,7 @@ export const FACE_COPY: Record<
       none: {
         badge: "Not in wallet",
         explain:
-          "Add your age verification to your EUDI Wallet to confirm your age online.",
+          "Add your age verification to your wallet to confirm your age online.",
       },
       offered: {
         badge: "Being added…",
@@ -112,7 +118,7 @@ export const FACE_COPY: Record<
     wero: {
       none: {
         badge: "Not in wallet",
-        explain: "Add Wero to your EUDI Wallet to pay from your account.",
+        explain: "Add Wero to your wallet to pay from your account.",
       },
       offered: {
         badge: "Being added…",
@@ -120,8 +126,8 @@ export const FACE_COPY: Record<
       },
       active: {
         badge: "In wallet",
-        // Unlike the other two kinds this tile HAS only the EUDI button, so
-        // naming that wallet here would be defensible — it is left unnamed
+        // Unlike the other two kinds this tile has only the one button, so
+        // naming a scheme here would be defensible — it is left unnamed
         // anyway, because an OpenID4VCI offer is answered by whichever wallet
         // the device hands it to, and the bank never learns which.
         explain:
@@ -134,7 +140,7 @@ export const FACE_COPY: Record<
         // Says what it is FOR — signing in — rather than what it contains. Its
         // only claim is an opaque `sub`, so there is nothing else to describe.
         explain:
-          "Add the Sparkassen Authenticator to your EUDI Wallet to prove it is you online.",
+          "Add the Sparkassen Authenticator to your wallet to prove it is you online.",
       },
       offered: {
         badge: "Being added…",
@@ -155,7 +161,7 @@ export const FACE_COPY: Record<
       none: {
         badge: "Nicht im Wallet",
         explain:
-          "Fügen Sie diese Karte Ihrem EUDI Wallet hinzu, um online zu bezahlen.",
+          "Fügen Sie diese Karte Ihrem Wallet hinzu, um online zu bezahlen.",
       },
       offered: {
         badge: "Wird hinzugefügt…",
@@ -171,7 +177,7 @@ export const FACE_COPY: Record<
       none: {
         badge: "Nicht im Wallet",
         explain:
-          "Fügen Sie Ihren Altersnachweis Ihrem EUDI Wallet hinzu, um Ihr Alter online zu bestätigen.",
+          "Fügen Sie Ihren Altersnachweis Ihrem Wallet hinzu, um Ihr Alter online zu bestätigen.",
       },
       offered: {
         badge: "Wird hinzugefügt…",
@@ -187,7 +193,7 @@ export const FACE_COPY: Record<
       none: {
         badge: "Nicht im Wallet",
         explain:
-          "Fügen Sie Wero Ihrem EUDI Wallet hinzu, um von Ihrem Konto zu bezahlen.",
+          "Fügen Sie Wero Ihrem Wallet hinzu, um von Ihrem Konto zu bezahlen.",
       },
       offered: {
         badge: "Wird hinzugefügt…",
@@ -203,7 +209,7 @@ export const FACE_COPY: Record<
       none: {
         badge: "Nicht im Wallet",
         explain:
-          "Fügen Sie den Sparkassen Authenticator Ihrem EUDI Wallet hinzu, um sich online auszuweisen.",
+          "Fügen Sie den Sparkassen Authenticator Ihrem Wallet hinzu, um sich online auszuweisen.",
       },
       offered: {
         badge: "Wird hinzugefügt…",
@@ -230,9 +236,13 @@ export const DIALOG_COPY: Record<
 > = {
   en: {
     "card-eudi": {
-      title: "Add card to EUDI Wallet",
+      title: "Add card to wallet",
       successTitle: "Card added",
-      successBody: "Your card is now in your EUDI Wallet.",
+      // Byte-identical to card-google's below, and correctly so: the reason
+      // that one never named Google applies to every flavour — the bank cannot
+      // observe which app answered the offer. Only the TITLE, which states an
+      // intent rather than an outcome, can differ between the two buttons.
+      successBody: "Your card is now in your wallet.",
       failureBody: "The card could not be added.",
     },
     "card-google": {
@@ -245,9 +255,9 @@ export const DIALOG_COPY: Record<
       failureBody: "The card could not be added.",
     },
     "age-eudi": {
-      title: "Add age verification to EUDI Wallet",
+      title: "Add age verification to wallet",
       successTitle: "Age verification added",
-      successBody: "Your age verification is now in your EUDI Wallet.",
+      successBody: "Your age verification is now in your wallet.",
       failureBody: "The age verification could not be added.",
     },
     "age-google": {
@@ -258,31 +268,27 @@ export const DIALOG_COPY: Record<
       successBody: "Your age verification is now in your wallet.",
       failureBody: "The age verification could not be added.",
     },
-    // No `wero-google` counterpart: Wero is offered for the EUDI Wallet alone,
-    // so a second flavour would be copy for a button that does not exist. The
-    // authenticator below has no counterpart for exactly the same reason.
+    // No `wero-google` counterpart: Wero has one button, so a second flavour
+    // would be copy for a button that does not exist. The authenticator below
+    // has no counterpart for exactly the same reason.
     "wero-eudi": {
-      title: "Add Wero to EUDI Wallet",
+      title: "Add Wero to wallet",
       successTitle: "Wero added",
-      successBody: "Wero is now in your EUDI Wallet.",
+      successBody: "Wero is now in your wallet.",
       failureBody: "Wero could not be added.",
     },
     "authenticator-eudi": {
-      title: "Add Sparkassen Authenticator to EUDI Wallet",
+      title: "Add Sparkassen Authenticator to wallet",
       successTitle: "Sparkassen Authenticator added",
-      // Names EUDI Wallet legitimately, as card-eudi and wero-eudi do: this
-      // credential has exactly one handover and it was started from the EUDI
-      // button, so the sentence states an intent the bank actually had rather
-      // than an outcome it cannot observe.
-      successBody: "The Sparkassen Authenticator is now in your EUDI Wallet.",
+      successBody: "The Sparkassen Authenticator is now in your wallet.",
       failureBody: "The Sparkassen Authenticator could not be added.",
     },
   },
   de: {
     "card-eudi": {
-      title: "Karte zum EUDI Wallet hinzufügen",
+      title: "Karte zum Wallet hinzufügen",
       successTitle: "Karte hinzugefügt",
-      successBody: "Ihre Karte ist jetzt in Ihrem EUDI Wallet.",
+      successBody: "Ihre Karte ist jetzt in Ihrem Wallet.",
       failureBody: "Die Karte konnte nicht hinzugefügt werden.",
     },
     "card-google": {
@@ -292,9 +298,9 @@ export const DIALOG_COPY: Record<
       failureBody: "Die Karte konnte nicht hinzugefügt werden.",
     },
     "age-eudi": {
-      title: "Altersnachweis zum EUDI Wallet hinzufügen",
+      title: "Altersnachweis zum Wallet hinzufügen",
       successTitle: "Altersnachweis hinzugefügt",
-      successBody: "Ihr Altersnachweis ist jetzt in Ihrem EUDI Wallet.",
+      successBody: "Ihr Altersnachweis ist jetzt in Ihrem Wallet.",
       failureBody: "Der Altersnachweis konnte nicht hinzugefügt werden.",
     },
     "age-google": {
@@ -304,16 +310,15 @@ export const DIALOG_COPY: Record<
       failureBody: "Der Altersnachweis konnte nicht hinzugefügt werden.",
     },
     "wero-eudi": {
-      title: "Wero zum EUDI Wallet hinzufügen",
+      title: "Wero zum Wallet hinzufügen",
       successTitle: "Wero hinzugefügt",
-      successBody: "Wero ist jetzt in Ihrem EUDI Wallet.",
+      successBody: "Wero ist jetzt in Ihrem Wallet.",
       failureBody: "Wero konnte nicht hinzugefügt werden.",
     },
     "authenticator-eudi": {
-      title: "Sparkassen Authenticator zum EUDI Wallet hinzufügen",
+      title: "Sparkassen Authenticator zum Wallet hinzufügen",
       successTitle: "Sparkassen Authenticator hinzugefügt",
-      successBody:
-        "Der Sparkassen Authenticator ist jetzt in Ihrem EUDI Wallet.",
+      successBody: "Der Sparkassen Authenticator ist jetzt in Ihrem Wallet.",
       failureBody:
         "Der Sparkassen Authenticator konnte nicht hinzugefügt werden.",
     },
@@ -338,9 +343,9 @@ export function dialogCopy(
 /**
  * The label on the one button beside a credential.
  *
- * Credential-independent — "Add to EUDI Wallet" says nothing about what is
- * being added, because the tile's heading and face already do — so this reads
- * the shared catalog rather than FACE_COPY. It is the EUDI button's label only:
+ * Credential-independent — "Add to wallet" says nothing about what is being
+ * added, because the tile's heading and face already do — so this reads the
+ * shared catalog rather than FACE_COPY. It is that button's label only:
  * the Google Wallet badge is artwork and carries its text in the SVG, so
  * `MESSAGES[locale].issuance.addToGoogleWallet` is its accessible name rather
  * than a rendered string.

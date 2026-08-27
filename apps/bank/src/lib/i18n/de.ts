@@ -21,7 +21,11 @@ export const de: Messages = {
     submitPending: "Wird angemeldet…",
     demoLogins: "Demo-Zugänge",
     failed: "Anmeldung fehlgeschlagen. Bitte Zugangsdaten prüfen.",
-    walletSubmit: "Mit EUDI-Wallet anmelden",
+    // Deliberately article-less. The catalog is split on the gender of
+    // "Wallet" — `walletLogin` below treats it as feminine ("Mit Ihrer
+    // Wallet"), `issuance` as neuter ("Zum Wallet") — and this string sits
+    // between the two, so it takes no article and picks no side.
+    walletSubmit: "Mit Wallet anmelden",
     walletDivider: "oder",
   },
   walletLogin: {
@@ -67,13 +71,16 @@ export const de: Messages = {
     ageTitle: "Altersnachweis",
   },
   issuance: {
-    addToWallet: "Zum EUDI Wallet hinzufügen",
-    addAgain: "Erneut zum EUDI Wallet hinzufügen",
+    addToWallet: "Zum Wallet hinzufügen",
+    addAgain: "Erneut zum Wallet hinzufügen",
     addToGoogleWallet: "Zu Google Wallet hinzufügen",
     preparing: "Wird vorbereitet…",
-    confirmInApp: "Bestätigen Sie das Angebot in Ihrer EUDI Wallet App.",
+    // "Wallet-App" hyphenated: with "EUDI" gone the two nouns form a German
+    // compound, which "EUDI Wallet App" was spared only by the proper noun in
+    // front of it. Matches the spelling `walletLogin` already uses.
+    confirmInApp: "Bestätigen Sie das Angebot in Ihrer Wallet-App.",
     openInWallet: "Im Wallet öffnen",
-    scanCode: "Scannen Sie den Code mit Ihrer EUDI Wallet App.",
+    scanCode: "Scannen Sie den Code mit Ihrer Wallet-App.",
     qrAlt: "QR-Code für das Credential-Angebot",
     waiting: "Warte auf Wallet",
     cancel: "Abbrechen",

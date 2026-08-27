@@ -21,7 +21,7 @@ export const en: Messages = {
     submitPending: "Signing in…",
     demoLogins: "Demo logins",
     failed: "Sign-in failed. Please check your credentials.",
-    walletSubmit: "Login with EUDI-Wallet",
+    walletSubmit: "Sign in with wallet",
     walletDivider: "or",
   },
   walletLogin: {
@@ -67,15 +67,18 @@ export const en: Messages = {
     ageTitle: "Age verification",
   },
   issuance: {
-    addToWallet: "Add to EUDI Wallet",
-    addAgain: "Add to EUDI Wallet again",
+    // Names no scheme, exactly as the dialog and tile copy do not. The button
+    // beside this one on the card and age tiles IS Google-branded, but that is
+    // Google's artwork naming itself, not this app naming a wallet.
+    addToWallet: "Add to wallet",
+    addAgain: "Add to wallet again",
     // The accessible name for the Google Wallet badge. The badge is artwork
     // whose text is drawn as SVG paths, so nothing renders this string.
     addToGoogleWallet: "Add to Google Wallet",
     preparing: "Preparing…",
-    confirmInApp: "Confirm the offer in your EUDI Wallet app.",
+    confirmInApp: "Confirm the offer in your wallet app.",
     openInWallet: "Open in wallet",
-    scanCode: "Scan the code with your EUDI Wallet app.",
+    scanCode: "Scan the code with your wallet app.",
     qrAlt: "QR code for the credential offer",
     waiting: "Waiting for wallet",
     cancel: "Cancel",

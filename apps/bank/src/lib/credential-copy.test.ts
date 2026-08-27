@@ -185,7 +185,7 @@ describe("FACE_COPY", () => {
 
   it("uses the German the card tile shipped with", () => {
     expect(faceCopy("de", "card", "none").explain).toBe(
-      "Fügen Sie diese Karte Ihrem EUDI Wallet hinzu, um online zu bezahlen.",
+      "Fügen Sie diese Karte Ihrem Wallet hinzu, um online zu bezahlen.",
     );
     expect(faceCopy("de", "card", "active").badge).toBe("Im Wallet");
   });
@@ -199,16 +199,46 @@ describe("FACE_COPY", () => {
       expect(faceCopy("de", kind, "active").explain).not.toMatch(/EUDI/);
     }
   });
+
+  it("names no wallet scheme in ANY state, not just the active one", () => {
+    // The exclusion above is about which of a tile's two buttons delivered the
+    // credential, and so only ever covered `active`. This one is about
+    // vocabulary: the tiles say "your wallet" and never name a scheme, so the
+    // `none` state — which used to read "your EUDI Wallet" — cannot drift back.
+    for (const locale of ["de", "en"] as const) {
+      for (const kind of KINDS) {
+        for (const state of STATES) {
+          const { explain } = faceCopy(locale, kind, state);
+          expect(explain, `${locale}/${kind}/${state}`).not.toMatch(/EUDI/);
+          expect(explain, `${locale}/${kind}/${state}`).not.toMatch(/Google/);
+        }
+      }
+    }
+  });
 });
 
 describe("DIALOG_COPY", () => {
-  it("uses the card dialog's original German strings for the EUDI handover", () => {
+  it("uses the card dialog's German strings for the wallet handover", () => {
     expect(dialogCopy("de", "card-eudi")).toEqual({
-      title: "Karte zum EUDI Wallet hinzufügen",
+      title: "Karte zum Wallet hinzufügen",
       successTitle: "Karte hinzugefügt",
-      successBody: "Ihre Karte ist jetzt in Ihrem EUDI Wallet.",
+      successBody: "Ihre Karte ist jetzt in Ihrem Wallet.",
       failureBody: "Die Karte konnte nicht hinzugefügt werden.",
     });
+  });
+
+  it("names no wallet scheme in ANY flavour's success body", () => {
+    // Generalises what used to hold for the `-google` flavours alone, and the
+    // reason was never about Google: an OpenID4VCI offer is answered by
+    // whichever wallet the device hands it to, so no success body can name the
+    // recipient. The `-eudi` flavours were the exception contradicting that.
+    for (const locale of ["de", "en"] as const) {
+      for (const flavour of FLAVOURS) {
+        const { successBody } = dialogCopy(locale, flavour);
+        expect(successBody, `${locale}/${flavour}`).not.toMatch(/EUDI/);
+        expect(successBody, `${locale}/${flavour}`).not.toMatch(/Google/);
+      }
+    }
   });
 
   it("names Google Wallet in the Google flavour's title, in both languages", () => {
@@ -283,22 +313,14 @@ describe("DIALOG_COPY", () => {
     }
   });
 
-  it("names EUDI Wallet in Wero's title, in both languages", () => {
-    expect(dialogCopy("en", "wero-eudi").title).toBe("Add Wero to EUDI Wallet");
+  it("names a plain wallet in Wero's title, in both languages", () => {
+    // Wero has ONE button, so naming the scheme here would have been
+    // defensible — the title states an intent the bank does have. It says
+    // "wallet" anyway, so the whole app speaks one vocabulary.
+    expect(dialogCopy("en", "wero-eudi").title).toBe("Add Wero to wallet");
     expect(dialogCopy("de", "wero-eudi").title).toBe(
-      "Wero zum EUDI Wallet hinzufügen",
+      "Wero zum Wallet hinzufügen",
     );
-  });
-
-  it("may name EUDI Wallet in Wero's success body, unlike the Google flavours", () => {
-    // Legitimate here for the same reason it is on card-eudi: this credential
-    // has exactly one handover, started from the EUDI button, so the sentence
-    // states something the bank actually intended rather than an outcome it
-    // cannot observe.
-    for (const locale of ["de", "en"] as const) {
-      expect(dialogCopy(locale, "wero-eudi").successBody).toMatch(/EUDI/);
-      expect(dialogCopy(locale, "wero-eudi").successBody).not.toMatch(/Google/);
-    }
   });
 
   it("gives Wero its own subject in every dialog string", () => {
@@ -313,27 +335,13 @@ describe("DIALOG_COPY", () => {
     }
   });
 
-  it("names EUDI Wallet in the authenticator's title, in both languages", () => {
+  it("names a plain wallet in the authenticator's title, in both languages", () => {
     expect(dialogCopy("en", "authenticator-eudi").title).toBe(
-      "Add Sparkassen Authenticator to EUDI Wallet",
+      "Add Sparkassen Authenticator to wallet",
     );
     expect(dialogCopy("de", "authenticator-eudi").title).toBe(
-      "Sparkassen Authenticator zum EUDI Wallet hinzufügen",
+      "Sparkassen Authenticator zum Wallet hinzufügen",
     );
-  });
-
-  it("may name EUDI Wallet in the authenticator's success body", () => {
-    // Legitimate for the same reason as wero-eudi and card-eudi: one handover,
-    // started from the EUDI button, so the sentence states an intent rather
-    // than an unobservable outcome.
-    for (const locale of ["de", "en"] as const) {
-      expect(dialogCopy(locale, "authenticator-eudi").successBody).toMatch(
-        /EUDI/,
-      );
-      expect(dialogCopy(locale, "authenticator-eudi").successBody).not.toMatch(
-        /Google/,
-      );
-    }
   });
 
   it("gives the authenticator its own subject in every dialog string", () => {
@@ -410,7 +418,7 @@ describe("English copy", () => {
   });
 
   it("uses the English dialog title for the card", () => {
-    expect(dialogCopy("en", "card-eudi").title).toBe("Add card to EUDI Wallet");
+    expect(dialogCopy("en", "card-eudi").title).toBe("Add card to wallet");
   });
 
   it("distinguishes the two subjects in the English dialog", () => {
@@ -472,6 +480,48 @@ describe("the Google Wallet badge's accessible name", () => {
     for (const locale of ["de", "en"] as const) {
       expect(MESSAGES[locale].issuance.addToGoogleWallet).toMatch(/Google/);
       expect(MESSAGES[locale].issuance.addToGoogleWallet).not.toMatch(/EUDI/);
+    }
+  });
+});
+
+describe("the wallet button's own label", () => {
+  // The Google badge above is the ONE place a scheme is named, because that
+  // badge is Google's artwork and its proportions and wording are Google's to
+  // set. Every other handover string says "wallet" and nothing more.
+  const HANDOVER_KEYS = [
+    "addToWallet",
+    "addAgain",
+    "confirmInApp",
+    "openInWallet",
+    "scanCode",
+  ] as const;
+
+  it("names no wallet scheme, in either locale", () => {
+    for (const locale of ["de", "en"] as const) {
+      for (const key of HANDOVER_KEYS) {
+        expect(
+          MESSAGES[locale].issuance[key],
+          `${locale}:issuance.${key}`,
+        ).not.toMatch(/EUDI/);
+      }
+    }
+  });
+
+  it("names no wallet scheme on the wallet sign-in button either", () => {
+    // The dialog this button opens already said "your wallet" throughout, so
+    // the button was the last string on that path still naming a scheme.
+    for (const locale of ["de", "en"] as const) {
+      expect(MESSAGES[locale].login.walletSubmit).not.toMatch(/EUDI/);
+    }
+  });
+
+  it("still names the scheme in the login chrome, which is deliberate", () => {
+    // The footer and the page description name the SCHEME rather than
+    // instructing anyone, and the transaction badge sits beside the twelve EU
+    // stars. Those are not buttons and they keep the full name on purpose.
+    for (const locale of ["de", "en"] as const) {
+      expect(MESSAGES[locale].login.walletFooter).toMatch(/EUDI/);
+      expect(MESSAGES[locale].meta.description).toMatch(/EUDI/);
     }
   });
 });
