@@ -84,8 +84,23 @@ export const paymentSessions = sqliteTable("payment_sessions", {
   * How this session's presentation was requested. Recorded rather than
   * inferred: `openid4vp_uri IS NULL` is ambiguous between a dc_api session
   * and a foundry failure.
+  *
+  * `dc_api_signed` is the signed-Request-Object form of the DC API
+  * (OpenID4VP 1.0 §A.2) and is the DEFAULT for a browser that supports the
+  * API; `dc_api` is the unsigned form, reachable only via `?dcapi=unsigned`.
+  * The two are separate values rather than one plus a flag because they carry
+  * different `dc_api_request_json` shapes.
+  *
+  * Widening this list needed NO migration: the column has no CHECK constraint
+  * (`0002_funny_legion.sql` is plain `text DEFAULT 'request_uri' NOT NULL`), so
+  * the `enum:` here is a TypeScript claim about the data, not a database one.
+  *
+  * What is written here is the transport foundry ACTUALLY served, not the one
+  * that was asked for — see `startPaymentSession`.
   */
- transport: text("transport", { enum: ["request_uri", "dc_api"] })
+ transport: text("transport", {
+  enum: ["request_uri", "dc_api", "dc_api_signed"],
+ })
   .notNull()
   .default("request_uri"),
  /**
@@ -114,8 +129,25 @@ export const paymentSessions = sqliteTable("payment_sessions", {
  namedQueryRef: text("named_query_ref", { enum: ["payment", "payment_av"] })
   .notNull()
   .default("payment"),
- /** foundry's inline unsigned request object, verbatim. Only for dc_api. */
+ /**
+  * foundry's inline request object, verbatim. Only for a DC API transport: a
+  * bare parameter object under `dc_api`, the single-member
+  * `{ request: "<compact JWS>" }` wrapper under `dc_api_signed`.
+  */
  dcApiRequestJson: text("dc_api_request_json"),
+ /**
+  * The DC API exchange protocol identifier foundry returned alongside
+  * `dc_api_request_json` (`openid4vp-v1-signed` / `openid4vp-v1-unsigned`),
+  * stored verbatim and replayed verbatim into the browser's DC API call.
+  *
+  * Persisted rather than derived from `transport` on purpose. The identifier
+  * and the request-object shape are two halves of one wire contract and
+  * foundry decides the shape, so re-deriving one from our own request is
+  * exactly how a signed payload ends up under the unsigned identifier — a
+  * failure that happens inside the wallet with no server-side trace. NULL for
+  * `request_uri`, which performs no DC API invocation.
+  */
+ dcApiProtocol: text("dc_api_protocol"),
  /** foundry's verdict, stored verbatim so the success screen can show it. */
  disclosedClaimsJson: text("disclosed_claims_json"),
  checksJson: text("checks_json"),

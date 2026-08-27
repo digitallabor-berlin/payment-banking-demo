@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
-  DC_API_PRESENTATION_PROTOCOL,
+  DC_API_PRESENTATION_PROTOCOL_SIGNED,
   QrCanvas,
   invokeDcGet,
   isDcApiNotSupportedError,
@@ -28,9 +28,17 @@ const QR_DARK = "#ff0000";
 
 export interface WalletLoginDialogProps {
   sessionId: string;
-  /** Null under dc_api — foundry inlines the request object instead. */
+  /** Null under a DC API transport — foundry inlines the request object. */
   uri: string | null;
   dcApiRequest: unknown;
+  /**
+   * The DC API exchange protocol identifier foundry returned for THIS session,
+   * paired with `dcApiRequest` verbatim rather than re-derived from a constant:
+   * the identifier names which shape `dcApiRequest` carries, and a signed
+   * request object sent under the unsigned identifier fails inside the wallet
+   * with no server-side trace. Null when the session is cross-device.
+   */
+  dcApiProtocol: string | null;
   locale: Locale;
   onClose: () => void;
 }
@@ -44,13 +52,21 @@ export function WalletLoginDialog({
   sessionId,
   uri,
   dcApiRequest,
+  dcApiProtocol,
   locale,
   onClose,
 }: WalletLoginDialogProps) {
   const router = useRouter();
   const t = MESSAGES[locale].walletLogin;
   const isTouch = useIsTouch();
-  const dcSupported = useDcApiSupport("get", DC_API_PRESENTATION_PROTOCOL);
+  // Detect against the identifier this session actually holds; the signed form
+  // is the default when there is none, because that is what the button asks
+  // for. On the one browser we can measure the argument is inert anyway —
+  // HeadlessChrome 151 answers `true` for every string, bogus ones included.
+  const dcSupported = useDcApiSupport(
+    "get",
+    dcApiProtocol ?? DC_API_PRESENTATION_PROTOCOL_SIGNED,
+  );
   const [dcError, setDcError] = useState<LoginDcError>(null);
   const [claimed, setClaimed] = useState(false);
 
@@ -75,7 +91,10 @@ export function WalletLoginDialog({
     [],
   );
 
-  const { value, outcome } = useStatusPoll<PollState>({ fetchOnce, isTerminal });
+  const { value, outcome } = useStatusPoll<PollState>({
+    fetchOnce,
+    isTerminal,
+  });
 
   // The claim is a SEPARATE request from the poll, and it is a POST. A GET
   // that minted a session would be consumed by a prefetch or a double-poll.
@@ -128,9 +147,18 @@ export function WalletLoginDialog({
   // No `await` may execute before invokeDcGet — Chrome consumes the click's
   // transient activation otherwise. dcApiRequest is already a prop.
   async function signInViaDcApi() {
+    // A session created before detection resolved is cross-device and carries no
+    // identifier, while the dialog's own detection may since have answered yes.
+    // Inventing one here is exactly the mispairing persisting it prevents, so
+    // this reports the same "this browser cannot" copy the QR fallback sits
+    // under. Synchronous, so the click's transient activation survives it.
+    if (!dcApiProtocol) {
+      setDcError("unsupported");
+      return;
+    }
     try {
       const data = await invokeDcGet(
-        prepareDcApiRequest(dcApiRequest, DC_API_PRESENTATION_PROTOCOL),
+        prepareDcApiRequest(dcApiRequest, dcApiProtocol),
       );
       await fetch(`/api/auth/wallet-login/${sessionId}/dc-api-response`, {
         method: "POST",

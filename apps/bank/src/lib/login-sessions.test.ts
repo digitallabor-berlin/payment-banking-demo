@@ -72,16 +72,53 @@ const DC_API_OK = {
   status: 200,
   body: {
     verification_id: "v_login_2",
+    protocol: "openid4vp-v1-unsigned",
     openid4vp_uri: null,
     request_uri: null,
     dc_api_request: { response_mode: "dc_api.jwt", nonce: "n" },
   },
 };
 
+/**
+ * The signed form — the DEFAULT for a browser with the DC API. `dc_api_request`
+ * is OpenID4VP 1.0 L2476's single-member wrapper around a JWS Compact
+ * Serialization; shape measured 2026-08-27 against the deployed foundry, whose
+ * signed login request object carries the `transaction_data` entry inside the
+ * signature.
+ */
+const DC_API_SIGNED_OK = {
+  status: 200,
+  body: {
+    verification_id: "v_login_3",
+    protocol: "openid4vp-v1-signed",
+    openid4vp_uri: null,
+    request_uri: null,
+    dc_api_request: { request: "eyJ0eXAi.eyJhdWQi.c2ln" },
+  },
+};
+
+/**
+ * What a foundry too old to know `dc_api_signed` answers: the unknown transport
+ * falls through to `response_mode: direct_post.jwt`, so it serves URIs and no
+ * inline request object at all.
+ */
+const STALE_FOUNDRY_OK = {
+  status: 200,
+  body: {
+    verification_id: "v_login_stale",
+    openid4vp_uri: "openid4vp://?request_uri=https%3A%2F%2Ff%2Freq%2F9",
+    request_uri: "https://f/req/9",
+  },
+};
+
 describe("startLoginSession", () => {
   it("asks foundry for the sparkassen_auth named query", async () => {
     const captures: Capture[] = [];
-    await startLoginSession(db, stubClient(captures, REQUEST_URI_OK), false);
+    await startLoginSession(
+      db,
+      stubClient(captures, REQUEST_URI_OK),
+      "request_uri",
+    );
 
     expect(captures[0]?.url).toBe("http://f:9000/admin/verification/requests");
     expect(captures[0]?.body["named_query_ref"]).toBe("sparkassen_auth");
@@ -96,7 +133,7 @@ describe("startLoginSession", () => {
     await startLoginSession(
       db,
       stubClient(captures, REQUEST_URI_OK),
-      false,
+      "request_uri",
       Date.UTC(2026, 7, 25, 16, 45, 0, 123),
     );
 
@@ -112,7 +149,12 @@ describe("startLoginSession", () => {
 
   it("binds the datetime of the injected instant, not of the clock", async () => {
     const captures: Capture[] = [];
-    await startLoginSession(db, stubClient(captures, REQUEST_URI_OK), false, 0);
+    await startLoginSession(
+      db,
+      stubClient(captures, REQUEST_URI_OK),
+      "request_uri",
+      0,
+    );
 
     const [entry] = captures[0]?.body["transaction_data"] as Record<
       string,
@@ -126,7 +168,11 @@ describe("startLoginSession", () => {
   it("sends no dcql_query alongside the named query", async () => {
     // foundry prefers an inline query and would silently ignore the named one.
     const captures: Capture[] = [];
-    await startLoginSession(db, stubClient(captures, REQUEST_URI_OK), false);
+    await startLoginSession(
+      db,
+      stubClient(captures, REQUEST_URI_OK),
+      "request_uri",
+    );
     expect(captures[0]?.body).not.toHaveProperty("dcql_query");
   });
 
@@ -134,7 +180,7 @@ describe("startLoginSession", () => {
     const result = await startLoginSession(
       db,
       stubClient([], REQUEST_URI_OK),
-      false,
+      "request_uri",
     );
     expect(result).toMatchObject({
       ok: true,
@@ -149,7 +195,7 @@ describe("startLoginSession", () => {
     const result = await startLoginSession(
       db,
       stubClient([], REQUEST_URI_OK),
-      false,
+      "request_uri",
     );
     expect(result.ok && result.sessionId.startsWith("login_")).toBe(true);
   });
@@ -159,7 +205,7 @@ describe("startLoginSession", () => {
     const result = await startLoginSession(
       db,
       stubClient(captures, DC_API_OK),
-      true,
+      "dc_api",
     );
 
     expect(captures[0]?.body["transport"]).toBe("dc_api");
@@ -175,7 +221,7 @@ describe("startLoginSession", () => {
     const result = await startLoginSession(
       db,
       stubClient([], REQUEST_URI_OK),
-      false,
+      "request_uri",
     );
     const row = db.select().from(loginSessions).get();
 
@@ -188,7 +234,7 @@ describe("startLoginSession", () => {
   });
 
   it("stores the inline request object as JSON under dc_api", async () => {
-    await startLoginSession(db, stubClient([], DC_API_OK), true);
+    await startLoginSession(db, stubClient([], DC_API_OK), "dc_api");
     const row = db.select().from(loginSessions).get();
     expect(JSON.parse(row?.dcApiRequestJson ?? "null")).toEqual({
       response_mode: "dc_api.jwt",
@@ -200,7 +246,7 @@ describe("startLoginSession", () => {
     const result = await startLoginSession(
       db,
       stubClient([], { status: 500, body: { error: "unknown named query" } }),
-      false,
+      "request_uri",
     );
 
     expect(result).toEqual({ ok: false, reason: "foundry_unavailable" });
@@ -209,11 +255,70 @@ describe("startLoginSession", () => {
     expect(row?.failureReason).toBe("foundry_unavailable");
   });
 
+  it("asks for the signed form and pairs foundry's own protocol identifier with it", async () => {
+    const captures: Capture[] = [];
+    const result = await startLoginSession(
+      db,
+      stubClient(captures, DC_API_SIGNED_OK),
+      "dc_api_signed",
+    );
+
+    expect(captures[0]?.body["transport"]).toBe("dc_api_signed");
+    expect(result).toMatchObject({
+      ok: true,
+      transport: "dc_api_signed",
+      uri: null,
+      dcApiRequest: { request: "eyJ0eXAi.eyJhdWQi.c2ln" },
+      dcApiProtocol: "openid4vp-v1-signed",
+    });
+
+    const row = db.select().from(loginSessions).get();
+    expect(row?.transport).toBe("dc_api_signed");
+    expect(row?.dcApiProtocol).toBe("openid4vp-v1-signed");
+    expect(JSON.parse(row?.dcApiRequestJson ?? "null")).toEqual({
+      request: "eyJ0eXAi.eyJhdWQi.c2ln",
+    });
+  });
+
+  // Fails SOFT. A stale foundry cannot serve a signed request object but does
+  // serve a URI, so the holder gets the cross-device QR rather than a dialog
+  // with a button that cannot be invoked.
+  it("records the transport foundry actually served, not the one requested", async () => {
+    const result = await startLoginSession(
+      db,
+      stubClient([], STALE_FOUNDRY_OK),
+      "dc_api_signed",
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      transport: "request_uri",
+      uri: "openid4vp://?request_uri=https%3A%2F%2Ff%2Freq%2F9",
+      dcApiRequest: null,
+      dcApiProtocol: null,
+    });
+
+    const row = db.select().from(loginSessions).get();
+    expect(row?.transport).toBe("request_uri");
+    expect(row?.dcApiProtocol).toBeNull();
+    expect(row?.dcApiRequestJson).toBeNull();
+  });
+
+  it("leaves the protocol identifier null under request_uri", async () => {
+    const result = await startLoginSession(
+      db,
+      stubClient([], REQUEST_URI_OK),
+      "request_uri",
+    );
+    expect(result).toMatchObject({ ok: true, dcApiProtocol: null });
+    expect(db.select().from(loginSessions).get()?.dcApiProtocol).toBeNull();
+  });
+
   it("records the requested transport even on a failed row", async () => {
     await startLoginSession(
       db,
       stubClient([], { status: 500, body: {} }),
-      true,
+      "dc_api",
     );
     expect(db.select().from(loginSessions).get()?.transport).toBe("dc_api");
   });
@@ -228,7 +333,7 @@ describe("getLoginSessionStatus", () => {
     const result = await startLoginSession(
       db,
       stubClient([], REQUEST_URI_OK),
-      false,
+      "request_uri",
     );
     const status = getLoginSessionStatus(db, result.ok ? result.sessionId : "");
     expect(status).toEqual({ state: "pending" });
@@ -238,7 +343,7 @@ describe("getLoginSessionStatus", () => {
     await startLoginSession(
       db,
       stubClient([], { status: 500, body: {} }),
-      false,
+      "request_uri",
     );
     const row = db.select().from(loginSessions).get();
     expect(getLoginSessionStatus(db, row?.id ?? "")).toEqual({
@@ -318,7 +423,7 @@ async function openSession(): Promise<string> {
   const result = await startLoginSession(
     db,
     stubClient([], REQUEST_URI_OK),
-    false,
+    "request_uri",
   );
   if (!result.ok) throw new Error("fixture failed to open a session");
   return result.sessionId;

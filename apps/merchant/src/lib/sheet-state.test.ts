@@ -46,8 +46,34 @@ describe("selectSheetView — waiting states", () => {
     expect(view.animate).toBe(false);
   });
 
+  // The signed form is the DEFAULT DC API transport, so this branch is the one
+  // most sessions take. A bare `transport === "dc_api"` would miss it and fall
+  // through to the QR branch — rendering a QR of an empty string, because a DC
+  // API session has no URI at all.
+  it("offers the wallet button for a dc_api_signed session too", () => {
+    const view = selectSheetView({ ...base, transport: "dc_api_signed" });
+    expect(view.phase).toBe("authorise");
+    expect(view.showQr).toBe(false);
+    expect(view.showWalletButton).toBe(true);
+    expect(view.primaryAction).toBe("approve");
+  });
+
+  it("moves to waiting once a dc_api_signed call is in flight", () => {
+    const view = selectSheetView({
+      ...base,
+      transport: "dc_api_signed",
+      dcBusy: true,
+    });
+    expect(view.phase).toBe("waiting");
+    expect(view.showWalletButton).toBe(false);
+  });
+
   it("moves to waiting once the dc_api call is in flight", () => {
-    const view = selectSheetView({ ...base, transport: "dc_api", dcBusy: true });
+    const view = selectSheetView({
+      ...base,
+      transport: "dc_api",
+      dcBusy: true,
+    });
     expect(view.phase).toBe("waiting");
     expect(view.pill).toBe("Opening your wallet…");
     expect(view.animate).toBe(true);
@@ -70,7 +96,11 @@ describe("selectSheetView — settling", () => {
 
 describe("selectSheetView — terminal states", () => {
   it("completes the ring and flips the eyebrow on success", () => {
-    const view = selectSheetView({ ...base, state: "completed", pollStatus: null });
+    const view = selectSheetView({
+      ...base,
+      state: "completed",
+      pollStatus: null,
+    });
     expect(view.phase).toBe("approved");
     expect(view.eyebrow).toBe("Paid");
     expect(view.litStars).toBe(12);
@@ -152,7 +182,11 @@ describe("selectSheetView — dc_api recovery", () => {
   });
 
   it("distinguishes a failed invocation from an unsupported browser", () => {
-    const view = selectSheetView({ ...base, transport: "dc_api", dcError: "failed" });
+    const view = selectSheetView({
+      ...base,
+      transport: "dc_api",
+      dcError: "failed",
+    });
     expect(view.body).toBe("Could not open your wallet on this device.");
     expect(view.primaryAction).toBe("show-qr");
   });
@@ -162,7 +196,9 @@ describe("selectSheetView — the age clause", () => {
   it("adds the age clause to the QR instruction and changes nothing else", () => {
     const plain = selectSheetView(base);
     const aged = selectSheetView({ ...base, ageRequested: true });
-    expect(plain.body).toBe("Scan with your EUDI Wallet to approve the payment.");
+    expect(plain.body).toBe(
+      "Scan with your EUDI Wallet to approve the payment.",
+    );
     expect(aged.body).toBe(
       "Scan with your EUDI Wallet to approve the payment and confirm you're over 18.",
     );

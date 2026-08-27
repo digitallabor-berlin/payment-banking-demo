@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DC_API_ISSUANCE_PROTOCOL,
   DC_API_PRESENTATION_PROTOCOL,
+  DC_API_PRESENTATION_PROTOCOL_SIGNED,
   invokeDcCreate,
   isDcApiNotSupportedError,
   prepareDcApiRequest,
@@ -141,6 +142,17 @@ describe("protocol constants", () => {
   it("uses the exact identifiers foundry and Chrome expect", () => {
     expect(DC_API_ISSUANCE_PROTOCOL).toBe("openid4vci-v1");
     expect(DC_API_PRESENTATION_PROTOCOL).toBe("openid4vp-v1-unsigned");
+    expect(DC_API_PRESENTATION_PROTOCOL_SIGNED).toBe("openid4vp-v1-signed");
+  });
+
+  // The two presentation identifiers must stay distinct values: they are the
+  // half of the wire contract that names which shape `data` carries, and a
+  // signed payload under the unsigned identifier fails inside the wallet with
+  // no server-side trace.
+  it("keeps the two presentation identifiers distinct", () => {
+    expect(DC_API_PRESENTATION_PROTOCOL_SIGNED).not.toBe(
+      DC_API_PRESENTATION_PROTOCOL,
+    );
   });
 });
 /**

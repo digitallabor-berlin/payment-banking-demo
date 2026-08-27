@@ -12,6 +12,8 @@
  * `litStars` instead, which is why the waiting states carry 6 rather than 0.
  */
 
+import { isDcApiTransport, type PresentationTransport } from "./transport.js";
+
 export type SheetPhase =
   | "authorise"
   | "waiting"
@@ -28,7 +30,7 @@ export type DcError = "unsupported" | "failed" | null;
 
 export interface SheetInput {
   state: string;
-  transport: "request_uri" | "dc_api";
+  transport: PresentationTransport;
   ageRequested: boolean;
   redirecting: boolean;
   dcBusy: boolean;
@@ -99,7 +101,11 @@ function declined(
 export function selectSheetView(input: SheetInput): SheetView {
   // Terminal outcomes first: a declined payment must never keep offering a QR.
   if (input.pollStatus === "timeout") {
-    return declined("Payment declined", "This payment request expired.", "retry");
+    return declined(
+      "Payment declined",
+      "This payment request expired.",
+      "retry",
+    );
   }
 
   if (input.pollStatus === "failed") {
@@ -186,7 +192,11 @@ export function selectSheetView(input: SheetInput): SheetView {
     };
   }
 
-  if (input.transport === "dc_api") {
+  // Both DC API forms render the wallet button and never a QR: each inlines its
+  // request object and has no URI to scan. Asked through the predicate rather
+  // than compared to one value, because `transport === "dc_api"` misses the
+  // signed form and would silently show a QR of an empty string.
+  if (isDcApiTransport(input.transport)) {
     const body = input.ageRequested
       ? "Your wallet will confirm the amount and that you're over 18."
       : "Your wallet will confirm the amount.";

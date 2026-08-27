@@ -1,0 +1,1 @@
+ALTER TABLE `login_sessions` ADD `dc_api_protocol` text;

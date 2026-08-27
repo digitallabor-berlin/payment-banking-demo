@@ -327,9 +327,7 @@ describe("credentials shape", () => {
 
 describe("login_sessions", () => {
   it("defaults a new row to pending / request_uri with no user", () => {
-    db.insert(loginSessions)
-      .values({ id: "login_1", createdAt: 1000 })
-      .run();
+    db.insert(loginSessions).values({ id: "login_1", createdAt: 1000 }).run();
 
     const row = db.select().from(loginSessions).get();
     expect(row?.state).toBe("pending");
@@ -337,6 +335,30 @@ describe("login_sessions", () => {
     expect(row?.userId).toBeNull();
     expect(row?.foundryVerificationId).toBeNull();
     expect(row?.failureReason).toBeNull();
+    // NULL, not the empty string: a request_uri session performs no DC API
+    // invocation, so there is no protocol identifier to report.
+    expect(row?.dcApiProtocol).toBeNull();
+  });
+
+  // Widening the `transport` enum needed no SQL: the column is plain
+  // `text DEFAULT 'request_uri' NOT NULL` with no CHECK constraint
+  // (`0002_gorgeous_natasha_romanoff.sql`), so the drizzle `enum:` is a
+  // TypeScript claim about the data rather than a database one. This test is
+  // what proves the database really does accept the third value.
+  it("stores the signed DC API transport alongside foundry's protocol identifier", () => {
+    db.insert(loginSessions)
+      .values({
+        id: "login_signed",
+        transport: "dc_api_signed",
+        dcApiRequestJson: '{"request":"eyJ0.eyJ1.sig"}',
+        dcApiProtocol: "openid4vp-v1-signed",
+        createdAt: 3000,
+      })
+      .run();
+
+    const row = db.select().from(loginSessions).get();
+    expect(row?.transport).toBe("dc_api_signed");
+    expect(row?.dcApiProtocol).toBe("openid4vp-v1-signed");
   });
 
   it("stores a resolved user and the dc_api transport", () => {

@@ -95,7 +95,37 @@ const dcApiOk = () => ({
   status: 200,
   body: {
     verification_id: "ver_dc",
+    protocol: "openid4vp-v1-unsigned",
     dc_api_request: { client_id: "x509_hash:abc", nonce: "n1" },
+  },
+});
+
+/**
+ * The signed form. `dc_api_request` is OpenID4VP 1.0 L2476's single-member
+ * wrapper around a JWS Compact Serialization — shape measured 2026-08-27
+ * against the deployed foundry.
+ */
+const dcApiSignedOk = () => ({
+  status: 200,
+  body: {
+    verification_id: "ver_dcs",
+    protocol: "openid4vp-v1-signed",
+    dc_api_request: { request: "eyJ0eXAi.eyJhdWQi.c2ln" },
+  },
+});
+
+/**
+ * What a foundry too old to know `dc_api_signed` answers: the unknown transport
+ * falls through to `response_mode: direct_post.jwt`, so it serves URIs and no
+ * inline request object at all. Not hypothetical politeness — it is the shape
+ * the deployed instance served before the signed transport landed.
+ */
+const staleFoundryOk = () => ({
+  status: 200,
+  body: {
+    verification_id: "ver_stale",
+    openid4vp_uri: "openid4vp://?x=1",
+    request_uri: "https://foundry.example/req/1",
   },
 });
 
@@ -118,6 +148,7 @@ describe("startPaymentSession", () => {
       transport: "request_uri",
       ageRequested: false,
       dcApiRequest: null,
+      dcApiProtocol: null,
       state: "pending",
     });
 
@@ -251,6 +282,7 @@ describe("startPaymentSession", () => {
     const row = db.select().from(paymentSessions).get();
     expect(row?.transport).toBe("request_uri");
     expect(row?.dcApiRequestJson).toBeNull();
+    expect(row?.dcApiProtocol).toBeNull();
   });
 
   it("asks foundry for the dc_api transport when told to", async () => {
@@ -266,10 +298,113 @@ describe("startPaymentSession", () => {
       "ord_1",
       "Demo Shop",
       "Payee-id-123",
-      true,
+      "dc_api",
     );
 
     expect(sentBody).toMatchObject({ transport: "dc_api" });
+  });
+
+  it("asks foundry for the dc_api_signed transport when told to", async () => {
+    let sentBody: unknown = null;
+    const client = stubClient((_url, init) => {
+      sentBody = JSON.parse(String(init.body));
+      return dcApiSignedOk();
+    });
+
+    await startPaymentSession(
+      db,
+      client,
+      "ord_1",
+      "Demo Shop",
+      "Payee-id-123",
+      "dc_api_signed",
+    );
+
+    expect(sentBody).toMatchObject({ transport: "dc_api_signed" });
+  });
+
+  // The signed request object and the identifier that names its shape are two
+  // halves of one wire contract. foundry decides the shape, so its `protocol`
+  // is persisted verbatim rather than re-derived from our own request.
+  it("persists the signed request object with foundry's own protocol identifier", async () => {
+    const result = await startPaymentSession(
+      db,
+      stubClient(dcApiSignedOk),
+      "ord_1",
+      "Demo Shop",
+      "Payee-id-123",
+      "dc_api_signed",
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      uri: null,
+      transport: "dc_api_signed",
+      dcApiRequest: { request: "eyJ0eXAi.eyJhdWQi.c2ln" },
+      dcApiProtocol: "openid4vp-v1-signed",
+    });
+
+    const row = db.select().from(paymentSessions).get();
+    expect(row?.transport).toBe("dc_api_signed");
+    expect(row?.dcApiProtocol).toBe("openid4vp-v1-signed");
+    expect(row?.openid4vpUri).toBeNull();
+    expect(row?.requestUri).toBeNull();
+    expect(JSON.parse(row?.dcApiRequestJson ?? "null")).toEqual({
+      request: "eyJ0eXAi.eyJhdWQi.c2ln",
+    });
+  });
+
+  // Fails SOFT, not loud. A stale foundry cannot serve a signed request object,
+  // but it does serve a URI — so the shopper gets a QR rather than a dead end,
+  // and the row records what was actually served rather than what was asked for.
+  it("records the transport foundry actually served, not the one requested", async () => {
+    const result = await startPaymentSession(
+      db,
+      stubClient(staleFoundryOk),
+      "ord_1",
+      "Demo Shop",
+      "Payee-id-123",
+      "dc_api_signed",
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      transport: "request_uri",
+      uri: "openid4vp://?x=1",
+      dcApiRequest: null,
+      dcApiProtocol: null,
+    });
+
+    const row = db.select().from(paymentSessions).get();
+    expect(row?.transport).toBe("request_uri");
+    expect(row?.dcApiProtocol).toBeNull();
+    expect(row?.dcApiRequestJson).toBeNull();
+  });
+
+  // The one omission that is unambiguous: a build old enough to lack `protocol`
+  // has only the unsigned DC API shape to serve, so the unsigned form still
+  // works against it rather than degrading.
+  it("defaults an unsigned session's identifier when foundry omits protocol", async () => {
+    const result = await startPaymentSession(
+      db,
+      stubClient(() => ({
+        status: 200,
+        body: {
+          verification_id: "ver_old",
+          dc_api_request: { client_id: "x509_hash:abc", nonce: "n1" },
+        },
+      })),
+      "ord_1",
+      "Demo Shop",
+      "Payee-id-123",
+      "dc_api",
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      transport: "dc_api",
+      dcApiProtocol: "openid4vp-v1-unsigned",
+    });
   });
 
   it("persists the inline dc_api_request and leaves both uris null", async () => {
@@ -279,7 +414,7 @@ describe("startPaymentSession", () => {
       "ord_1",
       "Demo Shop",
       "Payee-id-123",
-      true,
+      "dc_api",
     );
 
     // `uri` is null rather than "" under dc_api: foundry returns neither
@@ -294,11 +429,13 @@ describe("startPaymentSession", () => {
       transport: "dc_api",
       ageRequested: false,
       dcApiRequest: { client_id: "x509_hash:abc", nonce: "n1" },
+      dcApiProtocol: "openid4vp-v1-unsigned",
       state: "pending",
     });
 
     const row = db.select().from(paymentSessions).get();
     expect(row?.transport).toBe("dc_api");
+    expect(row?.dcApiProtocol).toBe("openid4vp-v1-unsigned");
     expect(row?.openid4vpUri).toBeNull();
     expect(row?.requestUri).toBeNull();
     expect(JSON.parse(row?.dcApiRequestJson ?? "null")).toEqual({
@@ -375,7 +512,7 @@ describe("startPaymentSession — the result the sheet is built from", () => {
       "ord_1",
       "Larder",
       "PAYEE-1",
-      false,
+      "request_uri",
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -392,7 +529,7 @@ describe("startPaymentSession — the result the sheet is built from", () => {
       "ord_1",
       "Larder",
       "PAYEE-1",
-      true,
+      "dc_api",
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;

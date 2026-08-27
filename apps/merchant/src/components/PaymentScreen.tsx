@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  DC_API_PRESENTATION_PROTOCOL,
   QrCanvas,
   invokeDcGet,
   isDcApiNotSupportedError,
@@ -13,6 +12,10 @@ import {
 } from "@demo/ui";
 import { formatEuroCents } from "@/lib/format.js";
 import { selectSheetView, type DcError } from "@/lib/sheet-state.js";
+import {
+  isDcApiTransport,
+  type PresentationTransport,
+} from "@/lib/transport.js";
 import { useCart } from "@/lib/useCart.js";
 // NB: EudiPayLogo is deliberately NOT imported. The ring draws its own card
 // glyph at the centre, so importing the standalone mark here would both put two
@@ -28,10 +31,17 @@ export interface PaymentScreenProps {
   amountCents: number;
   merchantName: string;
   openid4vpUri: string;
-  transport: "request_uri" | "dc_api";
+  transport: PresentationTransport;
   /** True when this session presents `payment_av`; adds one clause to the copy. */
   ageRequested: boolean;
   dcApiRequest: unknown;
+  /**
+   * The DC API exchange protocol identifier foundry returned for THIS session,
+   * paired with `dcApiRequest` verbatim rather than re-derived from a constant.
+   * Non-null whenever `transport` is a DC API form — `startPaymentSession`
+   * downgrades the session to request_uri when foundry did not supply one.
+   */
+  dcApiProtocol: string | null;
   /** A session that was already terminal when the page rendered. */
   initialState: string;
   initialFailureReason?: string;
@@ -58,6 +68,7 @@ export function PaymentScreen({
   transport,
   ageRequested,
   dcApiRequest,
+  dcApiProtocol,
   initialState,
   initialFailureReason,
   onClose,
@@ -147,7 +158,7 @@ export function PaymentScreen({
   // there is no URI to navigate to, and the gesture requirement forbids an
   // on-mount action anyway.
   useEffect(() => {
-    if (transport !== "request_uri") return;
+    if (isDcApiTransport(transport)) return;
     if (!isTouch || terminalAtRender || redirecting) return;
     setRedirecting(true);
     window.location.href = openid4vpUri;
@@ -208,13 +219,13 @@ export function PaymentScreen({
   }
 
   /** A fresh presentation for the same still-pending order (spec §6.3). */
-  async function startFreshSession(dcApi: boolean) {
+  async function startFreshSession(nextTransport: PresentationTransport) {
     setRetryError(null);
     try {
       const response = await fetch("/api/payment-sessions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ orderId, dcApi }),
+        body: JSON.stringify({ orderId, transport: nextTransport }),
       });
       if (!response.ok) {
         setRetryError(
@@ -232,10 +243,18 @@ export function PaymentScreen({
   // No `await` may execute before invokeDcGet — Chrome consumes the click's
   // transient activation otherwise. dcApiRequest is already a prop.
   async function payViaDcApi() {
+    // Cannot happen for a session this screen renders a wallet button for, but
+    // the identifier is half the wire contract: inventing one here is exactly
+    // the mispairing that persisting it was meant to prevent. Synchronous, so
+    // the click's transient activation survives it.
+    if (!dcApiProtocol) {
+      setDcError("unsupported");
+      return;
+    }
     setDcBusy(true);
     try {
       const data = await invokeDcGet(
-        prepareDcApiRequest(dcApiRequest, DC_API_PRESENTATION_PROTOCOL),
+        prepareDcApiRequest(dcApiRequest, dcApiProtocol),
       );
       await fetch(`/api/payment-sessions/${sessionId}/dc-api-response`, {
         method: "POST",
@@ -252,14 +271,15 @@ export function PaymentScreen({
 
   function onPrimaryAction() {
     if (view.primaryAction === "approve") void payViaDcApi();
-    // A dc_api session cannot be re-rendered as a QR: it is bound to
+    // Neither DC API session can be re-rendered as a QR: both are bound to
     // response_mode dc_api.jwt with an inlined request object. Recovery is a
     // fresh request_uri session for the same still-pending order.
-    else if (view.primaryAction === "show-qr") void startFreshSession(false);
-    // A dc_api session existing at all proves detection said yes on this
-    // browser, so a retry keeps the preferred transport (spec D1).
-    else if (view.primaryAction === "retry")
-      void startFreshSession(transport === "dc_api");
+    else if (view.primaryAction === "show-qr")
+      void startFreshSession("request_uri");
+    // A DC API session existing at all proves detection said yes on this
+    // browser, so a retry keeps the transport that was actually served —
+    // including which of the two wire forms it was (spec D1).
+    else if (view.primaryAction === "retry") void startFreshSession(transport);
   }
 
   const primaryLabel =

@@ -14,6 +14,11 @@ import {
 } from "./credential-types.js";
 import { extractAuthSubject, passedLoginBinding } from "./login-checks.js";
 import { buildLoginTransactionData } from "./login-transaction-data.js";
+import {
+  isDcApiTransport,
+  resolveDcApiProtocol,
+  type PresentationTransport,
+} from "./transport.js";
 
 /**
  * How long a login session may be claimed for.
@@ -29,11 +34,20 @@ export type StartLoginSessionResult =
   | {
       ok: true;
       sessionId: string;
-      /** Null under dc_api — foundry inlines the request object instead. */
+      /** Null under a DC API transport — foundry inlines the request object. */
       uri: string | null;
-      transport: "request_uri" | "dc_api";
-      /** foundry's inline unsigned request object. Null under request_uri. */
+      /**
+       * The transport foundry ACTUALLY served, which is not always the one that
+       * was asked for — see the soft fallback below.
+       */
+      transport: PresentationTransport;
+      /** foundry's inline request object. Null under request_uri. */
       dcApiRequest: unknown;
+      /**
+       * The DC API exchange protocol identifier to pair with `dcApiRequest`,
+       * exactly as foundry returned it. Null under request_uri.
+       */
+      dcApiProtocol: string | null;
       state: "pending";
     }
   | { ok: false; reason: "foundry_unavailable" };
@@ -69,35 +83,64 @@ export interface LoginSessionStatusDto {
 export async function startLoginSession(
   db: Db,
   client: FoundryClient,
-  useDcApi: boolean,
+  requestedTransport: PresentationTransport,
   now: number = Date.now(),
 ): Promise<StartLoginSessionResult> {
   const sessionId = `login_${randomUUID()}`;
-  const transport = useDcApi ? "dc_api" : "request_uri";
 
+  // The first write records what is being ATTEMPTED, so a `failed` row names
+  // the transport that failed. A row that reaches foundry has this corrected
+  // below to what was actually served.
   db.insert(loginSessions)
-    .values({ id: sessionId, state: "pending", transport, createdAt: now })
+    .values({
+      id: sessionId,
+      state: "pending",
+      transport: requestedTransport,
+      createdAt: now,
+    })
     .run();
 
   try {
     const response = await client.createVerificationRequest({
-      transport,
+      transport: requestedTransport,
       named_query_ref: SPARKASSEN_AUTH_NAMED_QUERY,
       transaction_data: buildLoginTransactionData(now),
     });
 
-    // Under dc_api foundry returns neither uri — the request object is inlined
-    // and unsigned because response_mode is dc_api.jwt.
+    // Under either DC API transport foundry returns neither uri — the request
+    // object is inlined, because response_mode is dc_api.jwt.
     const uri = response.openid4vp_uri ?? response.request_uri ?? null;
-    const dcApiRequest = response.dc_api_request ?? null;
+    const returnedRequest = response.dc_api_request ?? null;
+    const returnedProtocol = resolveDcApiProtocol(
+      requestedTransport,
+      response.protocol,
+    );
+
+    // The RESPONSE decides the transport, never the request. A foundry too old
+    // to know `dc_api_signed` does not reject it — unknown transport strings
+    // fall through to `response_mode: direct_post.jwt`, so such a build answers
+    // with a URI and no inline request object. Recording the requested value
+    // there would leave the dialog offering a DC API button it cannot invoke
+    // and suppressing the QR that would have worked, so this fails SOFT.
+    const usableDcApi =
+      isDcApiTransport(requestedTransport) &&
+      returnedRequest !== null &&
+      returnedProtocol !== null;
+    const transport: PresentationTransport = usableDcApi
+      ? requestedTransport
+      : "request_uri";
+    const dcApiRequest = usableDcApi ? returnedRequest : null;
+    const dcApiProtocol = usableDcApi ? returnedProtocol : null;
 
     db.update(loginSessions)
       .set({
         foundryVerificationId: response.verification_id,
         openid4vpUri: response.openid4vp_uri ?? null,
         requestUri: response.request_uri ?? null,
+        transport,
         dcApiRequestJson:
           dcApiRequest === null ? null : JSON.stringify(dcApiRequest),
+        dcApiProtocol,
       })
       .where(eq(loginSessions.id, sessionId))
       .run();
@@ -108,6 +151,7 @@ export async function startLoginSession(
       uri,
       transport,
       dcApiRequest,
+      dcApiProtocol,
       state: "pending",
     };
   } catch {

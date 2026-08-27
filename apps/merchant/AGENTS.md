@@ -286,20 +286,27 @@ types collapse into local state, and `EUDIPAY_REDIRECT` becomes a plain
   modules), accents `#FFEFB4` / `#FFCC00`.
 - **The DC API wins wherever it is available — touch and desktop alike.** The
   deep link is now only the *touch fallback*, and the QR only the desktop
-  fallback. On a `dc_api` session the screen shows a "Pay with your wallet"
+  fallback. On either DC API session the screen shows a "Pay with your wallet"
   button and the auto-redirect effect returns early; there is no URI to follow
   and `credentials.get()` requires a user gesture anyway, so the zero-click
-  Android redirect is deliberately given up.
+  Android redirect is deliberately given up. Ask `isDcApiTransport`, never
+  `transport === "dc_api"` — the signed form is the default and the equality
+  test would miss it, falling through to a QR of an empty string.
 - **Transport is fixed when the session is created**, because it changes the
   OpenID4VP wire. Detection therefore lives in `CheckoutForm`, not here, and
-  travels in the `POST /api/payment-sessions` body as `dcApi: boolean`.
-  `PaymentScreen` never calls `useDcApiSupport` and has no `null` phase — by
-  the time it renders, `transport` is a fact on the row.
+  travels in the `POST /api/payment-sessions` body as `transport`, a zod enum of
+  the three values — it used to be `dcApi: boolean`, which cannot express which
+  of the two DC API wire forms is wanted. `PaymentScreen` never calls
+  `useDcApiSupport` and has no `null` phase — by the time it renders,
+  `transport` is a fact on the row. It does read `dcApiProtocol` off that row and
+  pass it verbatim to `prepareDcApiRequest`, and refuses to invoke at all when it
+  is null.
 - On failure the screen shows an explicit **"Show QR code"** button rather than
   silently swapping in a QR: a user who just dismissed a wallet sheet would not
   understand a QR appearing on its own. It mints a fresh `request_uri` session
-  for the same still-pending order. `tryAgain` in contrast *preserves*
-  `dc_api`, since the session existing at all proves the browser supports it.
+  for the same still-pending order. `tryAgain` in contrast *preserves* the
+  transport that was actually served — including which of the two wire forms it
+  was — since the session existing at all proves the browser supports it.
 - **No countdown timer or progress bar.** The 10-minute cap lives in
   `useStatusPoll` and surfaces only if reached.
 - **The status indicator is `EudiPayRing`, inline SVG — no binary asset.** It

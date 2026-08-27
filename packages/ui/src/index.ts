@@ -11,6 +11,7 @@ export type { QrCanvasProps } from "./QrCanvas.js";
 export {
   DC_API_ISSUANCE_PROTOCOL,
   DC_API_PRESENTATION_PROTOCOL,
+  DC_API_PRESENTATION_PROTOCOL_SIGNED,
   invokeDcCreate,
   invokeDcGet,
   isDcApiNotSupportedError,

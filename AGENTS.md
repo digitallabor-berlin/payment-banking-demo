@@ -53,8 +53,31 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**702 tests** (474 bank + 181 merchant + 11 foundry-client + 36 ui), measured
-2026-08-25.
+**747 tests** (494 bank + 203 merchant + 13 foundry-client + 37 ui), measured
+2026-08-27.
+
+That was **705** before the signed-DC-API work — not the **702** this file
+asserted, and the discrepancy is the point. The bank measured **477** at HEAD,
+not the 474 recorded here; the other three projects' figures were exact. So the
+correction is +3 in one project, found only because the per-file `it()` deltas
+refused to reconcile with the run's own totals. Measure both ends.
+
+The work itself added 42: +13 in `transport.test.ts` in **each** app (3 → 16
+apiece — both already existed, holding only `selectTransport`'s old one-argument
+contract, and both were rewritten because that contract is gone), +4 in the
+merchant's `payment-sessions.test.ts`, +3 in the bank's `login-sessions.test.ts`,
++2 each in `sheet-state.test.ts`, the merchant's `schema.test.ts` and
+`packages/foundry-client/src/client.test.ts`, and +1 each in
+`checkout-session.test.ts`, the bank's `schema.test.ts` and
+`packages/ui/src/dcApi.test.ts`.
+
+Two traps. `packages/ui` added **one** case for two new facts: the existing
+`uses the exact identifiers foundry and Chrome expect` test simply gained an
+assertion, so a count of `it()` blocks understates what was pinned. And the
+bank's `transport.test.ts` is a *copy* of the merchant's, including its
+`@demo/ui` cross-check — the two files are byte-identical by intent, so a
+change to one that is not made to the other is invisible to both suites. No
+plan; the work was a bounded request.
 
 That was **678** before the login-`transaction_data` work, which added 24, all
 in `apps/bank`: 12 in the new `login-transaction-data.test.ts`, +8 in
@@ -943,11 +966,21 @@ them without reading the linked reasoning first.
   `navigator.credentials.get()` / `.create()`.** Chrome consumes the click's
   transient activation. This is why both apps have the DC API payload in the
   component as a prop before the click, rather than fetching it in the handler.
+- **`userAgentAllowsProtocol` is a RUBBER STAMP on the only build we can
+  measure, not a gate.** Re-measured 2026-08-27 in real HeadlessChrome 151 over
+  HTTPS against the deployed merchant: it answers `true` for
+  `openid4vp-v1-unsigned`, `openid4vp-v1-signed`, `openid4vp-v1-multisigned`,
+  `openid4vci-v1` **and for a deliberately bogus string**. This file previously
+  said only "returns `true` for both", which understates it — the function is
+  supplying no signal at all there, so the `protocol` argument to
+  `supportsDcApi` cannot distinguish two wire forms and cannot produce a false
+  negative either. Real capability is still answered only by invoking and
+  catching the throw. Keep passing the protocol you actually intend to use;
+  it is honest wiring rather than a working check.
+
 - **The `create` gate is lenient, the `get` gate is strict** —
-  `supportsDcApi` skips `userAgentAllowsProtocol` for `create`. Measured on
-  HeadlessChrome 151: `userAgentAllowsProtocol` exists and returns `true` for
-  **both** `openid4vp-v1-unsigned` and `openid4vci-v1`, so on that build the
-  leniency is currently doing no work. It is kept because `openid4vci-v1` is a
+  `supportsDcApi` skips `userAgentAllowsProtocol` for `create`. Given the
+  measurement above, on that build the leniency is doing no work. It is kept because `openid4vci-v1` is a
   Chrome origin-trial identifier behind
   `chrome://flags/#web-identity-digital-credentials-creation`, not a shipped
   protocol, and a browser that can issue may still answer `false`. The claim
@@ -991,10 +1024,84 @@ them without reading the linked reasoning first.
   to the cross-device QR instead of appearing broken.
 - **`useDcApiSupport` returning `null` is not `false`.** It means "not yet
   known". Rendering the QR fallback on `null` flashes a QR on Android.
-- **A `dc_api` session can never be re-rendered as a QR.** It is bound to
-  `response_mode: dc_api.jwt` with an inlined unsigned request object and
+- **Neither DC API session can be re-rendered as a QR.** Both are bound to
+  `response_mode: dc_api.jwt` with an inlined request object and
   foundry returns neither `openid4vp_uri` nor `request_uri`. Recovery creates a
   *new* `request_uri` session — that is what "Show QR code" does.
+
+- **There are THREE presentation transports, and SIGNED is the default.**
+  `request_uri` (QR / cross-device), `dc_api` (unsigned inline parameter object)
+  and `dc_api_signed` (inline Request Object signed as a JWS Compact
+  Serialization, OpenID4VP 1.0 §A.2). Both apps ask for `dc_api_signed` whenever
+  detection says the DC API exists; `?dcapi=unsigned` on `/checkout` or `/login`
+  is the per-attempt opt-out, and **only** that exact value opts out — an absent
+  param, an empty one and a typo all mean signed, because a debugging affordance
+  must not silently downgrade the wire form. The param is read **server-side**
+  in each page's `searchParams`, not with `useSearchParams`, so no client
+  component needs a Suspense boundary and the button has the answer before the
+  click. `parseDcApiForm` / `selectTransport` / `presentationProtocolFor` live in
+  each app's `lib/transport.ts` (duplicated on purpose, as `selectTransport`
+  already was).
+
+- **`transport === "dc_api"` is now a BUG wherever it means "is this a DC API
+  session".** Use `isDcApiTransport`, which mirrors foundry's own
+  `VerificationTransaction::is_dc_api` — foundry had to add that predicate for
+  exactly this reason when it introduced the transport. The equality test does
+  not match `dc_api_signed`, so it falls through to the QR branch and renders a
+  QR of an *empty string*: a DC API session has no URI at all. Six sites
+  compared it for meaning (`sheet-state.ts`, `PaymentScreen.tsx`,
+  `payment-sessions.ts`, `login-sessions.ts`, and both dialogs).
+
+- **The protocol identifier is PERSISTED from foundry's response, never
+  derived.** `CreateVerificationResponse.protocol` is the DC API exchange
+  protocol identifier (`openid4vp-v1-signed` / `openid4vp-v1-unsigned`, `null`
+  for `request_uri`), and foundry emits it precisely so the calling page does not
+  compute one: the identifier and the `data` shape are two halves of one wire
+  contract and foundry decides the shape. Both apps store it in a new nullable
+  `dc_api_protocol` column and replay it verbatim into `prepareDcApiRequest`.
+  A signed request object sent under the unsigned identifier fails **inside the
+  wallet, with no server-side trace**, which is why the constants in
+  `packages/ui` are for feature detection and tests only. The one permitted
+  fallback is `resolveDcApiProtocol`'s: a foundry that omits the field predates
+  `dc_api_signed` too, so for `dc_api` the omission unambiguously means unsigned
+  — and for `dc_api_signed` it returns null rather than guessing.
+
+- **A DC API request FAILS SOFT to `request_uri`, and the row records what was
+  SERVED rather than what was asked for.** A foundry too old to know
+  `dc_api_signed` does not reject it: unknown transport strings fall through to
+  `response_mode: direct_post.jwt`, so such a build answers with a URI and no
+  inline request object. Recording the requested value there would leave the
+  sheet offering a DC API button it cannot invoke while suppressing the QR that
+  would have worked. So `startPaymentSession` / `startLoginSession` treat the
+  DC API as usable only when a `dc_api_request` **and** a protocol came back, and
+  otherwise persist `request_uri`. The bank's first write still records the
+  *attempted* transport, so a `failed` row names the transport that failed.
+
+- **Widening the `transport` enum needed no migration; the protocol column did.**
+  Both `transport` columns are plain `text DEFAULT 'request_uri' NOT NULL` with
+  no CHECK constraint (`0002_funny_legion.sql`, `0002_gorgeous_natasha_romanoff.sql`),
+  so the drizzle `enum:` is a TypeScript claim about the data, exactly as with
+  `credential_type_id`. The new `dc_api_protocol` column is a real `ALTER TABLE
+  … ADD`. Read the generated SQL: the **merchant's** `0004` came out as a full
+  table rebuild whose `INSERT … SELECT` listed `dc_api_protocol` on both sides —
+  unrunnable (`no such column`) — and is hand-edited down to the plain ADD, while
+  the bank's `0003` generated correctly. Same generator, same day, two different
+  outputs; both were applied to a real SQLite file before being committed.
+
+- **Verified against the deployed foundry 2026-08-27, request leg only.**
+  `dc_api_signed` answers HTTP 200 with `protocol: "openid4vp-v1-signed"` and a
+  `dc_api_request` of exactly `{ request: <3-segment compact JWS> }`, whose
+  header is `typ: oauth-authz-req+jwt`, `alg: ES256`, `x5c` with the **leaf
+  only**, and whose payload carries `client_id: x509_hash:…`,
+  `response_mode: dc_api.jwt`, `aud: https://self-issued.me/v2`,
+  `expected_origins`, and — on the login query — the `transaction_data` entry
+  *inside the signature*, with no `response_uri` and no `state`. `dc_api`
+  answers `protocol: "openid4vp-v1-unsigned"` and a bare parameter object. Both
+  were exercised through the merchant's own `startPaymentSession`, and in real
+  headless Chrome: `/checkout` produced a `dc_api_signed` row with the signed
+  JWS and rendered the wallet button with no QR canvas, `?dcapi=unsigned`
+  produced a `dc_api` row with the parameter object. **No wallet has answered
+  either form** — see Known-unverifiable.
 - **foundry needs `verifier.dc_api_expected_origins` to list the merchant
   origin.** Over the DC API transport the KB-JWT audience MUST be the
   browsing-context Origin. Unset, foundry accepts only an origin derived from
@@ -1002,16 +1109,24 @@ them without reading the linked reasoning first.
   payment fails `transaction_data_binding` *as a payment decline*, not as a
   transport error — nothing throws in the browser, so the "Show QR code"
   recovery never appears. `config.yaml` is gitignored in `../foundry`.
-- **OPERATOR DEPENDENCY, open: the BANK's origin is not in
-  `dc_api_expected_origins`.** Measured 2026-08-24 from
-  `dl-infra-k8s/foundry/foundry_config.yml`, which reads
-  `["https://foundry-admin.digitallabor.dev", "https://larder-shop.digitallabor.dev"]`
-  — the merchant is listed, the bank is **not**. Wallet login now makes the bank
-  a verifier too, so `https://sparkasse-musterstadt.digitallabor.dev` must be
-  added or a same-device (DC API) wallet login **declines silently**: the KB-JWT
-  audience is the browsing-context Origin, foundry rejects it, and the failure
-  surfaces as an ordinary failed verification rather than as a transport error.
-  Cross-device (QR / `request_uri`) login is unaffected.
+- **OPERATOR DEPENDENCY, RESOLVED: the bank's origin IS now in
+  `dc_api_expected_origins`.** This file said the opposite until 2026-08-27, when
+  it was re-measured — not from the config repo, which is not checked out here,
+  but by reading the value **out of a signed request object** the deployed
+  foundry served: `expected_origins` is
+  `["https://foundry-admin.digitallabor.dev", "https://larder-shop.digitallabor.dev", "https://sparkasse-musterstadt.digitallabor.dev"]`.
+  That is a better source than the YAML, because it is what foundry actually
+  signs. So a same-device (DC API) wallet login is no longer guaranteed to
+  decline on the audience check.
+
+  Note this list is now load-bearing in a second way. `dc_api_signed` is
+  **rejected outright** — a hard request-creation failure, not a `verified:
+  false` verdict — when `verifier.dc_api_expected_origins` is empty, because
+  OpenID4VP 1.0 L2442 requires the parameter and foundry refuses to sign an
+  assertion about which Origins are legitimate rather than guess one from its
+  `public_base_url` (which is what the verify side does). An origin missing from
+  a non-empty list still fails the way it always did: silently, inside the
+  wallet.
 
 ## Known-unverifiable
 
@@ -1072,6 +1187,24 @@ on that check. A wallet that ignores `transaction_data` will fail login with
 `transaction_data_binding_failed` rather than degrading, and nothing in this
 environment can tell you whether the real wallet honours it. Ask the operator to
 run one wallet login before calling login working at all.
+
+**No wallet has answered a SIGNED request object either**, as of 2026-08-27, and
+this is now the *default* path for every same-device payment and login — so the
+unverified leg moved from an opt-in to the common case. Everything up to the
+handover is verified and was verified: the request object foundry signs (200,
+3-segment JWS, `x5c` leaf, `expected_origins` including the bank, the login
+`transaction_data` entry inside the signature), the row both apps persist, and
+the browser rendering the wallet button rather than a QR. What is unobserved is
+the only thing that matters at the end: whether a real wallet accepts an
+`x509_hash:` `client_id` it must resolve from that `x5c` chain, and whether it
+honours `expected_origins`. Two failure modes to expect if it does not, neither
+of which this environment can distinguish from success: the wallet rejects the
+signature outright (visible as a cancelled/failed DC API call, which *does* fall
+back to the QR), or it answers with a KB-JWT whose audience foundry refuses
+(visible only as an ordinary declined payment or failed login). `?dcapi=unsigned`
+is the diagnostic to hand the operator — it is the same flow over the previously
+exercised unsigned form, so a wallet that succeeds there and fails by default has
+localised the problem to the signature.
 
 A trap when checking any of this against the deployed admin API: a **local**
 foundry may own `127.0.0.1:9000` (IPv4) while `kubectl port-forward svc/foundry

@@ -16,6 +16,19 @@ export const DC_API_ISSUANCE_PROTOCOL = "openid4vci-v1";
 /** OpenID4VP over the DC API, unsigned inline request object. */
 export const DC_API_PRESENTATION_PROTOCOL = "openid4vp-v1-unsigned";
 
+/**
+ * OpenID4VP over the DC API, inline Request Object signed as a JWS Compact
+ * Serialization (OpenID4VP 1.0 §A.2). The default form for both apps.
+ *
+ * This identifier is the half of the wire contract that names which shape
+ * `data` carries: signed pairs with `{ request: "<compact JWS>" }`, unsigned
+ * with a bare parameter object. It exists here for FEATURE DETECTION and for
+ * tests; the value actually paired with a payload is the one foundry returned
+ * on the session, persisted and replayed verbatim, because foundry decides the
+ * shape and a mispairing fails inside the wallet with no server-side trace.
+ */
+export const DC_API_PRESENTATION_PROTOCOL_SIGNED = "openid4vp-v1-signed";
+
 export type DcApiMethod = "get" | "create";
 
 export interface DcApiGlobals {
@@ -42,7 +55,7 @@ export function supportsDcApi(
  // `false` rather than throwing.
  // The cast only supplies the default argument; it never asserts the browser
  // globals are actually present.
- globals: DcApiGlobals = globalThis as unknown as DcApiGlobals, // SAFETY: all members optional
+ globals: DcApiGlobals = /* SAFETY: all members optional */ globalThis as unknown as DcApiGlobals,
 ): boolean {
  if (!globals || !globals.isSecureContext) return false;
 
@@ -58,6 +71,15 @@ export function supportsDcApi(
  // browser that CAN issue may still answer false or throw for it. A false
  // negative would mean the feature silently never appears, which is worse
  // for this demo than a false positive costing one visible click.
+ //
+ // Note how little the `protocol` argument buys on the only build we can
+ // measure. HeadlessChrome 151, over HTTPS, 2026-08-27: this function answers
+ // `true` for `openid4vp-v1-unsigned`, `openid4vp-v1-signed`,
+ // `openid4vp-v1-multisigned`, `openid4vci-v1` AND for a deliberately bogus
+ // string — it is a rubber stamp on that build, not a gate. So passing the
+ // signed identifier here cannot produce a false negative, and cannot
+ // distinguish the two wire forms either. Real capability is still answered
+ // only by invoking and catching the throw.
  if (method === "create") return true;
 
  if (typeof dc.userAgentAllowsProtocol !== "function") return true;

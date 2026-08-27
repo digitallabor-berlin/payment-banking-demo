@@ -16,6 +16,11 @@ import {
 } from "./checks.js";
 import { buildTransactionData, selectNamedQuery } from "./dcql.js";
 import { listOrderProductIds } from "./orders.js";
+import {
+  isDcApiTransport,
+  resolveDcApiProtocol,
+  type PresentationTransport,
+} from "./transport.js";
 
 /** The name shown on the bank statement. Same value the wallet authorized. */
 const MERCHANT_REFERENCE_NAME = env.MERCHANT_NAME;
@@ -30,16 +35,25 @@ export type StartPaymentSessionResult =
   | {
       ok: true;
       sessionId: string;
-      /** Null under dc_api — foundry inlines the request object instead. */
+      /** Null under a DC API transport — foundry inlines the request object. */
       uri: string | null;
       orderId: string;
       /** From the order row. Never from the browser. */
       amountCents: number;
-      transport: "request_uri" | "dc_api";
+      /**
+       * The transport foundry ACTUALLY served, which is not always the one that
+       * was asked for — see the soft fallback in `startPaymentSession`.
+       */
+      transport: PresentationTransport;
       /** True when this session presents the `payment_av` named query. */
       ageRequested: boolean;
-      /** foundry's inline unsigned request object. Null under request_uri. */
+      /** foundry's inline request object. Null under request_uri. */
       dcApiRequest: unknown;
+      /**
+       * The DC API exchange protocol identifier to pair with `dcApiRequest`,
+       * exactly as foundry returned it. Null under request_uri.
+       */
+      dcApiProtocol: string | null;
       state: "pending";
     }
   | {
@@ -71,7 +85,7 @@ export async function startPaymentSession(
   orderId: string,
   merchantName: string,
   payeeId: string,
-  useDcApi = false,
+  requestedTransport: PresentationTransport = "request_uri",
   now: number = Date.now(),
 ): Promise<StartPaymentSessionResult> {
   const order = db.select().from(orders).where(eq(orders.id, orderId)).get();
@@ -96,7 +110,7 @@ export async function startPaymentSession(
     // `named_query_ref` only, never alongside a `dcql_query`: foundry prefers
     // an inline query and would silently ignore the named one.
     const response = await client.createVerificationRequest({
-      transport: useDcApi ? "dc_api" : "request_uri",
+      transport: requestedTransport,
       named_query_ref: namedQueryRef,
       transaction_data: buildTransactionData({
         transactionId: sessionId,
@@ -106,22 +120,45 @@ export async function startPaymentSession(
       }),
     });
 
-    // Under dc_api foundry returns neither uri — the request object is inlined
-    // and unsigned because response_mode is dc_api.jwt.
+    // Under either DC API transport foundry returns neither uri — the request
+    // object is inlined, because response_mode is dc_api.jwt.
     const uri = response.openid4vp_uri ?? response.request_uri ?? null;
-    const dcApiRequest =
+    const returnedRequest =
       response.dc_api_request === undefined || response.dc_api_request === null
         ? null
         : response.dc_api_request;
+    const returnedProtocol = resolveDcApiProtocol(
+      requestedTransport,
+      response.protocol,
+    );
+
+    // The RESPONSE decides the transport, never the request. A foundry too old
+    // to know `dc_api_signed` does not reject it — unknown transport strings
+    // fall through to `response_mode: direct_post.jwt`, so such a build answers
+    // with a URI and no inline request object. Recording the requested value
+    // there would leave the sheet offering a DC API button it cannot invoke and
+    // suppressing the QR that would have worked. So this fails SOFT: the
+    // shopper gets the cross-device flow, and the row says what actually
+    // happened.
+    const usableDcApi =
+      isDcApiTransport(requestedTransport) &&
+      returnedRequest !== null &&
+      returnedProtocol !== null;
+    const transport: PresentationTransport = usableDcApi
+      ? requestedTransport
+      : "request_uri";
+    const dcApiRequest = usableDcApi ? returnedRequest : null;
+    const dcApiProtocol = usableDcApi ? returnedProtocol : null;
 
     db.update(paymentSessions)
       .set({
         foundryVerificationId: response.verification_id,
         openid4vpUri: response.openid4vp_uri ?? null,
         requestUri: response.request_uri ?? null,
-        transport: useDcApi ? "dc_api" : "request_uri",
+        transport,
         dcApiRequestJson:
           dcApiRequest === null ? null : JSON.stringify(dcApiRequest),
+        dcApiProtocol,
       })
       .where(eq(paymentSessions.id, sessionId))
       .run();
@@ -132,9 +169,10 @@ export async function startPaymentSession(
       uri,
       orderId: order.id,
       amountCents: order.totalCents,
-      transport: useDcApi ? "dc_api" : "request_uri",
+      transport,
       ageRequested: namedQueryRef === "payment_av",
       dcApiRequest,
+      dcApiProtocol,
       state: "pending",
     };
   } catch {

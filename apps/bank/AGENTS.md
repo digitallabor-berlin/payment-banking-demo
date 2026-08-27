@@ -661,6 +661,29 @@ The bank became a **verifier** here, for the first time. A customer presents a
   consumes a click's transient activation, so no `await` may run between that
   handler starting and `navigator.credentials.get()`.
 
+- **The login presentation is a SIGNED DC API request by default**
+  (`transport: dc_api_signed`), with `?dcapi=unsigned` on `/login` as the
+  per-attempt opt-out and the QR unchanged as the cross-device path. The param is
+  read in `login/page.tsx`'s `searchParams` and handed to `WalletLoginButton`, so
+  the button has it before the click; `POST /api/auth/wallet-login` now takes a
+  `transport` enum rather than `dcApi: boolean`, which could not express which of
+  the two wire forms was wanted. See the root AGENTS.md DC API section for the
+  rules that apply to both apps: `isDcApiTransport` instead of an equality test,
+  foundry's `protocol` persisted to `login_sessions.dc_api_protocol` and replayed
+  verbatim, and the soft fallback to `request_uri` when foundry serves no inline
+  request object.
+
+  Note what signing does **not** change here: `transaction_data` still carries
+  the login datetime and `refreshLoginSessionState` still gates on the binding
+  check. Verified 2026-08-27 that the deployed foundry puts that entry *inside*
+  the signed request object rather than dropping it.
+
+  The dialog re-detects support against the session's own `dcApiProtocol`, and
+  refuses to invoke the DC API when that value is null — which also closes a
+  pre-existing hole: a session created before detection resolved is cross-device
+  and carries no request object, while the dialog's own detection may since have
+  answered yes.
+
 - **Known gap: a refused `/claim` leaves the dialog on its waiting face.** The
   poll is already terminal on `verified`, so nothing re-drives it. Reaching that
   branch needs the state to change between the poll reading it and the POST — the
@@ -682,7 +705,11 @@ The bank became a **verifier** here, for the first time. A customer presents a
   a distinct port (9100) instead of trusting the address.
 
 - **NOT verified: no wallet has ever answered this query.** No device here. The
-  disclosed-claim shape is pinned by foundry's config, not by observation.
+  disclosed-claim shape is pinned by foundry's config, not by observation. Since
+  2026-08-27 the same-device path also asks for a **signed** request object,
+  which no wallet has answered either — so if the operator reports a login
+  failing, `?dcapi=unsigned` is the first thing to try: it isolates the signature
+  from everything else in the flow.
 
 ## i18n
 

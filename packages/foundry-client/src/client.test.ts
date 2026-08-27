@@ -219,6 +219,60 @@ describe("FoundryClient verification methods", () => {
     expect(res.openid4vp_uri).toBe("openid4vp://?x=1");
   });
 
+  // Measured 2026-08-27 against the deployed foundry: `dc_api_signed` answers
+  // 200 with `protocol: "openid4vp-v1-signed"` and a `dc_api_request` of
+  // `{ request: <compact JWS> }`, while `dc_api` answers
+  // `protocol: "openid4vp-v1-unsigned"` and a bare parameter object. The two
+  // halves are one wire contract, so the client must surface foundry's
+  // identifier rather than leave the caller to derive it.
+  it("forwards the dc_api_signed transport and surfaces the protocol identifier", async () => {
+    let seenBody = "";
+    const client = makeClient(
+      stubFetch(
+        200,
+        {
+          verification_id: "v_2",
+          protocol: "openid4vp-v1-signed",
+          dc_api_request: { request: "eyJ0.eyJ1.sig" },
+          openid4vp_uri: null,
+          request_uri: null,
+        },
+        (_url, init) => {
+          seenBody = String(init.body);
+        },
+      ),
+    );
+
+    const res = await client.createVerificationRequest({
+      transport: "dc_api_signed",
+      named_query_ref: "payment",
+    });
+
+    expect(JSON.parse(seenBody).transport).toBe("dc_api_signed");
+    expect(res.protocol).toBe("openid4vp-v1-signed");
+    expect(res.dc_api_request).toEqual({ request: "eyJ0.eyJ1.sig" });
+    expect(res.openid4vp_uri).toBeNull();
+  });
+
+  // `protocol` is `null` — not the empty string — for the transport that
+  // performs no DC API invocation, so there is no identifier to report.
+  it("surfaces a null protocol for the request_uri transport", async () => {
+    const client = makeClient(
+      stubFetch(200, {
+        verification_id: "v_3",
+        protocol: null,
+        openid4vp_uri: "openid4vp://?x=1",
+        request_uri: "http://r",
+      }),
+    );
+
+    const res = await client.createVerificationRequest({
+      transport: "request_uri",
+    });
+
+    expect(res.protocol).toBeNull();
+  });
+
   it("returns the verification verdict with per-credential checks and claims", async () => {
     // The shape foundry actually serves (openapi.json VerificationResult,
     // confirmed 2026-08-19 against https://foundry-admin.digitallabor.dev):

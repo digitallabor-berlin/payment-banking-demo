@@ -1,16 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import { DC_API_PRESENTATION_PROTOCOL, useDcApiSupport } from "@demo/ui";
+import { useDcApiSupport } from "@demo/ui";
 import type { Locale } from "@/lib/i18n/locale.js";
 import { MESSAGES } from "@/lib/i18n/messages.js";
-import { selectTransport } from "@/lib/transport.js";
+import {
+  presentationProtocolFor,
+  selectTransport,
+  type DcApiForm,
+} from "@/lib/transport.js";
 import { WalletLoginDialog } from "./WalletLoginDialog.js";
 
 interface LoginSession {
   sessionId: string;
   uri: string | null;
   dcApiRequest: unknown;
+  /**
+   * The DC API exchange protocol identifier foundry returned for this session.
+   * Replayed verbatim by the dialog rather than re-derived, so the identifier
+   * and the request object cannot drift apart.
+   */
+  dcApiProtocol: string | null;
 }
 
 /**
@@ -25,9 +35,22 @@ interface LoginSession {
  * Chrome consumes a click's transient activation, so no `await` may run between
  * that handler starting and `navigator.credentials.get()`.
  */
-export function WalletLoginButton({ locale }: { locale: Locale }) {
+export function WalletLoginButton({
+  locale,
+  dcApiForm,
+}: {
+  locale: Locale;
+  /**
+   * Which DC API wire form this attempt asks for, resolved from `?dcapi=` by
+   * the page. Signed unless explicitly opted out of.
+   */
+  dcApiForm: DcApiForm;
+}) {
   const t = MESSAGES[locale];
-  const dcSupported = useDcApiSupport("get", DC_API_PRESENTATION_PROTOCOL);
+  const dcSupported = useDcApiSupport(
+    "get",
+    presentationProtocolFor(dcApiForm),
+  );
   const [session, setSession] = useState<LoginSession | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +63,7 @@ export function WalletLoginButton({ locale }: { locale: Locale }) {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          dcApi: selectTransport(dcSupported) === "dc_api",
+          transport: selectTransport(dcSupported, dcApiForm),
         }),
       });
       if (!response.ok) {
@@ -86,6 +109,7 @@ export function WalletLoginButton({ locale }: { locale: Locale }) {
           sessionId={session.sessionId}
           uri={session.uri}
           dcApiRequest={session.dcApiRequest}
+          dcApiProtocol={session.dcApiProtocol}
           locale={locale}
           onClose={() => setSession(null)}
         />

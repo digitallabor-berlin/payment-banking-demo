@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import { orders, paymentSessions } from "../db/schema.js";
+import type { PresentationTransport } from "./transport.js";
 
 /**
  * The payment sheet's props, as one serialisable object.
@@ -11,17 +12,24 @@ import { orders, paymentSessions } from "../db/schema.js";
  * therefore trivially testable.
  */
 export interface SheetSession {
-  sessionId: string;
-  orderId: string;
-  amountCents: number;
-  /** Empty string under dc_api — there is no URI to navigate to. */
-  openid4vpUri: string;
-  transport: "request_uri" | "dc_api";
-  /** True when this session presents the `payment_av` named query. */
-  ageRequested: boolean;
-  dcApiRequest: unknown;
-  initialState: string;
-  initialFailureReason?: string;
+ sessionId: string;
+ orderId: string;
+ amountCents: number;
+ /** Empty string under a DC API transport — there is no URI to navigate to. */
+ openid4vpUri: string;
+ transport: PresentationTransport;
+ /** True when this session presents the `payment_av` named query. */
+ ageRequested: boolean;
+ dcApiRequest: unknown;
+ /**
+  * The DC API exchange protocol identifier foundry returned for this session,
+  * replayed verbatim into `navigator.credentials.get()`. Null under
+  * request_uri. Carried on the session rather than recomputed in the component
+  * so the identifier and the request object cannot drift apart.
+  */
+ dcApiProtocol: string | null;
+ initialState: string;
+ initialFailureReason?: string;
 }
 
 /**
@@ -36,36 +44,37 @@ export interface SheetSession {
  * `?session=` should render the ordinary checkout form, not an error page.
  */
 export function loadCheckoutSession(
-  db: Db,
-  sessionId: string,
+ db: Db,
+ sessionId: string,
 ): SheetSession | null {
-  const session = db
-    .select()
-    .from(paymentSessions)
-    .where(eq(paymentSessions.id, sessionId))
-    .get();
-  if (!session) return null;
+ const session = db
+  .select()
+  .from(paymentSessions)
+  .where(eq(paymentSessions.id, sessionId))
+  .get();
+ if (!session) return null;
 
-  const order = db
-    .select()
-    .from(orders)
-    .where(eq(orders.id, session.orderId))
-    .get();
-  if (!order) return null;
+ const order = db
+  .select()
+  .from(orders)
+  .where(eq(orders.id, session.orderId))
+  .get();
+ if (!order) return null;
 
-  return {
-    sessionId: session.id,
-    orderId: order.id,
-    amountCents: order.totalCents,
-    openid4vpUri: session.openid4vpUri ?? session.requestUri ?? "",
-    transport: session.transport,
-    ageRequested: session.namedQueryRef === "payment_av",
-    dcApiRequest: session.dcApiRequestJson
-      ? JSON.parse(session.dcApiRequestJson)
-      : null,
-    initialState: session.state,
-    ...(session.failureReason
-      ? { initialFailureReason: session.failureReason }
-      : {}),
-  };
+ return {
+  sessionId: session.id,
+  orderId: order.id,
+  amountCents: order.totalCents,
+  openid4vpUri: session.openid4vpUri ?? session.requestUri ?? "",
+  transport: session.transport,
+  ageRequested: session.namedQueryRef === "payment_av",
+  dcApiRequest: session.dcApiRequestJson
+   ? JSON.parse(session.dcApiRequestJson)
+   : null,
+  dcApiProtocol: session.dcApiProtocol ?? null,
+  initialState: session.state,
+  ...(session.failureReason
+   ? { initialFailureReason: session.failureReason }
+   : {}),
+ };
 }

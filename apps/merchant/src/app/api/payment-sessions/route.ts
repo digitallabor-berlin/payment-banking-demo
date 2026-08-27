@@ -9,8 +9,16 @@ export const dynamic = "force-dynamic";
 
 const bodySchema = z.object({
   orderId: z.string().min(1),
-  /** The browser's DC API detection result. Absent means "no". */
-  dcApi: z.boolean().optional(),
+  /**
+   * The transport the browser resolved (see `lib/transport.ts`). Absent means
+   * the cross-device QR flow, which works everywhere — so a caller that cannot
+   * decide gets the safe one rather than a DC API call it cannot make.
+   *
+   * A closed enum rather than a free string: this value is forwarded to foundry
+   * verbatim, and an unknown transport there does not fail loudly — it falls
+   * through to `direct_post.jwt`.
+   */
+  transport: z.enum(["request_uri", "dc_api", "dc_api_signed"]).optional(),
 });
 
 export async function POST(request: Request) {
@@ -25,7 +33,7 @@ export async function POST(request: Request) {
     parsed.data.orderId,
     env.MERCHANT_NAME,
     env.MERCHANT_PAYEE_ID,
-    parsed.data.dcApi ?? false,
+    parsed.data.transport ?? "request_uri",
   );
 
   if (!result.ok) {

@@ -92,10 +92,77 @@ describe("payment_sessions retries", () => {
     expect(() =>
       db
         .insert(paymentSessions)
-        .values({ id: "sess_2", orderId: "ord_1", state: "pending", createdAt: 2 })
+        .values({
+          id: "sess_2",
+          orderId: "ord_1",
+          state: "pending",
+          createdAt: 2,
+        })
         .run(),
     ).not.toThrow();
 
     expect(db.select().from(paymentSessions).all()).toHaveLength(2);
+  });
+
+  // Widening the `transport` enum needed no SQL: the column is plain
+  // `text DEFAULT 'request_uri' NOT NULL` with no CHECK constraint
+  // (`0002_funny_legion.sql`), so the drizzle `enum:` is a TypeScript claim
+  // about the data rather than a database one. This test is what proves the
+  // database really does accept the third value.
+  it("stores the signed DC API transport alongside foundry's protocol identifier", () => {
+    db.insert(orders)
+      .values({
+        id: "ord_2",
+        totalCents: 1000,
+        currency: "EUR",
+        customerName: "Test",
+        customerEmail: "test@example.com",
+        createdAt: 1,
+      })
+      .run();
+
+    db.insert(paymentSessions)
+      .values({
+        id: "sess_signed",
+        orderId: "ord_2",
+        state: "pending",
+        transport: "dc_api_signed",
+        dcApiRequestJson: '{"request":"eyJ0.eyJ1.sig"}',
+        dcApiProtocol: "openid4vp-v1-signed",
+        createdAt: 1,
+      })
+      .run();
+
+    const row = db.select().from(paymentSessions).get();
+    expect(row?.transport).toBe("dc_api_signed");
+    expect(row?.dcApiProtocol).toBe("openid4vp-v1-signed");
+  });
+
+  // NULL, not the empty string: a request_uri session performs no DC API
+  // invocation, so there is no identifier to report.
+  it("leaves the protocol identifier null by default", () => {
+    db.insert(orders)
+      .values({
+        id: "ord_3",
+        totalCents: 1000,
+        currency: "EUR",
+        customerName: "Test",
+        customerEmail: "test@example.com",
+        createdAt: 1,
+      })
+      .run();
+
+    db.insert(paymentSessions)
+      .values({
+        id: "sess_qr",
+        orderId: "ord_3",
+        state: "pending",
+        createdAt: 1,
+      })
+      .run();
+
+    const row = db.select().from(paymentSessions).get();
+    expect(row?.transport).toBe("request_uri");
+    expect(row?.dcApiProtocol).toBeNull();
   });
 });

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { SheetSession } from "@/lib/checkout-session.js";
+import type { DcApiForm } from "@/lib/transport.js";
 import { CheckoutForm } from "./CheckoutForm.js";
 import { PaymentScreen } from "./PaymentScreen.js";
 
@@ -23,9 +24,12 @@ import { PaymentScreen } from "./PaymentScreen.js";
 export function CheckoutPanel({
   initialSession,
   merchantName,
+  dcApiForm,
 }: {
   initialSession: SheetSession | null;
   merchantName: string;
+  /** Resolved from `?dcapi=` by the page; the form needs it before first paint. */
+  dcApiForm: DcApiForm;
 }) {
   const router = useRouter();
   const [session, setSession] = useState<SheetSession | null>(initialSession);
@@ -39,6 +43,7 @@ export function CheckoutPanel({
       */}
       <div inert={session ? true : undefined}>
         <CheckoutForm
+          dcApiForm={dcApiForm}
           onSessionStarted={(started) => {
             setSession(started);
             router.replace(`/checkout?session=${started.sessionId}`);

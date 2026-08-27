@@ -2,19 +2,30 @@
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
-import { DC_API_PRESENTATION_PROTOCOL, useDcApiSupport } from "@demo/ui";
+import { useDcApiSupport } from "@demo/ui";
 import { cartHasAgeRestricted } from "@/lib/cart.js";
 import type { SheetSession } from "@/lib/checkout-session.js";
 import { isAgeRestricted } from "@/lib/dcql.js";
 import { formatEuroCents } from "@/lib/format.js";
-import { selectTransport } from "@/lib/transport.js";
+import {
+  presentationProtocolFor,
+  selectTransport,
+  type DcApiForm,
+  type PresentationTransport,
+} from "@/lib/transport.js";
 import { AgeChip } from "./AgeChip.js";
 import { useCart } from "@/lib/useCart.js";
 
 export function CheckoutForm({
   onSessionStarted,
+  dcApiForm,
 }: {
   onSessionStarted: (session: SheetSession) => void;
+  /**
+   * Which DC API wire form this attempt asks for, resolved from `?dcapi=` by
+   * the page. Signed unless explicitly opted out of.
+   */
+  dcApiForm: DcApiForm;
 }) {
   const { items, totalCents } = useCart();
   const [name, setName] = useState("");
@@ -23,7 +34,10 @@ export function CheckoutForm({
   const [pending, setPending] = useState(false);
   // Detection must happen HERE, not on the pay page: `transport` changes the
   // OpenID4VP wire and is therefore fixed when the session is created.
-  const dcApiSupported = useDcApiSupport("get", DC_API_PRESENTATION_PROTOCOL);
+  const dcApiSupported = useDcApiSupport(
+    "get",
+    presentationProtocolFor(dcApiForm),
+  );
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -34,12 +48,17 @@ export function CheckoutForm({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          items: items.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+          items: items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+          })),
           customer: { name, email },
         }),
       });
       if (!orderResponse.ok) {
-        setError("Could not create the order. Please check your basket and try again.");
+        setError(
+          "Could not create the order. Please check your basket and try again.",
+        );
         return;
       }
       const order = (await orderResponse.json()) as { orderId: string };
@@ -49,7 +68,7 @@ export function CheckoutForm({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           orderId: order.orderId,
-          dcApi: selectTransport(dcApiSupported) === "dc_api",
+          transport: selectTransport(dcApiSupported, dcApiForm),
         }),
       });
       if (!sessionResponse.ok) {
@@ -64,9 +83,10 @@ export function CheckoutForm({
         uri: string | null;
         orderId: string;
         amountCents: number;
-        transport: "request_uri" | "dc_api";
+        transport: PresentationTransport;
         ageRequested: boolean;
         dcApiRequest: unknown;
+        dcApiProtocol: string | null;
         state: string;
       };
 
@@ -78,6 +98,7 @@ export function CheckoutForm({
         transport: session.transport,
         ageRequested: session.ageRequested,
         dcApiRequest: session.dcApiRequest,
+        dcApiProtocol: session.dcApiProtocol,
         initialState: session.state,
       });
     } catch {
@@ -138,7 +159,10 @@ export function CheckoutForm({
         </div>
 
         {error ? (
-          <p role="alert" className="text-sm font-medium text-[var(--color-destructive)]">
+          <p
+            role="alert"
+            className="text-sm font-medium text-[var(--color-destructive)]"
+          >
             {error}
           </p>
         ) : null}
@@ -147,8 +171,8 @@ export function CheckoutForm({
           <div className="age-note px-3.5 py-3">
             <AgeChip />
             <span>
-              Your wallet will confirm you&rsquo;re over 18. It won&rsquo;t share your
-              date of birth.
+              Your wallet will confirm you&rsquo;re over 18. It won&rsquo;t
+              share your date of birth.
             </span>
           </div>
         ) : null}
@@ -170,13 +194,18 @@ export function CheckoutForm({
         <h2 className="eyebrow">Your basket</h2>
         <ul className="mt-3 space-y-2.5">
           {items.map((item) => (
-            <li key={item.productId} className="flex items-baseline justify-between gap-3 text-sm">
+            <li
+              key={item.productId}
+              className="flex items-baseline justify-between gap-3 text-sm"
+            >
               <span className="min-w-0">
                 <span className="data mr-1.5 text-[var(--color-muted-foreground)]">
                   {item.quantity}×
                 </span>
                 {item.name}
-                {isAgeRestricted(item.productId) ? <AgeChip className="ml-1.5" /> : null}
+                {isAgeRestricted(item.productId) ? (
+                  <AgeChip className="ml-1.5" />
+                ) : null}
               </span>
               <span className="shrink-0 tabular-nums">
                 {formatEuroCents(item.priceCents * item.quantity)}
@@ -187,7 +216,9 @@ export function CheckoutForm({
         <div className="rule-strong mt-4 pb-2.5" />
         <div className="flex items-baseline justify-between">
           <span className="eyebrow">Total</span>
-          <span className="display text-2xl">{formatEuroCents(totalCents)}</span>
+          <span className="display text-2xl">
+            {formatEuroCents(totalCents)}
+          </span>
         </div>
       </aside>
     </div>

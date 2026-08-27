@@ -44,7 +44,8 @@ describe("loadCheckoutSession", () => {
         id: "sess_1",
         orderId: "ord_1",
         state: "pending",
-        openid4vpUri: "openid4vp://?request_uri=https%3A%2F%2Ffoundry.test%2Fr%2F1",
+        openid4vpUri:
+          "openid4vp://?request_uri=https%3A%2F%2Ffoundry.test%2Fr%2F1",
         transport: "request_uri",
         namedQueryRef: "payment",
         createdAt: NOW,
@@ -55,11 +56,42 @@ describe("loadCheckoutSession", () => {
       sessionId: "sess_1",
       orderId: "ord_1",
       amountCents: 1747,
-      openid4vpUri: "openid4vp://?request_uri=https%3A%2F%2Ffoundry.test%2Fr%2F1",
+      openid4vpUri:
+        "openid4vp://?request_uri=https%3A%2F%2Ffoundry.test%2Fr%2F1",
       transport: "request_uri",
       ageRequested: false,
       dcApiRequest: null,
+      dcApiProtocol: null,
       initialState: "pending",
+    });
+  });
+
+  // A deep link or a reload has to rebuild the DC API call from the row alone,
+  // and the protocol identifier is half of that call's contract — a signed
+  // request object replayed under the unsigned identifier fails inside the
+  // wallet with no server-side trace.
+  it("carries the signed session's protocol identifier back out of the row", () => {
+    insertOrder("ord_signed", 500);
+    db.insert(paymentSessions)
+      .values({
+        id: "sess_signed",
+        orderId: "ord_signed",
+        state: "pending",
+        transport: "dc_api_signed",
+        dcApiRequestJson: '{"request":"eyJ0.eyJ1.sig"}',
+        dcApiProtocol: "openid4vp-v1-signed",
+        namedQueryRef: "payment",
+        createdAt: NOW,
+      })
+      .run();
+
+    expect(loadCheckoutSession(db, "sess_signed")).toMatchObject({
+      // Empty string, not the row's NULL uri: the sheet takes a string prop and
+      // a DC API session has no URI to navigate to.
+      openid4vpUri: "",
+      transport: "dc_api_signed",
+      dcApiRequest: { request: "eyJ0.eyJ1.sig" },
+      dcApiProtocol: "openid4vp-v1-signed",
     });
   });
 
