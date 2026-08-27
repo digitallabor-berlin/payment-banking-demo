@@ -61,6 +61,17 @@ export type StartPaymentSessionResult =
       reason: "order_not_found" | "order_not_pending" | "foundry_unavailable";
     };
 
+/**
+ * The `ok: true` branch, named because the sheet is built from it — see
+ * `sheetSessionFromStart` in `checkout-session.ts`. Extracted rather than
+ * declared separately so the union stays the single declaration of these
+ * members and cannot drift from its own success case.
+ */
+export type StartedPaymentSession = Extract<
+  StartPaymentSessionResult,
+  { ok: true }
+>;
+
 export interface PaymentSessionStatusDto {
   state: PaymentSessionState;
   checks?: unknown;

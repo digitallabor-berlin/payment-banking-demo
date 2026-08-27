@@ -11,7 +11,6 @@ import {
   presentationProtocolFor,
   selectTransport,
   type DcApiForm,
-  type PresentationTransport,
 } from "@/lib/transport.js";
 import { AgeChip } from "./AgeChip.js";
 import { useCart } from "@/lib/useCart.js";
@@ -78,29 +77,14 @@ export function CheckoutForm({
       // The cart is NOT cleared here. The basket is the content the payment
       // sheet now sits over, and a declined payment must leave it intact.
       // PaymentScreen clears it on completion instead.
-      const session = (await sessionResponse.json()) as {
-        sessionId: string;
-        uri: string | null;
-        orderId: string;
-        amountCents: number;
-        transport: PresentationTransport;
-        ageRequested: boolean;
-        dcApiRequest: unknown;
-        dcApiProtocol: string | null;
-        state: string;
-      };
-
-      onSessionStarted({
-        sessionId: session.sessionId,
-        orderId: session.orderId,
-        amountCents: session.amountCents,
-        openid4vpUri: session.uri ?? "",
-        transport: session.transport,
-        ageRequested: session.ageRequested,
-        dcApiRequest: session.dcApiRequest,
-        dcApiProtocol: session.dcApiProtocol,
-        initialState: session.state,
-      });
+      //
+      // The route answers a `SheetSession` outright, so this hands it straight
+      // to the sheet. It used to re-map the body member by member — a third
+      // copy of one shape, purely because the route spelled two of them `uri`
+      // and `state` — and that copy is where `dcApiProtocol` went missing. The
+      // `as` cast is unavoidable at a JSON boundary, but there is now exactly
+      // one, against the shared type, with a type-checked producer behind it.
+      onSessionStarted((await sessionResponse.json()) as SheetSession);
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {

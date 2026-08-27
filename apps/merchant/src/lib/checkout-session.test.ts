@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "../db/index.js";
 import { orders, paymentSessions } from "../db/schema.js";
 import { seed } from "../db/seed.js";
-import { loadCheckoutSession } from "./checkout-session.js";
+import {
+  loadCheckoutSession,
+  sheetSessionFromStart,
+} from "./checkout-session.js";
+import type { StartedPaymentSession } from "./payment-sessions.js";
 
 let dir: string;
 let db: Db;
@@ -153,5 +157,115 @@ describe("loadCheckoutSession", () => {
 
   it("returns null for an unknown session id", () => {
     expect(loadCheckoutSession(db, "sess_nope")).toBeNull();
+  });
+});
+
+/**
+ * The SECOND constructor of `SheetSession`, and the reason it is a named
+ * function rather than an object literal in a route handler.
+ *
+ * A freshly created session is answered over HTTP before any row is read back,
+ * because the sheet needs its props immediately — the DC API payload must
+ * already be a prop when the click arrives, since Chrome consumes the click's
+ * transient activation. So there are unavoidably two ways to build one
+ * `SheetSession`: from a `startPaymentSession` result, and from a stored row.
+ *
+ * The literal this replaced silently lost `dcApiProtocol` for a commit, which
+ * broke every merchant DC API payment on its first attempt while a reload
+ * appeared to fix it — a reload takes the OTHER constructor. Naming the
+ * projection is what makes the return type enforceable.
+ */
+describe("sheetSessionFromStart", () => {
+  const startedRequestUri: StartedPaymentSession = {
+    ok: true,
+    sessionId: "sess_new",
+    uri: "openid4vp://?request_uri=https%3A%2F%2Ffoundry.test%2Fr%2F9",
+    orderId: "ord_new",
+    amountCents: 4_798,
+    transport: "request_uri",
+    ageRequested: false,
+    dcApiRequest: null,
+    dcApiProtocol: null,
+    state: "pending",
+  };
+
+  // The two renames are the whole reason a third hand-written mapping used to
+  // exist in CheckoutForm: `uri` -> `openid4vpUri`, `state` -> `initialState`.
+  it("renames the result's uri and state to the sheet's prop names", () => {
+    expect(sheetSessionFromStart(startedRequestUri)).toEqual({
+      sessionId: "sess_new",
+      orderId: "ord_new",
+      amountCents: 4_798,
+      openid4vpUri:
+        "openid4vp://?request_uri=https%3A%2F%2Ffoundry.test%2Fr%2F9",
+      transport: "request_uri",
+      ageRequested: false,
+      dcApiRequest: null,
+      dcApiProtocol: null,
+      initialState: "pending",
+    });
+  });
+
+  it("empties a null uri and carries the signed protocol identifier", () => {
+    expect(
+      sheetSessionFromStart({
+        ...startedRequestUri,
+        uri: null,
+        transport: "dc_api_signed",
+        dcApiRequest: { request: "eyJ0.eyJ1.sig" },
+        dcApiProtocol: "openid4vp-v1-signed",
+      }),
+    ).toMatchObject({
+      // A string prop, not the result's null: a DC API session has no URI to
+      // navigate to, and the sheet's QR branch is chosen by transport anyway.
+      openid4vpUri: "",
+      dcApiProtocol: "openid4vp-v1-signed",
+    });
+  });
+
+  // `state` is the literal "pending" on this branch, so the member has nothing
+  // to report and its absence is the honest answer rather than an empty string.
+  it("omits initialFailureReason — no session is born failed", () => {
+    expect(Object.keys(sheetSessionFromStart(startedRequestUri))).not.toContain(
+      "initialFailureReason",
+    );
+  });
+
+  /**
+   * The point of the whole exercise. The sheet is built by this function when a
+   * session is created and by `loadCheckoutSession` on every reload of the same
+   * session, so the two must agree member for member — a shopper must not get a
+   * different sheet for the same payment depending on how they arrived at it.
+   * This is the assertion the lost `dcApiProtocol` would have failed.
+   */
+  it("agrees member for member with loadCheckoutSession", () => {
+    insertOrder("ord_agree", 4_798);
+    db.insert(paymentSessions)
+      .values({
+        id: "sess_agree",
+        orderId: "ord_agree",
+        state: "pending",
+        transport: "dc_api_signed",
+        dcApiRequestJson: '{"request":"eyJ0.eyJ1.sig"}',
+        dcApiProtocol: "openid4vp-v1-signed",
+        namedQueryRef: "payment",
+        createdAt: NOW,
+      })
+      .run();
+
+    const fromStart = sheetSessionFromStart({
+      ok: true,
+      sessionId: "sess_agree",
+      uri: null,
+      orderId: "ord_agree",
+      amountCents: 4_798,
+      transport: "dc_api_signed",
+      ageRequested: false,
+      dcApiRequest: { request: "eyJ0.eyJ1.sig" },
+      dcApiProtocol: "openid4vp-v1-signed",
+      state: "pending",
+    });
+
+    expect(fromStart).toEqual(loadCheckoutSession(db, "sess_agree"));
   });
 });

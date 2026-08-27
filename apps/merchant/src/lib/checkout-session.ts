@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import { orders, paymentSessions } from "../db/schema.js";
+import type { StartedPaymentSession } from "./payment-sessions.js";
 import type { PresentationTransport } from "./transport.js";
 
 /**
@@ -76,5 +77,47 @@ export function loadCheckoutSession(
   ...(session.failureReason
    ? { initialFailureReason: session.failureReason }
    : {}),
+ };
+}
+
+/**
+ * The OTHER constructor of `SheetSession`: from a session just created, rather
+ * than from a stored row.
+ *
+ * Both exist because the sheet must have its props — including the DC API
+ * request object — before the shopper's click, since Chrome consumes a click's
+ * transient activation and no `await` may run inside the handler. So a fresh
+ * session is answered over HTTP directly instead of being read back.
+ *
+ * That makes it two projections of one type, and the pair is the hazard. This
+ * used to be an object literal inside `POST /api/payment-sessions` under two
+ * DIFFERENT member names (`uri`, `state`), which forced a third hand-written
+ * re-map in `CheckoutForm` — and one of the three lost `dcApiProtocol`, which
+ * broke every merchant DC API payment on its first attempt while a reload
+ * appeared to fix it, because a reload takes `loadCheckoutSession` instead.
+ *
+ * The `SheetSession` return annotation is the guard: a member added to the
+ * sheet's props and forgotten here is now a compile error rather than a
+ * runtime `undefined` behind an `as` cast. Keep it annotated — inferring the
+ * return type would silently restore the old failure mode.
+ *
+ * No `initialFailureReason`: this branch's `state` is the literal `"pending"`,
+ * so a session cannot be born failed and the member has nothing to report.
+ */
+export function sheetSessionFromStart(
+ started: StartedPaymentSession,
+): SheetSession {
+ return {
+  sessionId: started.sessionId,
+  orderId: started.orderId,
+  amountCents: started.amountCents,
+  // The sheet takes a string; a DC API session has no URI at all, and its QR
+  // branch is chosen by `transport` rather than by this being empty.
+  openid4vpUri: started.uri ?? "",
+  transport: started.transport,
+  ageRequested: started.ageRequested,
+  dcApiRequest: started.dcApiRequest,
+  dcApiProtocol: started.dcApiProtocol,
+  initialState: started.state,
  };
 }

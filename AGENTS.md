@@ -53,8 +53,33 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**747 tests** (494 bank + 203 merchant + 13 foundry-client + 37 ui), measured
+**756 tests** (494 bank + 212 merchant + 13 foundry-client + 37 ui), measured
 2026-08-27.
+
+That was **752** before the `SheetSession` de-duplication that followed the fix
+below, which added 4, all in `apps/merchant/src/lib/checkout-session.test.ts`
+(a `sheetSessionFromStart` describe). `route.test.ts` gained **none** — its
+key-set test was re-keyed to the sheet's own prop names rather than duplicated,
+which is the honest edit: the body did not gain a member, it stopped renaming
+two. Note the one test worth more than the other three: `agrees member for
+member with loadCheckoutSession` compares the two constructors of one type as
+whole objects, so it fails for *any* future divergence rather than for a named
+member. That is the test the original bug would have failed.
+
+That was **747** before the `dcApiProtocol` route fix, which added 5, all in
+`apps/merchant` and all in one new file: `src/app/api/payment-sessions/route.test.ts`,
+this app's **first route-handler test**. The count is the least interesting part;
+what matters is which one was already green. `agrees with the row it wrote`
+passed before the fix existed, because the database write was never broken —
+only the JSON projection over it — and that single fact is the whole diagnosis.
+A suite that only checked persistence would have reported this bug as absent.
+The other four were red for one reason: `dcApiProtocol` was not a member of the
+response body at all, so it read `undefined` rather than a wrong value.
+
+Note also what did **not** need a test: nothing in `packages/ui`, nothing in
+`sheet-state.ts`, nothing in `payment-sessions.test.ts`. Every one of those was
+already correct and already covered. The gap was exactly the seam between two
+tested things, which is the class of gap a per-file test count cannot see.
 
 That was **705** before the signed-DC-API work — not the **702** this file
 asserted, and the discrepancy is the point. The bank measured **477** at HEAD,
@@ -1024,6 +1049,80 @@ them without reading the linked reasoning first.
   to the cross-device QR instead of appearing broken.
 - **`useDcApiSupport` returning `null` is not `false`.** It means "not yet
   known". Rendering the QR fallback on `null` flashes a QR on Android.
+- **A route handler's JSON body is a hand-maintained projection, and it is the
+  seam this project keeps losing things in.** Reported bug, 2026-08-27: every
+  merchant DC API payment showed `This browser does not support the Digital
+  Credentials API` on the **first** attempt and worked after a reload. The
+  browser was fine. `POST /api/payment-sessions` simply did not return
+  `dcApiProtocol` — `startPaymentSession` returned it, the column stored it, and
+  the route's `NextResponse.json({…})` literal omitted it — so `CheckoutForm`
+  read `undefined` and `PaymentScreen`'s own `if (!dcApiProtocol)` guard fired.
+  That guard's comment read *"Cannot happen for a session this screen renders a
+  wallet button for"*, which is the tell: the comment asserted the invariant the
+  route was breaking.
+
+  The reload "fixed" it because there are **two** projections of one session and
+  only one was wrong: the route's literal, and `loadCheckoutSession`, which reads
+  the column directly. `CheckoutPanel` holds the sheet in
+  `useState(initialSession)`, so the `router.replace('/checkout?session=…')` that
+  follows session creation re-renders the server component with correct data that
+  is then **ignored** — only discarding client state (a hard reload) picks it up.
+  A bug that disappears on refresh is a strong hint that two code paths compute
+  the same value and you have only found one of them.
+
+  Introduced by `8c36e90`, which added the member to the **bank's**
+  `wallet-login` route body and never touched the merchant's response literal.
+  Both apps, same pattern, one edited. A grep for the new member across every
+  `NextResponse.json` would have caught it in seconds; `pnpm check` at 747 could
+  not, because `apps/merchant/src/app/**` had **zero** test files.
+
+  Two things conspired to make it invisible. `CheckoutForm` used to do
+  `(await response.json()) as { … dcApiProtocol: string | null … }` — an `as`
+  cast over `.json()` asserts a shape nothing verifies, so `tsc` typed the member
+  as `string | null` while it was `undefined` at runtime. And the field is only
+  read inside a click handler, so nothing failed until a human clicked.
+
+  **The three mappings are now two, and the survivor is type-checked.**
+  `sheetSessionFromStart` (`lib/checkout-session.ts`) is the named projection
+  from a `StartedPaymentSession` to a `SheetSession`, sitting beside
+  `loadCheckoutSession`; the route is now `NextResponse.json(
+  sheetSessionFromStart(result), { status: 201 })` and the body **is** a
+  `SheetSession` under the sheet's own prop names, so `CheckoutForm`'s member-by-
+  member re-map is gone. The two renames that forced that third copy — `uri` →
+  `openid4vpUri` and `state` → `initialState` — were the whole reason it existed.
+
+  The `: SheetSession` return annotation is the actual guard and **must stay
+  written out**; inferring the return type restores the old failure mode
+  silently. Verified by deleting the same member the bug lost, this time from the
+  named function: `error TS2741: Property 'dcApiProtocol' is missing … but
+  required in type 'SheetSession'`. That is the error the object literal could
+  never produce.
+
+  Two tests remain load-bearing on top of the type. `route.test.ts`'s exact
+  key-set assertion catches what a type cannot — that the member survives
+  `JSON.stringify`, which silently drops `undefined` — and is deliberately not a
+  subset check, because the defect *is* an absent member. And
+  `agrees member for member with loadCheckoutSession` compares the two
+  constructors as whole objects. Confirmed over real HTTP against the deployed
+  foundry for all three transports: the 201 body is byte-identical to what
+  `loadCheckoutSession` rebuilds from the row it just wrote.
+
+  One `as` cast survives, in `CheckoutForm`, and it is irreducible: `.json()` is
+  untyped at runtime. What changed is that there is now exactly one, against the
+  shared type, with a compile-checked producer on the other end — rather than
+  three hand-written copies and a cast asserting a shape no one produced.
+
+  Verified against the **deployed** foundry, not only in tests, and A/B against
+  the one-line change: with the fix, all three transports answer HTTP 201 with
+  `dcApiProtocol` present and equal to what the row stored
+  (`openid4vp-v1-signed`, `openid4vp-v1-unsigned`, `null`); with that single line
+  removed and nothing else altered, all three answer 201 with the member
+  **absent** and body-vs-row disagreeing. Note this cannot be checked against a
+  local `pnpm dev`: the local foundry declares neither `payment` nor
+  `payment_av`, so every transport returns `502 foundry_unavailable` and the 201
+  body is unreachable. Port-forward the deployed admin API to a **distinct** port
+  (9100, not 9000) or you will silently probe the local instance.
+
 - **Neither DC API session can be re-rendered as a QR.** Both are bound to
   `response_mode: dc_api.jwt` with an inlined request object and
   foundry returns neither `openid4vp_uri` nor `request_uri`. Recovery creates a
@@ -1102,6 +1201,14 @@ them without reading the linked reasoning first.
   JWS and rendered the wallet button with no QR canvas, `?dcapi=unsigned`
   produced a `dc_api` row with the parameter object. **No wallet has answered
   either form** — see Known-unverifiable.
+
+  Read that browser check for exactly what it says, because it was later shown
+  to be the limit of its own claim. It confirmed the row and the *rendered*
+  button; it never **clicked** the button. The merchant's click path was broken
+  at the time by the missing `dcApiProtocol` in the route body (see the
+  route-projection bullet above), and no amount of asserting on markup would
+  have found it. "Renders the wallet button" and "the wallet button works" are
+  different claims, and only the second one is the feature.
 - **foundry needs `verifier.dc_api_expected_origins` to list the merchant
   origin.** Over the DC API transport the KB-JWT audience MUST be the
   browsing-context Origin. Unset, foundry accepts only an origin derived from
