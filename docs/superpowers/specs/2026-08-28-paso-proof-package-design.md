@@ -136,10 +136,11 @@ Dockerfile's build-stage `ENV` block: an optional secret degrades to an
 unauthenticated endpoint that accepts holder PII from anyone, and this project's
 convention is that a missing secret crashes at boot with a named error.
 
-**Response.** Always 2xx, fast, on every path including a rejected signature
-being the one exception (401). foundry never retries and a non-2xx is only a
-`warn` in its log, so there is nothing to gain by reporting a storage failure —
-but an unsigned or wrongly-signed request must be refused rather than stored.
+**Response.** A missing or wrong signature is `401` and nothing is stored.
+Every other path answers 2xx and answers it fast — an unknown `event`, an
+unmatched `tx_id`, a body we chose not to keep. foundry never retries and a
+non-2xx is only a `warn` in its log, so there is nothing to gain by reporting a
+storage decision as a failure; authentication is the one thing worth refusing.
 
 **Decision logic** lives in `lib/verifier-events.ts` as pure functions, not in
 the route:
@@ -183,6 +184,9 @@ gates. After `credentialId` is resolved and the row is `verified`, and before
 the `settling` write:
 
 ```ts
+// `verifiedAt` is re-read off the row rather than carried in a local: the
+// `verified` transition may have happened on an EARLIER poll, in which case
+// this invocation entered through the resume branch and never wrote it.
 const pkg = proofPackageFor(db, row.foundryVerificationId);
 if (shouldWaitForProof(pkg !== null, verifiedAt, now)) {
   return { ok: true, status: getPaymentSessionStatus(db, sessionId)! };
