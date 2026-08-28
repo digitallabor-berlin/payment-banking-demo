@@ -91,10 +91,12 @@ export const en: Messages = {
     // The bank stores this package; it verifies nothing in it (design D4).
     disclaimer:
       "Stored exactly as the merchant sent it. The bank has not checked it.",
+    unverifiedMark: "Unverified",
     signedRequest: "Signed request",
     vpToken: "Wallet response",
-    showRaw: "Show raw",
-    showDecoded: "Show decoded",
+    decoded: "Decoded",
+    raw: "Raw",
+    received: "Received",
     copy: "Copy",
     copied: "Copied",
     close: "Close",

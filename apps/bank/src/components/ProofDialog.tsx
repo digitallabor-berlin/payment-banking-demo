@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { formatReceivedAt } from "@/lib/format.js";
 import type { Locale } from "@/lib/i18n/locale.js";
 import { MESSAGES } from "@/lib/i18n/messages.js";
 import {
@@ -20,6 +21,12 @@ type Copy = (typeof MESSAGES)[Locale]["proof"];
 
 /**
  * Shows one stored PaSO proof package.
+ *
+ * An EVIDENCE INSPECTOR, not a confirmation dialog, and it wears `.proof-*`
+ * rather than `.dialog-card` for that reason — see the comment above those
+ * rules in globals.css. The distinction is not cosmetic: `.dialog-card` is
+ * 25rem wide and `text-align: center`, which centred fifteen blocks of JSON in
+ * a 400px column.
  *
  * Fetches on open rather than receiving the package as a prop: a `vp_token` is
  * kilobytes and the ledger renders twenty rows, so `TransactionDto` carries a
@@ -68,6 +75,16 @@ export function ProofDialog({
     };
   }, [transactionId]);
 
+  // A modal with no primary action still needs an unambiguous way out, and a
+  // reader deep inside a scrolled payload should not have to find the button.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   const copy = useCallback((value: string) => {
     void navigator.clipboard?.writeText(value);
     setCopied(true);
@@ -80,77 +97,146 @@ export function ProofDialog({
       aria-modal="true"
       aria-label={t.title}
     >
-      <div className="dialog-card max-h-[85vh] overflow-y-auto px-7 py-8">
-        <h2 className="text-lg font-semibold">{t.title}</h2>
-        <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
-          {t.disclaimer}
-        </p>
+      <div className="proof-sheet">
+        <div className="proof-head">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold">{t.title}</h2>
+              {body ? (
+                <p className="mono mt-1 text-xs text-[var(--color-muted-foreground)]">
+                  {t.received} {formatReceivedAt(body.receivedAt, locale)}
+                </p>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              className="btn btn-outline shrink-0 px-3 py-2"
+              onClick={onClose}
+            >
+              {t.close}
+            </button>
+          </div>
 
-        {failed ? (
-          <p className="mt-6 text-sm">{t.loadFailed}</p>
-        ) : body ? (
-          <>
-            <div className="mt-4 flex items-center gap-3">
-              <button
-                type="button"
-                className="btn btn-outline"
-                onClick={() => setRaw((value) => !value)}
+          {/*
+            The custody strip. The bank stores this package and verifies nothing
+            in it (design D4), so that statement is set as an evidence tag
+            rather than a grey sentence under the title — it is the one claim
+            this sheet must never let a reader skim past.
+          */}
+          <p className="proof-custody">
+            <span className="proof-custody-mark">{t.unverifiedMark}</span>
+            <span>{t.disclaimer}</span>
+          </p>
+
+          {body ? (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <div
+                className="proof-segment"
+                role="group"
+                aria-label={t.title}
               >
-                {raw ? t.showDecoded : t.showRaw}
-              </button>
+                <button
+                  type="button"
+                  aria-current={raw ? undefined : "true"}
+                  onClick={() => setRaw(false)}
+                >
+                  {t.decoded}
+                </button>
+                <button
+                  type="button"
+                  aria-current={raw ? "true" : undefined}
+                  onClick={() => setRaw(true)}
+                >
+                  {t.raw}
+                </button>
+              </div>
               <button
                 type="button"
-                className="btn btn-outline"
+                className="btn btn-outline px-3 py-2"
                 onClick={() => copy(JSON.stringify(body.proofPackage, null, 2))}
               >
                 {copied ? t.copied : t.copy}
               </button>
             </div>
+          ) : null}
+        </div>
 
-            {raw ? (
-              <Block label={t.title}>
+        <div className="proof-body">
+          {failed ? (
+            <p className="mt-4 text-sm">{t.loadFailed}</p>
+          ) : body ? raw ? (
+            <div className="proof-specimen">
+              <div className="proof-specimen-head">
+                <span className="proof-specimen-name">{t.title}</span>
+                <span className="proof-specimen-tag">application/json</span>
+              </div>
+              <pre className="proof-data max-h-none">
                 {JSON.stringify(body.proofPackage, null, 2)}
-              </Block>
-            ) : (
-              <>
-                <section className="mt-6">
-                  <h3 className="text-sm font-semibold">{t.signedRequest}</h3>
-                  <Jws
-                    result={decodeJwsCompact(body.proofPackage.signed_request)}
-                    raw={body.proofPackage.signed_request}
-                    t={t}
-                  />
-                </section>
-
-                <section className="mt-6">
-                  <h3 className="text-sm font-semibold">{t.vpToken}</h3>
-                  <VpToken value={body.proofPackage.vp_token} t={t} />
-                </section>
-              </>
-            )}
-          </>
-        ) : (
-          <p className="mt-6 text-sm">{t.loading}</p>
-        )}
-
-        <div className="mt-8">
-          <button type="button" className="btn btn-primary" onClick={onClose}>
-            {t.close}
-          </button>
+              </pre>
+            </div>
+          ) : (
+            <>
+              <Specimen
+                name={t.signedRequest}
+                tag="compact JWS"
+                result={decodeJwsCompact(body.proofPackage.signed_request)}
+                raw={body.proofPackage.signed_request}
+                t={t}
+              />
+              <VpToken value={body.proofPackage.vp_token} t={t} />
+            </>
+          ) : (
+            <p className="mt-4 text-sm">{t.loading}</p>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function Block({ label, children }: { label: string; children: string }) {
+/** One labelled part of a JOSE artefact: header, payload or signature. */
+function Part({
+  index,
+  label,
+  children,
+}: {
+  index: number;
+  label: string;
+  children: string;
+}) {
   return (
-    <div className="mt-2">
-      <p className="text-xs text-[var(--color-muted-foreground)]">{label}</p>
-      <pre className="mt-1 max-h-64 overflow-auto rounded bg-black/5 p-3 text-xs break-all whitespace-pre-wrap">
-        {children}
-      </pre>
+    <div className="proof-part">
+      <p className="proof-part-label">
+        <span className="proof-part-index">{index}</span>
+        <span>{label}</span>
+      </p>
+      <pre className="proof-data">{children}</pre>
     </div>
+  );
+}
+
+/** A framed artefact with a name and a machine tag. */
+function Specimen({
+  name,
+  tag,
+  result,
+  raw,
+  t,
+}: {
+  name: string;
+  tag: string;
+  result: JwsResult;
+  raw?: string;
+  t: Copy;
+}) {
+  return (
+    <section className="proof-specimen">
+      <div className="proof-specimen-head">
+        <span className="proof-specimen-name">{name}</span>
+        <span className="proof-specimen-tag">{tag}</span>
+      </div>
+      <Jws result={result} raw={raw} t={t} />
+    </section>
   );
 }
 
@@ -158,20 +244,24 @@ function Jws({ result, raw, t }: { result: JwsResult; raw?: string; t: Copy }) {
   if (!result.ok) {
     return (
       <>
-        <p className="mt-2 text-xs text-[var(--color-muted-foreground)]">
-          {t.undecodable}
-        </p>
+        <p className="proof-note">{t.undecodable}</p>
         {/* Only the top-level signed request still has its raw bytes to hand.
             A nested KB-JWT does not, and an empty block would say nothing. */}
-        {raw ? <Block label={t.signature}>{raw}</Block> : null}
+        {raw ? <pre className="proof-data">{raw}</pre> : null}
       </>
     );
   }
   return (
     <>
-      <Block label={t.header}>{JSON.stringify(result.header, null, 2)}</Block>
-      <Block label={t.payload}>{JSON.stringify(result.payload, null, 2)}</Block>
-      <Block label={t.signature}>{result.signature}</Block>
+      <Part index={1} label={t.header}>
+        {JSON.stringify(result.header, null, 2)}
+      </Part>
+      <Part index={2} label={t.payload}>
+        {JSON.stringify(result.payload, null, 2)}
+      </Part>
+      <Part index={3} label={t.signature}>
+        {result.signature}
+      </Part>
     </>
   );
 }
@@ -180,70 +270,89 @@ function VpToken({ value, t }: { value: unknown; t: Copy }) {
   const view = decodeVpToken(value);
   if (!view.ok) {
     return (
-      <>
-        <p className="mt-2 text-xs text-[var(--color-muted-foreground)]">
-          {t.undecodable}
-        </p>
-        <Block label={t.vpToken}>{JSON.stringify(value, null, 2)}</Block>
-      </>
+      <section className="proof-specimen">
+        <div className="proof-specimen-head">
+          <span className="proof-specimen-name">{t.vpToken}</span>
+        </div>
+        <p className="proof-note">{t.undecodable}</p>
+        <pre className="proof-data">{JSON.stringify(value, null, 2)}</pre>
+      </section>
     );
   }
 
   return (
     <>
-      {view.entries.map((entry) => (
-        <div key={entry.queryId} className="mt-4">
-          <p className="text-xs font-semibold">
-            {t.credential}: {entry.queryId}
-          </p>
-          {entry.presentations.map((presentation, index) => (
-            <Presentation key={index} presentation={presentation} t={t} />
-          ))}
-        </div>
-      ))}
+      {view.entries.map((entry) =>
+        entry.presentations.map((presentation, index) => (
+          <Presentation
+            // A credential may answer with more than one presentation, so the
+            // query id alone is not unique.
+            key={`${entry.queryId}:${index}`}
+            queryId={entry.queryId}
+            presentation={presentation}
+            t={t}
+          />
+        )),
+      )}
     </>
   );
 }
 
 function Presentation({
+  queryId,
   presentation,
   t,
 }: {
+  queryId: string;
   presentation: PresentationView;
   t: Copy;
 }) {
-  if (presentation.kind === "opaque") {
-    return (
-      <>
-        <p className="mt-2 text-xs text-[var(--color-muted-foreground)]">
-          {t.undecodable}
-        </p>
-        <Block label={t.vpToken}>{presentation.value}</Block>
-      </>
-    );
-  }
-
   return (
-    <>
-      <Jws result={presentation.issuerJwt} t={t} />
-      {presentation.disclosures.length > 0 ? (
-        <Block label={t.disclosures}>
-          {presentation.disclosures
-            .map((disclosure) =>
-              disclosure.ok
-                ? JSON.stringify(disclosure.value)
-                : `— ${t.undecodable}`,
-            )
-            .join("\n")}
-        </Block>
-      ) : null}
-      {presentation.kbJwt ? (
-        <div className="mt-2">
-          <p className="text-xs font-semibold">{t.keyBinding}</p>
-          <Jws result={presentation.kbJwt} t={t} />
-        </div>
-      ) : null}
-    </>
+    <section className="proof-specimen">
+      <div className="proof-specimen-head">
+        <span className="proof-specimen-name">
+          {t.credential}: {queryId}
+        </span>
+        <span className="proof-specimen-tag">
+          {presentation.kind === "sd-jwt" ? "dc+sd-jwt" : t.vpToken}
+        </span>
+      </div>
+
+      {presentation.kind === "opaque" ? (
+        <>
+          <p className="proof-note">{t.undecodable}</p>
+          <pre className="proof-data">{presentation.value}</pre>
+        </>
+      ) : (
+        <>
+          <Jws result={presentation.issuerJwt} t={t} />
+          {presentation.disclosures.length > 0 ? (
+            <div className="proof-part">
+              <p className="proof-part-label">
+                <span>{t.disclosures}</span>
+              </p>
+              <pre className="proof-data">
+                {presentation.disclosures
+                  .map((disclosure) =>
+                    disclosure.ok
+                      ? JSON.stringify(disclosure.value)
+                      : `— ${t.undecodable}`,
+                  )
+                  .join("\n")}
+              </pre>
+            </div>
+          ) : null}
+          {presentation.kbJwt ? (
+            <div className="proof-part">
+              <p className="proof-part-label">
+                <span>{t.keyBinding}</span>
+              </p>
+              <Jws result={presentation.kbJwt} t={t} />
+            </div>
+          ) : null}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -273,7 +382,7 @@ export function ProofButton({
         // is the only way a screen-reader user reaches the package at all.
         aria-label={t.open}
         title={t.open}
-        className="inline-flex items-center rounded p-0.5 align-middle"
+        className="-m-1 inline-flex items-center rounded p-1 align-middle text-[var(--color-muted-foreground)] transition-colors hover:text-[var(--color-foreground)]"
         onClick={() => setOpen(true)}
       >
         <ProofMark className="h-3.5 w-3.5" />

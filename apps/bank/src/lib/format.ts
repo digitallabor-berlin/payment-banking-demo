@@ -76,6 +76,28 @@ export function formatBookedAt(ms: number, locale: Locale): string {
 }
 
 /**
+ * "28/08/2026, 10:57 UTC" — when the bank received a proof package.
+ *
+ * Built ON `formatBookedAt` rather than beside it, so the day shown on a
+ * package can never drift from the day its transaction shows in the ledger.
+ *
+ * The zone marker is load-bearing, not decoration. Every other timestamp in
+ * this app is a banking DATE, where the hour does not matter; this one is a
+ * custody record, where it does — and a bare `10:57` on a receipt reads as
+ * local time while being UTC. This repo has already paid for that ambiguity
+ * once, on the login `transaction_data` datetime.
+ *
+ * Minutes, not seconds: enough to place the moment, and the second is noise a
+ * reader cannot act on. The stored value keeps full precision either way.
+ */
+export function formatReceivedAt(ms: number, locale: Locale): string {
+ const date = new Date(ms);
+ const hours = String(date.getUTCHours()).padStart(2, "0");
+ const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+ return `${formatBookedAt(ms, locale)}, ${hours}:${minutes} UTC`;
+}
+
+/**
  * "Fr, 01.08.2025" / "Fri, 01/08/2025" — the label on a ledger day rail. UTC
  * for the same reason as formatBookedAt.
  */

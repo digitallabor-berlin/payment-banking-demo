@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatBookedAt,
+  formatReceivedAt,
   formatDayLabel,
   formatEuroCents,
   formatIban,
@@ -97,6 +98,41 @@ describe("English formatting", () => {
   it("leaves IBAN grouping locale-independent", () => {
     expect(formatIban("DE02120300000000202051")).toBe(
       "DE02 1203 0000 0000 2020 51",
+    );
+  });
+});
+
+describe("formatReceivedAt", () => {
+  it("appends the time of day and names the zone", () => {
+    // The zone marker is not decoration. This repo has already been bitten by a
+    // bare datetime that looked local while being UTC (see the login
+    // transaction_data notes in AGENTS.md), and a custody timestamp on an
+    // evidence record is exactly where that ambiguity costs something.
+    const ms = Date.UTC(2026, 7, 28, 10, 57, 12);
+    expect(formatReceivedAt(ms, "en")).toBe("28/08/2026, 10:57 UTC");
+    expect(formatReceivedAt(ms, "de")).toBe("28.08.2026, 10:57 UTC");
+  });
+
+  it("pads both fields to two digits", () => {
+    expect(formatReceivedAt(Date.UTC(2026, 0, 3, 4, 5, 0), "en")).toBe(
+      "03/01/2026, 04:05 UTC",
+    );
+  });
+
+  it("agrees with formatBookedAt on the date half", () => {
+    // One derivation, not two: the day shown here must never drift from the
+    // day the same package's transaction shows in the ledger.
+    const ms = Date.UTC(2026, 11, 31, 23, 59, 59);
+    expect(formatReceivedAt(ms, "de").startsWith(formatBookedAt(ms, "de"))).toBe(
+      true,
+    );
+  });
+
+  it("does not roll over near midnight UTC", () => {
+    // A local-time implementation would print the wrong day here for most of
+    // the world. Hand-rolled UTC getters are what keep this stable.
+    expect(formatReceivedAt(Date.UTC(2026, 7, 28, 23, 30, 0), "en")).toBe(
+      "28/08/2026, 23:30 UTC",
     );
   });
 });

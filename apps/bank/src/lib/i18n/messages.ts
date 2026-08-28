@@ -156,12 +156,30 @@ export interface Messages {
           open: string;
           /** States plainly that the bank stored this and did not check it. */
           disclaimer: string;
+          /**
+           * The custody strip's one-word mark, set beside `disclaimer`.
+           *
+           * Names the STATE, not the artefact: the single fact a reader must
+           * not skim past is that nothing here was checked. It reads as a
+           * neutral custody label rather than an alarm because the sentence
+           * beside it says what was actually done.
+           */
+          unverifiedMark: string;
           /** Label for the `signed_request` member. */
           signedRequest: string;
           /** Label for the `vp_token` member. */
           vpToken: string;
-          showRaw: string;
-          showDecoded: string;
+          /**
+           * The two options of the view control.
+           *
+           * STATE labels, not commands — "Decoded", never "Show decoded". The
+           * control is a segmented pair showing both options at once, so each
+           * label names what you are looking at rather than what clicking does.
+           */
+          decoded: string;
+          raw: string;
+          /** Labels the moment the bank received the package. */
+          received: string;
           copy: string;
           copied: string;
           close: string;
