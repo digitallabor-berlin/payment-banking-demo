@@ -1505,14 +1505,36 @@ Three things that measurement settled, and one of them is a trap:
   `presentation_request_delivered` per `GET /vp/request/:id` *fetch*, so nothing
   arrives until a wallet actually fetches the request object.
 
-What remains genuinely unobserved is the **second** event. No wallet has
-completed a presentation against this deployment since the webhook went live, so
-`verification_completed` has never been received, no `vp_token` has ever been
-stored, and therefore **no complete package has ever been assembled** — every
-`vp_token_json` is still null. The decoder has still only ever parsed SD-JWTs
-this repo constructed, and the viewer was verified against a hand-seeded package
-(which is how the `Buffer` no-op was caught). One real wallet payment over
-`dc_api_signed` is all that is needed now; ask the operator for it.
+**A real wallet has now completed the whole path**, reported by the operator and
+then measured here — so the paragraph that used to sit here, saying no complete
+package had ever been assembled, is obsolete. `transaction_proofs` on the
+deployed bank holds one real row: a **3785-byte** `signed_request` and a
+**5107-byte** `vp_token`, from anna's €13.99 Larder payment.
+
+What that one row settles, none of which was previously observed:
+
+- `verification_completed` **is** delivered, and carries the decrypted
+  `vp_token`. Both events therefore arrive, and `proofPackageFor` assembles a
+  complete package from them.
+- The `vp_token` is keyed by DCQL query id with **array** values, exactly as
+  `decodeVpToken` assumes — `{ sparkassencard: [...], av_sdjwt: [...] }`. Two
+  credentials in one token, kept apart rather than merged.
+- Each presentation is `<issuer JWS>~<KB-JWT>` — **two** tilde-separated parts,
+  so a real presentation exercises `readPresentation`'s non-trivial branch: a
+  KB-JWT present, no disclosures. Note what that means for the decoder's
+  trailing-tilde rule — the last segment here is a JWT and must be read as one,
+  which is the opposite of the `issuer~disclosure~` case the unit tests pin.
+- The claims are **not** selectively disclosed: `sub`, `masked_iban`, `psu_id`
+  (and `age_over_16`/`age_over_18`) sit directly in the issuer payload. So the
+  disclosures list is legitimately empty on real data, and a viewer that assumed
+  disclosures always exist would look broken against the only real package there
+  is.
+
+The decoder was written against constructed SD-JWTs and met all of this
+unchanged. What is still unobserved is narrower than before: an `mso_mdoc`
+presentation (nothing the bank issues can answer `av_mdoc`), a presentation
+carrying actual disclosures, and any package produced over `request_uri` rather
+than `dc_api_signed`.
 
 One caveat outlives all of that, design D6/§9: on `request_uri` foundry re-signs
 per fetch and ECDSA is randomized, so several genuinely different

@@ -146,26 +146,47 @@ required — so **`?dcapi=unsigned` silently disables the proof package**.
 `proofPackageFor` returns null, which is correct, but that debugging affordance
 is no longer neutral: it is also a "produce no audit artefact" switch.
 
+## A real wallet closed the loop
+
+Superseded again, and this is the good direction. A real EUDI wallet completed a
+real payment on the deployed system, and `transaction_proofs` now holds one
+genuine row — a **3785-byte** `signed_request` and a **5107-byte** `vp_token`
+from anna's €13.99 Larder purchase. Every leg of this feature has now run end to
+end against real infrastructure.
+
+Four things that row settled, none of them previously observed:
+
+- `verification_completed` **is** delivered and carries the decrypted
+  `vp_token`, so `proofPackageFor` assembles a real package from two real events.
+- The token is keyed by DCQL query id with array values — `{ sparkassencard:
+  [...], av_sdjwt: [...] }` — exactly as `decodeVpToken` assumed. Two credentials
+  in one token, kept apart rather than merged.
+- Each presentation is `<issuer JWS>~<KB-JWT>`: two parts, KB-JWT present, no
+  disclosures. That is the *opposite* shape from the `issuer~disclosure~` case
+  the unit tests pin, so the trailing-tilde rule was exercised in its harder
+  direction by real data and held.
+- The claims are **not** selectively disclosed — `sub`, `masked_iban`, `psu_id`,
+  `age_over_16`, `age_over_18` sit directly in the issuer payload. An empty
+  disclosures list is therefore normal on real data, not a decode failure.
+
+The decoder was written against constructed fixtures and met all of it unchanged.
+
 ## Still NOT verified
 
-**No complete package has ever been assembled.** Only the *first* of the two
-events has ever been received: every stored `vp_token_json` is null, because no
-wallet has completed a presentation against this deployment since the webhook
-went live. Consequently:
+Narrower than before, but real:
 
-- `verification_completed` has never been observed at all — its shape, and the
-  `skip_serializing_if` absent-key behaviour on `vp_token`, are still read off
-  the design rather than measured.
-- The decoder has never met a real `vp_token`. Every SD-JWT it has parsed was
-  constructed by this repo, and the viewer was verified against a hand-seeded
-  package (which is how the `Buffer` no-op was caught).
-- `transaction_proofs` in the deployed bank is still empty.
+- No `mso_mdoc` presentation has been seen — nothing the bank issues can answer
+  the `av_mdoc` query, so the `opaque` branch remains untested against real data.
+- No presentation carrying actual disclosures has been seen.
+- No package has been produced over `request_uri`. That transport delivers its
+  request event per wallet *fetch*, and design D6/§9's "which JWS did the wallet
+  actually consume" ambiguity only bites there — the one real package came over
+  `dc_api_signed`, where exactly one JWS exists.
 
-**One real wallet payment over `dc_api_signed` closes all of this.** Until then
-every payment takes the full six-second grace period and settles with no
-package — the designed degradation, not a failure: `shouldWaitForProof` fails
-forward in every branch but one, because an audit artefact is never worth a
-payment that does not complete.
+And the degradation path is unchanged: when no package arrives, every payment
+takes the full six-second grace period and settles without one. That is the
+design, not a failure — `shouldWaitForProof` fails forward in every branch but
+one, because an audit artefact is never worth a payment that does not complete.
 
 One further caveat with teeth, design D6/§9: on the `request_uri` transport
 foundry re-signs the request object per fetch and ECDSA is randomized, so several
