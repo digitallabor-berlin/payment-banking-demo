@@ -23,7 +23,10 @@ function post(body: unknown, secret = SECRET): Request {
   const signature = `sha256=${createHmac("sha256", secret).update(raw).digest("hex")}`;
   return new Request("http://m/api/verifier-events", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-foundry-signature": signature },
+    headers: {
+      "content-type": "application/json",
+      "x-foundry-signature": signature,
+    },
     body: raw,
   });
 }
@@ -60,7 +63,9 @@ describe("POST /api/verifier-events", () => {
     );
 
     expect(response.status).toBe(204);
-    expect(getDb().select().from(verifierEvents).all()[0]!.signedRequest).toBe("a.b.c");
+    expect(getDb().select().from(verifierEvents).all()[0]!.signedRequest).toBe(
+      "a.b.c",
+    );
   });
 
   it("stores a completion for a transaction a payment session claims", async () => {
@@ -92,7 +97,10 @@ describe("POST /api/verifier-events", () => {
 
   it("refuses a wrongly-signed body with 401 and stores nothing", async () => {
     const response = await POST(
-      post({ event: "presentation_request_delivered", tx_id: "ver_1" }, "wrong-secret"),
+      post(
+        { event: "presentation_request_delivered", tx_id: "ver_1" },
+        "wrong-secret",
+      ),
     );
 
     expect(response.status).toBe(401);
@@ -110,7 +118,9 @@ describe("POST /api/verifier-events", () => {
   });
 
   it("answers 204 to an event type it does not know, storing nothing", async () => {
-    const response = await POST(post({ event: "something_new", tx_id: "ver_1" }));
+    const response = await POST(
+      post({ event: "something_new", tx_id: "ver_1" }),
+    );
     expect(response.status).toBe(204);
     expect(getDb().select().from(verifierEvents).all()).toHaveLength(0);
   });

@@ -46,7 +46,9 @@ describe("parseEnv", () => {
     // secret degrades that route to an unauthenticated endpoint accepting
     // holder credentials from anyone, so absence must be a boot failure.
     const { FOUNDRY_WEBHOOK_SECRET: _omitted, ...withoutSecret } = complete;
-    expect(() => parseEnv(withoutSecret)).toThrowError(/FOUNDRY_WEBHOOK_SECRET/);
+    expect(() => parseEnv(withoutSecret)).toThrowError(
+      /FOUNDRY_WEBHOOK_SECRET/,
+    );
   });
 
   it("rejects a non-URL BANK_API_URL", () => {

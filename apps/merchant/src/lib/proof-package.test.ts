@@ -18,7 +18,11 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function requestEvent(txId: string, jws: string | null, receivedAt: number): void {
+function requestEvent(
+  txId: string,
+  jws: string | null,
+  receivedAt: number,
+): void {
   db.insert(verifierEvents)
     .values({
       txId,
@@ -31,7 +35,11 @@ function requestEvent(txId: string, jws: string | null, receivedAt: number): voi
     .run();
 }
 
-function completionEvent(txId: string, vpToken: unknown, receivedAt: number): void {
+function completionEvent(
+  txId: string,
+  vpToken: unknown,
+  receivedAt: number,
+): void {
   db.insert(verifierEvents)
     .values({
       txId,

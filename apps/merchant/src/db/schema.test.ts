@@ -3,12 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "./index.js";
-import {
-  orders,
-  paymentSessions,
-  products,
-  verifierEvents,
-} from "./schema.js";
+import { orders, paymentSessions, products, verifierEvents } from "./schema.js";
 import { seed } from "./seed.js";
 
 let dir: string;

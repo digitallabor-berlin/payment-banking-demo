@@ -64,7 +64,9 @@ function base64UrlToText(segment: string): string {
  return new TextDecoder().decode(bytes);
 }
 
-function decodeSegment(segment: string): { ok: true; value: unknown } | DecodeFailure {
+function decodeSegment(
+ segment: string,
+): { ok: true; value: unknown } | DecodeFailure {
  // The alphabet is checked first, always: `atob` throws on some invalid input
  // and silently accepts other invalid input, so neither its throwing nor its
  // returning is evidence the segment was well-formed.
@@ -88,7 +90,11 @@ export function decodeJwsCompact(value: string): JwsResult {
  if (segments.length !== 3) {
   return { ok: false, reason: `expected 3 segments, got ${segments.length}` };
  }
- const [rawHeader, rawPayload, signature] = segments as [string, string, string];
+ const [rawHeader, rawPayload, signature] = segments as [
+  string,
+  string,
+  string,
+ ];
 
  const header = decodeSegment(rawHeader);
  if (!header.ok) return { ok: false, reason: `header: ${header.reason}` };
@@ -168,7 +174,9 @@ export function decodeVpToken(value: unknown): VpTokenView {
  }
 
  const entries: VpTokenEntry[] = [];
- for (const [queryId, raw] of Object.entries(value as Record<string, unknown>)) {
+ for (const [queryId, raw] of Object.entries(
+  value as Record<string, unknown>,
+ )) {
   if (!Array.isArray(raw)) {
    return { ok: false, reason: `vp_token['${queryId}'] must be an array` };
   }

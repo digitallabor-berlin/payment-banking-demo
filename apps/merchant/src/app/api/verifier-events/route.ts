@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/db/index.js";
 import { env } from "@/env.js";
 import {
-  parseVerifierEvent,
-  recordVerifierEvent,
-  verifyWebhookSignature,
+ parseVerifierEvent,
+ recordVerifierEvent,
+ verifyWebhookSignature,
 } from "@/lib/verifier-events.js";
 
 export const dynamic = "force-dynamic";
@@ -28,23 +28,23 @@ export const dynamic = "force-dynamic";
  * credentials must be refused rather than believed.
  */
 export async function POST(request: Request) {
-  const raw = await request.text();
-  const signature = request.headers.get("x-foundry-signature");
+ const raw = await request.text();
+ const signature = request.headers.get("x-foundry-signature");
 
-  if (!verifyWebhookSignature(raw, signature, env.FOUNDRY_WEBHOOK_SECRET)) {
-    return NextResponse.json({ error: "invalid_signature" }, { status: 401 });
-  }
+ if (!verifyWebhookSignature(raw, signature, env.FOUNDRY_WEBHOOK_SECRET)) {
+  return NextResponse.json({ error: "invalid_signature" }, { status: 401 });
+ }
 
-  let body: unknown;
-  try {
-    body = JSON.parse(raw);
-  } catch {
-    // Authenticated but unreadable. Nothing to store and nothing to say.
-    return new NextResponse(null, { status: 204 });
-  }
-
-  const event = parseVerifierEvent(body);
-  if (event) recordVerifierEvent(getDb(), event, Date.now());
-
+ let body: unknown;
+ try {
+  body = JSON.parse(raw);
+ } catch {
+  // Authenticated but unreadable. Nothing to store and nothing to say.
   return new NextResponse(null, { status: 204 });
+ }
+
+ const event = parseVerifierEvent(body);
+ if (event) recordVerifierEvent(getDb(), event, Date.now());
+
+ return new NextResponse(null, { status: 204 });
 }

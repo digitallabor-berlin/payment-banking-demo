@@ -3,11 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "../db/index.js";
-import {
-  credentials,
-  transactionProofs,
-  transactions,
-} from "../db/schema.js";
+import { credentials, transactionProofs, transactions } from "../db/schema.js";
 import { seed } from "../db/seed.js";
 import {
   AGE_CREDENTIAL_TYPE_IDS,
@@ -908,7 +904,9 @@ describe("listTransactions hasProof", () => {
       .run();
 
     const rows = listTransactions(db, "user_anna", 20, 0);
-    expect(rows.filter((r) => r.hasProof).map((r) => r.id)).toEqual([target.id]);
+    expect(rows.filter((r) => r.hasProof).map((r) => r.id)).toEqual([
+      target.id,
+    ]);
   });
 
   it("returns an empty page without touching the proof table", () => {

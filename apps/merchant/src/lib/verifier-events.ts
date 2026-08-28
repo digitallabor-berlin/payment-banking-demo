@@ -18,19 +18,19 @@ import { paymentSessions, verifierEvents } from "../db/schema.js";
  * would be a second source of truth for the decision that moves money.
  */
 export type VerifierEvent =
- | {
-    event: "presentation_request_delivered";
-    txId: string;
-    transport: string;
-    /** The PaSO `signed_request`. Null when foundry's artefact gate is off. */
-    signedRequest: string | null;
-   }
- | {
-    event: "verification_completed";
-    txId: string;
-    /** The PaSO `vp_token`. Null when foundry's artefact gate is off. */
-    vpToken: unknown;
-   };
+  | {
+      event: "presentation_request_delivered";
+      txId: string;
+      transport: string;
+      /** The PaSO `signed_request`. Null when foundry's artefact gate is off. */
+      signedRequest: string | null;
+    }
+  | {
+      event: "verification_completed";
+      txId: string;
+      /** The PaSO `vp_token`. Null when foundry's artefact gate is off. */
+      vpToken: unknown;
+    };
 
 const SIGNATURE_PREFIX = "sha256=";
 
@@ -48,25 +48,25 @@ const SIGNATURE_PREFIX = "sha256=";
  * unauthenticated caller must not be able to produce a 500.
  */
 export function verifyWebhookSignature(
- rawBody: string,
- header: string | null,
- secret: string,
+  rawBody: string,
+  header: string | null,
+  secret: string,
 ): boolean {
- if (!header || !header.startsWith(SIGNATURE_PREFIX)) return false;
- const provided = header.slice(SIGNATURE_PREFIX.length);
- // `Buffer.from("zz", "hex")` yields an empty buffer rather than throwing, so
- // the hex shape is checked explicitly instead of inferred from the decode.
- if (!/^[0-9a-f]{64}$/.test(provided)) return false;
+  if (!header || !header.startsWith(SIGNATURE_PREFIX)) return false;
+  const provided = header.slice(SIGNATURE_PREFIX.length);
+  // `Buffer.from("zz", "hex")` yields an empty buffer rather than throwing, so
+  // the hex shape is checked explicitly instead of inferred from the decode.
+  if (!/^[0-9a-f]{64}$/.test(provided)) return false;
 
- const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
- const a = Buffer.from(provided, "hex");
- const b = Buffer.from(expected, "hex");
- if (a.length !== b.length) return false;
- return timingSafeEqual(a, b);
+  const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
+  const a = Buffer.from(provided, "hex");
+  const b = Buffer.from(expected, "hex");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 function asString(value: unknown): string | null {
- return typeof value === "string" && value.length > 0 ? value : null;
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 /**
@@ -79,30 +79,30 @@ function asString(value: unknown): string | null {
  * would only let the route return a status foundry does not read.
  */
 export function parseVerifierEvent(body: unknown): VerifierEvent | null {
- if (typeof body !== "object" || body === null) return null;
- const raw = body as Record<string, unknown>;
+  if (typeof body !== "object" || body === null) return null;
+  const raw = body as Record<string, unknown>;
 
- const txId = asString(raw.tx_id);
- if (!txId) return null;
+  const txId = asString(raw.tx_id);
+  if (!txId) return null;
 
- if (raw.event === "presentation_request_delivered") {
-  return {
-   event: "presentation_request_delivered",
-   txId,
-   transport: asString(raw.transport) ?? "",
-   signedRequest: asString(raw.request_object_jws),
-  };
- }
+  if (raw.event === "presentation_request_delivered") {
+    return {
+      event: "presentation_request_delivered",
+      txId,
+      transport: asString(raw.transport) ?? "",
+      signedRequest: asString(raw.request_object_jws),
+    };
+  }
 
- if (raw.event === "verification_completed") {
-  return {
-   event: "verification_completed",
-   txId,
-   vpToken: raw.vp_token === undefined ? null : raw.vp_token,
-  };
- }
+  if (raw.event === "verification_completed") {
+    return {
+      event: "verification_completed",
+      txId,
+      vpToken: raw.vp_token === undefined ? null : raw.vp_token,
+    };
+  }
 
- return null;
+  return null;
 }
 
 /**
@@ -126,40 +126,41 @@ export function parseVerifierEvent(body: unknown): VerifierEvent | null {
  * was never created, so by the time a completion exists our UPDATE has landed.
  */
 export function recordVerifierEvent(
- db: Db,
- event: VerifierEvent,
- now: number,
+  db: Db,
+  event: VerifierEvent,
+  now: number,
 ): "stored" | "ignored" {
- if (event.event === "verification_completed") {
-  const owned = db
-   .select({ id: paymentSessions.id })
-   .from(paymentSessions)
-   .where(eq(paymentSessions.foundryVerificationId, event.txId))
-   .get();
-  if (!owned) return "ignored";
+  if (event.event === "verification_completed") {
+    const owned = db
+      .select({ id: paymentSessions.id })
+      .from(paymentSessions)
+      .where(eq(paymentSessions.foundryVerificationId, event.txId))
+      .get();
+    if (!owned) return "ignored";
+
+    db.insert(verifierEvents)
+      .values({
+        txId: event.txId,
+        event: "verification_completed",
+        transport: null,
+        signedRequest: null,
+        vpTokenJson:
+          event.vpToken === null ? null : JSON.stringify(event.vpToken),
+        receivedAt: now,
+      })
+      .run();
+    return "stored";
+  }
 
   db.insert(verifierEvents)
-   .values({
-    txId: event.txId,
-    event: "verification_completed",
-    transport: null,
-    signedRequest: null,
-    vpTokenJson: event.vpToken === null ? null : JSON.stringify(event.vpToken),
-    receivedAt: now,
-   })
-   .run();
+    .values({
+      txId: event.txId,
+      event: "presentation_request_delivered",
+      transport: event.transport,
+      signedRequest: event.signedRequest,
+      vpTokenJson: null,
+      receivedAt: now,
+    })
+    .run();
   return "stored";
- }
-
- db.insert(verifierEvents)
-  .values({
-   txId: event.txId,
-   event: "presentation_request_delivered",
-   transport: event.transport,
-   signedRequest: event.signedRequest,
-   vpTokenJson: null,
-   receivedAt: now,
-  })
-  .run();
- return "stored";
 }

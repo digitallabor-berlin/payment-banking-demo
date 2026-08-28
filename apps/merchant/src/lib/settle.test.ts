@@ -767,7 +767,10 @@ describe("refreshPaymentSessionState — the proof package", () => {
     );
 
     expect(sent).toMatchObject({
-      proofPackage: { signedRequest: "hdr.pay.sig", vpToken: { dpc: ["eyJ..."] } },
+      proofPackage: {
+        signedRequest: "hdr.pay.sig",
+        vpToken: { dpc: ["eyJ..."] },
+      },
     });
   });
 
@@ -823,8 +826,11 @@ describe("refreshPaymentSessionState — the proof package", () => {
         .mock.calls[0]![0],
     ).not.toHaveProperty("proofPackage");
     expect(
-      db.select().from(paymentSessions).where(eq(paymentSessions.id, sessionId)).get()!
-        .state,
+      db
+        .select()
+        .from(paymentSessions)
+        .where(eq(paymentSessions.id, sessionId))
+        .get()!.state,
     ).toBe("completed");
   });
 

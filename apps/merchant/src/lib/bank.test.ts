@@ -37,10 +37,16 @@ describe("BankClient.pay", () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     await clientRecording(calls).pay({
       ...base,
-      proofPackage: { signedRequest: "hdr.pay.sig", vpToken: { dpc: ["eyJ..."] } },
+      proofPackage: {
+        signedRequest: "hdr.pay.sig",
+        vpToken: { dpc: ["eyJ..."] },
+      },
     });
 
-    const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
+    const body = JSON.parse(String(calls[0]!.init.body)) as Record<
+      string,
+      unknown
+    >;
     expect(body.proof_package).toEqual({
       signed_request: "hdr.pay.sig",
       vp_token: { dpc: ["eyJ..."] },
@@ -53,7 +59,10 @@ describe("BankClient.pay", () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     await clientRecording(calls).pay(base);
 
-    const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
+    const body = JSON.parse(String(calls[0]!.init.body)) as Record<
+      string,
+      unknown
+    >;
     expect(body).not.toHaveProperty("proof_package");
   });
 
@@ -61,7 +70,10 @@ describe("BankClient.pay", () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     await clientRecording(calls).pay(base);
 
-    const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
+    const body = JSON.parse(String(calls[0]!.init.body)) as Record<
+      string,
+      unknown
+    >;
     expect(Object.keys(body).sort()).toEqual([
       "amount_cents",
       "credential_id",

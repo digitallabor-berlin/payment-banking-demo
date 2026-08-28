@@ -16,7 +16,10 @@ function jws(header: unknown, payload: unknown, signature = "c2ln"): string {
 
 describe("decodeJwsCompact", () => {
   it("splits a compact JWS into header, payload and signature", () => {
-    const token = jws({ alg: "ES256", typ: "dc+sd-jwt" }, { vct: "com.emvco.dpc.card" });
+    const token = jws(
+      { alg: "ES256", typ: "dc+sd-jwt" },
+      { vct: "com.emvco.dpc.card" },
+    );
 
     expect(decodeJwsCompact(token)).toEqual({
       ok: true,
@@ -29,7 +32,10 @@ describe("decodeJwsCompact", () => {
   });
 
   it("fails on a token that is not three segments", () => {
-    expect(decodeJwsCompact("a.b")).toEqual({ ok: false, reason: expect.any(String) });
+    expect(decodeJwsCompact("a.b")).toEqual({
+      ok: false,
+      reason: expect.any(String),
+    });
     expect(decodeJwsCompact("a.b.c.d").ok).toBe(false);
     expect(decodeJwsCompact("").ok).toBe(false);
   });
@@ -38,7 +44,9 @@ describe("decodeJwsCompact", () => {
     // Buffer.from(_, "base64url") SILENTLY SKIPS invalid characters rather than
     // throwing, so the alphabet has to be checked explicitly. Without that this
     // returns a plausible-looking wrong answer.
-    expect(decodeJwsCompact(`${b64u({ a: 1 })}.not+base64url/.sig`).ok).toBe(false);
+    expect(decodeJwsCompact(`${b64u({ a: 1 })}.not+base64url/.sig`).ok).toBe(
+      false,
+    );
   });
 
   it("fails on base64url that is not JSON", () => {
@@ -92,14 +100,19 @@ describe("decodeJwsCompact", () => {
 });
 
 describe("decodeVpToken", () => {
-  const issuer = jws({ alg: "ES256", typ: "dc+sd-jwt" }, { vct: "sparkassencard" });
+  const issuer = jws(
+    { alg: "ES256", typ: "dc+sd-jwt" },
+    { vct: "sparkassencard" },
+  );
   const kb = jws({ alg: "ES256", typ: "kb+jwt" }, { aud: "x509_hash:abc" });
   const disclosure = Buffer.from(
     JSON.stringify(["c2FsdA", "psu_id", "psu-1"]),
   ).toString("base64url");
 
   it("keys presentations by their DCQL query id", () => {
-    const view = decodeVpToken({ sparkassencard: [`${issuer}~${disclosure}~`] });
+    const view = decodeVpToken({
+      sparkassencard: [`${issuer}~${disclosure}~`],
+    });
     expect(view.ok).toBe(true);
     if (!view.ok) return;
 
@@ -116,7 +129,9 @@ describe("decodeVpToken", () => {
     const p = view.entries[0]!.presentations[0]!;
     if (p.kind !== "sd-jwt") throw new Error("expected sd-jwt");
     expect(p.issuerJwt.ok).toBe(true);
-    expect(p.disclosures).toEqual([{ ok: true, value: ["c2FsdA", "psu_id", "psu-1"] }]);
+    expect(p.disclosures).toEqual([
+      { ok: true, value: ["c2FsdA", "psu_id", "psu-1"] },
+    ]);
     expect(p.kbJwt).toBeNull();
   });
 
@@ -165,7 +180,10 @@ describe("decodeVpToken", () => {
   it("keeps two credentials apart", () => {
     const view = decodeVpToken({ dpc: [issuer], av_sdjwt: [issuer] });
     if (!view.ok) throw new Error("expected ok");
-    expect(view.entries.map((e) => e.queryId).sort()).toEqual(["av_sdjwt", "dpc"]);
+    expect(view.entries.map((e) => e.queryId).sort()).toEqual([
+      "av_sdjwt",
+      "dpc",
+    ]);
   });
 
   it("fails on a vp_token that is not an object keyed by query id", () => {

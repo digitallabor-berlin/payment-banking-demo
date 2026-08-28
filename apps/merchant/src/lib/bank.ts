@@ -21,7 +21,10 @@ export interface BankPayInput {
 
 export type BankPayResult =
   | { ok: true; bankTxId: string }
-  | { ok: false; reason: "insufficient_funds" | "credential_invalid" | "bank_unreachable" };
+  | {
+      ok: false;
+      reason: "insufficient_funds" | "credential_invalid" | "bank_unreachable";
+    };
 
 export interface BankClientOptions {
   baseUrl: string;
@@ -46,7 +49,10 @@ export class BankClient {
     try {
       response = await this.fetchImpl(`${this.baseUrl}/api/payments`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-api-key": this.apiKey },
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": this.apiKey,
+        },
         body: JSON.stringify({
           credential_id: input.credentialId,
           amount_cents: input.amountCents,
@@ -77,12 +83,15 @@ export class BankClient {
 
     if (response.ok) {
       const body = (await response.json()) as { bank_tx_id?: unknown };
-      if (typeof body.bank_tx_id !== "string") return { ok: false, reason: "bank_unreachable" };
+      if (typeof body.bank_tx_id !== "string")
+        return { ok: false, reason: "bank_unreachable" };
       return { ok: true, bankTxId: body.bank_tx_id };
     }
 
-    if (response.status === 402) return { ok: false, reason: "insufficient_funds" };
-    if (response.status === 404) return { ok: false, reason: "credential_invalid" };
+    if (response.status === 402)
+      return { ok: false, reason: "insufficient_funds" };
+    if (response.status === 404)
+      return { ok: false, reason: "credential_invalid" };
     // 401 (bad shared secret) and 5xx are both operator problems, not user
     // problems — surfaced the same way, since the user can only retry.
     return { ok: false, reason: "bank_unreachable" };
@@ -92,6 +101,9 @@ export class BankClient {
 let instance: BankClient | null = null;
 
 export function getBankClient(): BankClient {
-  instance ??= new BankClient({ baseUrl: env.BANK_API_URL, apiKey: env.BANK_API_KEY });
+  instance ??= new BankClient({
+    baseUrl: env.BANK_API_URL,
+    apiKey: env.BANK_API_KEY,
+  });
   return instance;
 }

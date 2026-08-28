@@ -25,12 +25,16 @@ describe("verifyWebhookSignature", () => {
   });
 
   it("rejects a body that changed by one byte", () => {
-    expect(verifyWebhookSignature('{"a":2}', sign('{"a":1}'), SECRET)).toBe(false);
+    expect(verifyWebhookSignature('{"a":2}', sign('{"a":1}'), SECRET)).toBe(
+      false,
+    );
   });
 
   it("rejects a signature made with a different secret", () => {
     const body = '{"a":1}';
-    expect(verifyWebhookSignature(body, sign(body, "other"), SECRET)).toBe(false);
+    expect(verifyWebhookSignature(body, sign(body, "other"), SECRET)).toBe(
+      false,
+    );
   });
 
   it("rejects an absent header", () => {
@@ -39,18 +43,22 @@ describe("verifyWebhookSignature", () => {
 
   it("rejects a header without the sha256= prefix", () => {
     const body = '{"a":1}';
-    expect(verifyWebhookSignature(body, sign(body).slice(7), SECRET)).toBe(false);
+    expect(verifyWebhookSignature(body, sign(body).slice(7), SECRET)).toBe(
+      false,
+    );
   });
 
   it("rejects a header of the wrong length without throwing", () => {
     // timingSafeEqual throws on a length mismatch; the wrapper must not.
-    expect(verifyWebhookSignature('{"a":1}', "sha256=beef", SECRET)).toBe(false);
+    expect(verifyWebhookSignature('{"a":1}', "sha256=beef", SECRET)).toBe(
+      false,
+    );
   });
 
   it("rejects a header that is not hex", () => {
-    expect(verifyWebhookSignature('{"a":1}', `sha256=${"z".repeat(64)}`, SECRET)).toBe(
-      false,
-    );
+    expect(
+      verifyWebhookSignature('{"a":1}', `sha256=${"z".repeat(64)}`, SECRET),
+    ).toBe(false);
   });
 });
 
@@ -113,18 +121,27 @@ describe("parseVerifierEvent", () => {
         state: "failed",
         result: { verified: false, checks: [], credentials: [] },
       }),
-    ).toEqual({ event: "verification_completed", txId: "ver_1", vpToken: null });
+    ).toEqual({
+      event: "verification_completed",
+      txId: "ver_1",
+      vpToken: null,
+    });
   });
 
   it("ignores an event type it does not know", () => {
     // Forward compatibility: a later foundry may add events. An unknown one is
     // not an error, it is not ours.
-    expect(parseVerifierEvent({ event: "something_new", tx_id: "ver_1" })).toBeNull();
+    expect(
+      parseVerifierEvent({ event: "something_new", tx_id: "ver_1" }),
+    ).toBeNull();
   });
 
   it("rejects a body with no tx_id", () => {
     expect(
-      parseVerifierEvent({ event: "verification_completed", state: "verified" }),
+      parseVerifierEvent({
+        event: "verification_completed",
+        state: "verified",
+      }),
     ).toBeNull();
   });
 
@@ -203,7 +220,11 @@ describe("recordVerifierEvent", () => {
     expect(
       recordVerifierEvent(
         db,
-        { event: "verification_completed", txId: "ver_mine", vpToken: { dpc: ["x"] } },
+        {
+          event: "verification_completed",
+          txId: "ver_mine",
+          vpToken: { dpc: ["x"] },
+        },
         60,
       ),
     ).toBe("stored");

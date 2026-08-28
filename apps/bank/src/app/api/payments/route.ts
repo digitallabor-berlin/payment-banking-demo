@@ -66,5 +66,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: result.reason }, { status });
   }
 
-  return NextResponse.json({ bank_tx_id: result.bankTxId, new_balance_cents: result.newBalanceCents });
+  return NextResponse.json({
+    bank_tx_id: result.bankTxId,
+    new_balance_cents: result.newBalanceCents,
+  });
 }

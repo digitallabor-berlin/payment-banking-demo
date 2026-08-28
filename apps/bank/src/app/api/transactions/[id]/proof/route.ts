@@ -29,8 +29,8 @@ export const dynamic = "force-dynamic";
  * one, not become a 500.
  */
 export const GET = withSession(async (session, request) => {
-  const id = request.url.split("?")[0]!.split("/").at(-2) ?? "";
-  const body = getTransactionProof(getDb(), session.userId, id);
-  if (!body) return NextResponse.json({ error: "not_found" }, { status: 404 });
-  return NextResponse.json(body);
+ const id = request.url.split("?")[0]!.split("/").at(-2) ?? "";
+ const body = getTransactionProof(getDb(), session.userId, id);
+ if (!body) return NextResponse.json({ error: "not_found" }, { status: 404 });
+ return NextResponse.json(body);
 });

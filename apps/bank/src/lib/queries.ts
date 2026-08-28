@@ -365,16 +365,16 @@ export function listTransactions(
   rows.length === 0
    ? []
    : db
-     .select({ id: transactionProofs.transactionId })
-     .from(transactionProofs)
-     .where(
-      inArray(
-       transactionProofs.transactionId,
-       rows.map((row) => row.id),
-      ),
-     )
-     .all()
-     .map((row) => row.id),
+      .select({ id: transactionProofs.transactionId })
+      .from(transactionProofs)
+      .where(
+       inArray(
+        transactionProofs.transactionId,
+        rows.map((row) => row.id),
+       ),
+      )
+      .all()
+      .map((row) => row.id),
  );
 
  return rows.map((row) => ({

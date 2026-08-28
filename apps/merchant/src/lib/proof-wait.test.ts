@@ -7,15 +7,21 @@ describe("shouldWaitForProof", () => {
   });
 
   it("waits while the package is missing and the window is open", () => {
-    expect(shouldWaitForProof(false, 1_000, 1_000 + PROOF_GRACE_MS - 1)).toBe(true);
+    expect(shouldWaitForProof(false, 1_000, 1_000 + PROOF_GRACE_MS - 1)).toBe(
+      true,
+    );
   });
 
   it("stops waiting exactly at the boundary", () => {
-    expect(shouldWaitForProof(false, 1_000, 1_000 + PROOF_GRACE_MS)).toBe(false);
+    expect(shouldWaitForProof(false, 1_000, 1_000 + PROOF_GRACE_MS)).toBe(
+      false,
+    );
   });
 
   it("stops waiting after the window", () => {
-    expect(shouldWaitForProof(false, 1_000, 1_000 + PROOF_GRACE_MS + 1)).toBe(false);
+    expect(shouldWaitForProof(false, 1_000, 1_000 + PROOF_GRACE_MS + 1)).toBe(
+      false,
+    );
   });
 
   it("does not wait when there is no verified_at to measure from", () => {
