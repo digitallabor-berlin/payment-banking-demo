@@ -1,0 +1,1 @@
+ALTER TABLE `payment_sessions` ADD `verified_at` integer;

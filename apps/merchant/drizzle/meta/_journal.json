@@ -43,6 +43,13 @@
       "when": 1787910537855,
       "tag": "0005_youthful_marten_broadcloak",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787910892851,
+      "tag": "0006_happy_victor_mancha",
+      "breakpoints": true
     }
   ]
 }

@@ -152,6 +152,16 @@ export const paymentSessions = sqliteTable("payment_sessions", {
  disclosedClaimsJson: text("disclosed_claims_json"),
  checksJson: text("checks_json"),
  bankTxId: text("bank_tx_id"),
+ /**
+  * When the settle gates passed and the row became `verified`.
+  *
+  * Exists solely to bound the proof-package grace period: the package arrives
+  * over foundry's webhook, which races our own poll, and this is the clock the
+  * wait is measured against. Nullable because a row written before this column
+  * existed has no such moment — `shouldWaitForProof` treats null as "do not
+  * wait", so an old row settles immediately rather than stalling.
+  */
+ verifiedAt: integer("verified_at"),
  failureReason: text("failure_reason"),
  createdAt: integer("created_at").notNull(),
 });

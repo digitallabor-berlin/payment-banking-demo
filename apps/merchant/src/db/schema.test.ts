@@ -224,3 +224,45 @@ describe("verifier_events", () => {
     expect(db.select().from(verifierEvents).all()).toHaveLength(2);
   });
 });
+
+describe("payment_sessions.verified_at", () => {
+  beforeEach(() => {
+    db.insert(orders)
+      .values({
+        id: "ord_1",
+        totalCents: 1_000,
+        currency: "EUR",
+        customerName: "Ada",
+        customerEmail: "ada@example.com",
+        status: "pending",
+        createdAt: 1,
+      })
+      .run();
+  });
+
+  it("defaults to null and accepts a timestamp", () => {
+    db.insert(paymentSessions)
+      .values({
+        id: "sess_1",
+        orderId: "ord_1",
+        state: "pending",
+        namedQueryRef: "payment",
+        createdAt: 1,
+      })
+      .run();
+    db.insert(paymentSessions)
+      .values({
+        id: "sess_2",
+        orderId: "ord_1",
+        state: "verified",
+        namedQueryRef: "payment",
+        createdAt: 1,
+        verifiedAt: 42,
+      })
+      .run();
+
+    const rows = db.select().from(paymentSessions).all();
+    expect(rows.find((r) => r.id === "sess_1")!.verifiedAt).toBeNull();
+    expect(rows.find((r) => r.id === "sess_2")!.verifiedAt).toBe(42);
+  });
+});
