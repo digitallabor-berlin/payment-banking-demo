@@ -1,6 +1,15 @@
 import { createHmac } from "node:crypto";
-import { describe, expect, it } from "vitest";
-import { parseVerifierEvent, verifyWebhookSignature } from "./verifier-events.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createDb, type Db } from "../db/index.js";
+import { orders, paymentSessions, verifierEvents } from "../db/schema.js";
+import {
+  parseVerifierEvent,
+  recordVerifierEvent,
+  verifyWebhookSignature,
+} from "./verifier-events.js";
 
 const SECRET = "s3cr3t";
 
@@ -122,5 +131,118 @@ describe("parseVerifierEvent", () => {
   it("rejects a non-object body", () => {
     expect(parseVerifierEvent("nope")).toBeNull();
     expect(parseVerifierEvent(null)).toBeNull();
+  });
+});
+describe("recordVerifierEvent", () => {
+  let dir: string;
+  let db: Db;
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), "merchant-events-"));
+    db = createDb(path.join(dir, "test.db"));
+    // payment_sessions has a foreign key to orders, so the parent must exist
+    // before any session fixture below can be written.
+    db.insert(orders)
+      .values({
+        id: "ord_1",
+        totalCents: 1_000,
+        currency: "EUR",
+        customerName: "Ada",
+        customerEmail: "ada@example.com",
+        status: "pending",
+        createdAt: 1,
+      })
+      .run();
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A session that has already recorded its foundry verification id. */
+  function knownSession(txId: string): void {
+    db.insert(paymentSessions)
+      .values({
+        id: `sess_${txId}`,
+        orderId: "ord_1",
+        state: "pending",
+        foundryVerificationId: txId,
+        namedQueryRef: "payment",
+        createdAt: 1,
+      })
+      .run();
+  }
+
+  it("stores a request event even for a transaction it has never heard of", () => {
+    // The event is dispatched INSIDE foundry's create_verification_request, so
+    // it can beat our own UPDATE that writes foundry_verification_id. Refusing
+    // it would lose the signed request for every DC API payment.
+    expect(
+      recordVerifierEvent(
+        db,
+        {
+          event: "presentation_request_delivered",
+          txId: "ver_unknown",
+          transport: "dc_api_signed",
+          signedRequest: "a.b.c",
+        },
+        50,
+      ),
+    ).toBe("stored");
+
+    const row = db.select().from(verifierEvents).all()[0]!;
+    expect(row.txId).toBe("ver_unknown");
+    expect(row.signedRequest).toBe("a.b.c");
+    expect(row.vpTokenJson).toBeNull();
+    expect(row.receivedAt).toBe(50);
+  });
+
+  it("stores a completion for a transaction it owns", () => {
+    knownSession("ver_mine");
+
+    expect(
+      recordVerifierEvent(
+        db,
+        { event: "verification_completed", txId: "ver_mine", vpToken: { dpc: ["x"] } },
+        60,
+      ),
+    ).toBe("stored");
+
+    const row = db.select().from(verifierEvents).all()[0]!;
+    expect(row.event).toBe("verification_completed");
+    expect(JSON.parse(row.vpTokenJson!)).toEqual({ dpc: ["x"] });
+  });
+
+  it("DROPS a completion for a transaction it does not own", () => {
+    // Design D8. One foundry serves both apps, and the bank verifies too. An
+    // unmatched completion is the BANK's wallet-login vp_token — a holder
+    // credential from a flow this app has nothing to do with.
+    expect(
+      recordVerifierEvent(
+        db,
+        {
+          event: "verification_completed",
+          txId: "ver_bank_login",
+          vpToken: { sparkassen_auth: ["x"] },
+        },
+        70,
+      ),
+    ).toBe("ignored");
+
+    expect(db.select().from(verifierEvents).all()).toHaveLength(0);
+  });
+
+  it("stores a completion carrying no vp_token as a NULL artefact", () => {
+    knownSession("ver_mine");
+
+    expect(
+      recordVerifierEvent(
+        db,
+        { event: "verification_completed", txId: "ver_mine", vpToken: null },
+        80,
+      ),
+    ).toBe("stored");
+
+    expect(db.select().from(verifierEvents).all()[0]!.vpTokenJson).toBeNull();
   });
 });

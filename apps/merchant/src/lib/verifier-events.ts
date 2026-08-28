@@ -1,4 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { eq } from "drizzle-orm";
+import type { Db } from "../db/index.js";
+import { paymentSessions, verifierEvents } from "../db/schema.js";
 
 /**
  * One event from foundry's verification-artifact webhook, normalised.
@@ -100,4 +103,63 @@ export function parseVerifierEvent(body: unknown): VerifierEvent | null {
  }
 
  return null;
+}
+
+/**
+ * Writes one event to the inbox, or declines to.
+ *
+ * The two event types are stored under DIFFERENT rules, and the asymmetry is
+ * the point (design D8). One foundry instance has one webhook URL, and the bank
+ * verifies too — so this endpoint receives the bank's wallet-login events as
+ * well as our own.
+ *
+ * A `presentation_request_delivered` is stored unconditionally. It carries a
+ * request OBJECT, which is our own or the bank's public ask and holds no holder
+ * data; and it can legitimately arrive before we know its `tx_id`, because
+ * foundry dispatches it inside `create_verification_request` while
+ * `startPaymentSession` is still awaiting that call.
+ *
+ * A `verification_completed` is stored only when a payment session already
+ * claims that `tx_id`. An unmatched one is the bank's login `vp_token` — a
+ * holder credential from a flow this app has nothing to do with. The timing is
+ * safe in a way the other event's is not: a wallet cannot answer a request that
+ * was never created, so by the time a completion exists our UPDATE has landed.
+ */
+export function recordVerifierEvent(
+ db: Db,
+ event: VerifierEvent,
+ now: number,
+): "stored" | "ignored" {
+ if (event.event === "verification_completed") {
+  const owned = db
+   .select({ id: paymentSessions.id })
+   .from(paymentSessions)
+   .where(eq(paymentSessions.foundryVerificationId, event.txId))
+   .get();
+  if (!owned) return "ignored";
+
+  db.insert(verifierEvents)
+   .values({
+    txId: event.txId,
+    event: "verification_completed",
+    transport: null,
+    signedRequest: null,
+    vpTokenJson: event.vpToken === null ? null : JSON.stringify(event.vpToken),
+    receivedAt: now,
+   })
+   .run();
+  return "stored";
+ }
+
+ db.insert(verifierEvents)
+  .values({
+   txId: event.txId,
+   event: "presentation_request_delivered",
+   transport: event.transport,
+   signedRequest: event.signedRequest,
+   vpTokenJson: null,
+   receivedAt: now,
+  })
+  .run();
+ return "stored";
 }
