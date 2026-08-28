@@ -2,6 +2,7 @@ import type { TransactionDto } from "@/lib/queries.js";
 import { formatEuroCents } from "@/lib/format.js";
 import type { Locale } from "@/lib/i18n/locale.js";
 import { EuStars } from "./EuStars.js";
+import { ProofButton } from "./ProofDialog.js";
 
 export function TransactionRow({
   transaction,
@@ -28,6 +29,14 @@ export function TransactionRow({
               <EuStars className="h-3 w-3" />
               EUDI Wallet
             </span>
+          ) : null}
+          {/*
+            Present only when a package was actually stored. Its absence is
+            ordinary — foundry's webhook is best-effort and its artefact gate is
+            off by default — so there is no "no proof" state to render.
+          */}
+          {transaction.hasProof ? (
+            <ProofButton transactionId={transaction.id} locale={locale} />
           ) : null}
         </p>
       </div>

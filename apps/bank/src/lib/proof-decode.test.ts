@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { decodeJwsCompact, decodeVpToken } from "./proof-decode.js";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 /** base64url with no padding, exactly as JOSE requires. */
 function b64u(value: unknown): string {
@@ -46,6 +50,44 @@ describe("decodeJwsCompact", () => {
     for (const input of ["~~~", "...", "🙂.🙂.🙂", "a".repeat(10_000)]) {
       expect(() => decodeJwsCompact(input)).not.toThrow();
     }
+  });
+
+  it("decodes with no Node globals at all", () => {
+    // THIS FILE'S ONLY CONSUMER IS A BROWSER. `ProofDialog` is a client
+    // component, so every line of this module runs where `Buffer` does not
+    // exist — and a `Buffer` reference inside the existing try/catch does not
+    // crash, it degrades to "could not decode base64url" on EVERY artefact.
+    // That is a silent total no-op, and it shipped once: the whole dialog read
+    // "Could not be decoded — shown as received" against a package this suite
+    // was decoding perfectly.
+    //
+    // vitest is `environment: "node"`, so Buffer is present here and cannot
+    // reveal the defect. Removing it is the only way to run this module the
+    // way the browser does.
+    // Built BEFORE the stub: this file's own `b64u` helper uses Buffer too,
+    // and encoding after the stub fails in the fixture rather than in the
+    // code under test.
+    const token = jws({ alg: "ES256" }, { vct: "sparkassencard" });
+    vi.stubGlobal("Buffer", undefined);
+
+    expect(decodeJwsCompact(token)).toMatchObject({
+      ok: true,
+      header: { alg: "ES256" },
+      payload: { vct: "sparkassencard" },
+    });
+  });
+
+  it("decodes multi-byte UTF-8 without Buffer", () => {
+    // `atob` yields a BINARY string, one char per byte. Reading it as text
+    // mangles every non-ASCII claim — a holder called "Müller" becomes
+    // "MÃ¼ller" — so the bytes must go through a UTF-8 decoder.
+    const token = jws({ alg: "ES256" }, { name: "Müller", city: "Köln" });
+    vi.stubGlobal("Buffer", undefined);
+
+    expect(decodeJwsCompact(token)).toMatchObject({
+      ok: true,
+      payload: { name: "Müller", city: "Köln" },
+    });
   });
 });
 

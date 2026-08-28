@@ -87,6 +87,31 @@ export const de: Messages = {
     close: "Schließen",
     failedTitle: "Fehlgeschlagen",
   },
+  proof: {
+    title: "Zahlungsnachweis",
+    open: "Zahlungsnachweis anzeigen",
+    disclaimer:
+      "Unverändert so gespeichert, wie der Händler ihn gesendet hat. Die Bank hat ihn nicht geprüft.",
+    signedRequest: "Signierte Anfrage",
+    vpToken: "Wallet-Antwort",
+    showRaw: "Rohdaten anzeigen",
+    showDecoded: "Dekodiert anzeigen",
+    copy: "Kopieren",
+    copied: "Kopiert",
+    close: "Schließen",
+    loading: "Wird geladen…",
+    loadFailed: "Der Nachweis konnte nicht geladen werden.",
+    undecodable: "Konnte nicht dekodiert werden — Anzeige wie empfangen.",
+    credential: "Nachweis",
+    // NOT "Header". `messages.test.ts` fails any leaf that is byte-identical
+    // across the two locales, and this is the one word in this block where the
+    // English is also idiomatic German.
+    header: "Kopfdaten",
+    payload: "Nutzdaten",
+    signature: "Signatur",
+    disclosures: "Offengelegte Angaben",
+    keyBinding: "Schlüsselbindung",
+  },
   errors: {
     offerNotCreated: "Angebot konnte nicht erstellt werden.",
     connectionFailed: "Verbindung zum Server fehlgeschlagen.",

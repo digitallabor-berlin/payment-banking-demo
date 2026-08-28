@@ -38,14 +38,40 @@ export type JwsResult = JwsParts | DecodeFailure;
 /** base64url per RFC 4648 §5, unpadded — the only alphabet JOSE permits. */
 const BASE64URL = /^[A-Za-z0-9_-]*$/;
 
+/**
+ * base64url → text, using ONLY globals a browser has.
+ *
+ * `Buffer` is deliberately not used, and this is not a style preference: the
+ * sole consumer of this module is `ProofDialog`, a client component, and
+ * `Buffer` does not exist there. A `Buffer` reference inside the `try` below
+ * does not crash — it is a `ReferenceError` the `catch` swallows — so the
+ * decoder degrades to "could not decode base64url" on EVERY artefact while
+ * this suite, which runs in `environment: "node"`, keeps passing. That exact
+ * no-op shipped once and was found in a browser, not by a test.
+ *
+ * `atob` yields a BINARY string, one char per byte, so the bytes go through a
+ * `TextDecoder` rather than being read as text: without that, every non-ASCII
+ * claim is mangled ("Müller" → "MÃ¼ller").
+ */
+function base64UrlToText(segment: string): string {
+ const base64 = segment.replaceAll("-", "+").replaceAll("_", "/");
+ const padded = base64.padEnd(
+  base64.length + ((4 - (base64.length % 4)) % 4),
+  "=",
+ );
+ const binary = atob(padded);
+ const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+ return new TextDecoder().decode(bytes);
+}
+
 function decodeSegment(segment: string): { ok: true; value: unknown } | DecodeFailure {
- // `Buffer.from(_, "base64url")` SILENTLY SKIPS characters outside the
- // alphabet rather than throwing, so an unchecked segment yields a
- // plausible-looking wrong answer. The alphabet is checked first, always.
+ // The alphabet is checked first, always: `atob` throws on some invalid input
+ // and silently accepts other invalid input, so neither its throwing nor its
+ // returning is evidence the segment was well-formed.
  if (!BASE64URL.test(segment)) return { ok: false, reason: "not base64url" };
  let text: string;
  try {
-  text = Buffer.from(segment, "base64url").toString("utf8");
+  text = base64UrlToText(segment);
  } catch {
   return { ok: false, reason: "could not decode base64url" };
  }

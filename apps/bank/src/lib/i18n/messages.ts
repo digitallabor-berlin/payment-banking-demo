@@ -141,6 +141,41 @@ export interface Messages {
           close: string;
           failedTitle: string;
      };
+     /**
+      * The PaSO proof package viewer.
+      *
+      * NOTHING here may claim the bank verified this package. It stores what
+      * the merchant forwarded and runs none of PaSO §3's checks (design D4), so
+      * `disclaimer` says so in as many words and no other string implies
+      * otherwise. "Proof" here names the artefact, not a verdict.
+      */
+     proof: {
+          /** Dialog title. */
+          title: string;
+          /** Accessible name of the ledger-row button. */
+          open: string;
+          /** States plainly that the bank stored this and did not check it. */
+          disclaimer: string;
+          /** Label for the `signed_request` member. */
+          signedRequest: string;
+          /** Label for the `vp_token` member. */
+          vpToken: string;
+          showRaw: string;
+          showDecoded: string;
+          copy: string;
+          copied: string;
+          close: string;
+          loading: string;
+          loadFailed: string;
+          /** Shown beside an artefact the decoder could not read. */
+          undecodable: string;
+          credential: string;
+          header: string;
+          payload: string;
+          signature: string;
+          disclosures: string;
+          keyBinding: string;
+     };
      errors: {
           offerNotCreated: string;
           connectionFailed: string;
