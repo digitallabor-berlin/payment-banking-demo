@@ -16,6 +16,8 @@ import {
 } from "./checks.js";
 import { buildTransactionData, selectNamedQuery } from "./dcql.js";
 import { listOrderProductIds } from "./orders.js";
+import { proofPackageFor, type ProofPackage } from "./proof-package.js";
+import { shouldWaitForProof } from "./proof-wait.js";
 import {
   isDcApiTransport,
   resolveDcApiProtocol,
@@ -251,13 +253,19 @@ function fail(
  * be in flight) → `completed`, with `failed` reachable throughout. Collapsing
  * `verified` into `settling` would make "the wallet proved the card" and "the
  * money may already have moved" indistinguishable after a crash.
+ *
+ * The chain is unchanged by the proof package, but `verified` may now persist
+ * across several polls: once the gate passes, the debit is held for up to
+ * `PROOF_GRACE_MS` while foundry's webhook delivers the artefacts. The window
+ * closes on wall-clock, so a package that never arrives costs a few seconds
+ * and then settles without one.
  */
 export async function refreshPaymentSessionState(
   db: Db,
   foundry: FoundryClient,
   bank: BankClient,
   sessionId: string,
-  _now: number = Date.now(),
+  now: number = Date.now(),
 ): Promise<RefreshResult> {
   const row = db
     .select()
@@ -341,6 +349,10 @@ export async function refreshPaymentSessionState(
     db.update(paymentSessions)
       .set({
         state: "verified",
+        // Starts the proof-package grace window. Written in the same statement
+        // as the state it belongs to, so a row can never be `verified` without
+        // a clock to measure the wait against.
+        verifiedAt: now,
         checksJson,
         // The per-credential array verbatim, NOT a merged claims object:
         // `credentials[]` is what both the resume path and the success screen
@@ -370,6 +382,35 @@ export async function refreshPaymentSessionState(
     }
   }
 
+  // The proof package (PaSO Proof/Verify §4.1) arrives over foundry's webhook,
+  // which races this poll. Hold the debit briefly rather than settle without it
+  // — the demo's claim is that the bank holds the proof, and a payment that
+  // silently lacks one undermines the thing being shown.
+  //
+  // `verifiedAt` is re-read off the row rather than taken from a local: on
+  // every poll after the first, this function enters through the resume branch
+  // above, which never writes it. The row is the only place that knows.
+  const verifiedAt =
+    row.state === "pending"
+      ? now
+      : (db
+          .select({ verifiedAt: paymentSessions.verifiedAt })
+          .from(paymentSessions)
+          .where(eq(paymentSessions.id, sessionId))
+          .get()?.verifiedAt ?? null);
+
+  let proofPackage: ProofPackage | null = null;
+  if (row.foundryVerificationId) {
+    proofPackage = proofPackageFor(db, row.foundryVerificationId);
+  }
+
+  if (shouldWaitForProof(proofPackage !== null, verifiedAt, now)) {
+    // Still `verified`. The browser's existing ~2s poll retries; the window
+    // closes on wall-clock, so this cannot deadlock waiting for an event that
+    // never comes.
+    return { ok: true, status: getPaymentSessionStatus(db, sessionId)! };
+  }
+
   const order = db
     .select()
     .from(orders)
@@ -394,6 +435,7 @@ export async function refreshPaymentSessionState(
     merchant: MERCHANT_REFERENCE_NAME,
     reference: `Order ${order.id}`,
     idempotencyKey: sessionId,
+    ...(proofPackage ? { proofPackage } : {}),
   });
 
   if (!payment.ok) {

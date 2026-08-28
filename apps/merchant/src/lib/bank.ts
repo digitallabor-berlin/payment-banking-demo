@@ -1,4 +1,5 @@
 import { env } from "../env.js";
+import type { ProofPackage } from "./proof-package.js";
 
 export interface BankPayInput {
   credentialId: string;
@@ -7,6 +8,15 @@ export interface BankPayInput {
   merchant: string;
   reference: string;
   idempotencyKey: string;
+  /**
+   * The PaSO Proof/Verify §4.1 package, when one was assembled in time.
+   *
+   * Optional because it genuinely may not exist: foundry's webhook is
+   * best-effort and at-most-once, and its `include_raw_artifacts` gate is off
+   * by default, so a correctly configured system can still produce no package.
+   * A debit must never depend on an audit artefact.
+   */
+  proofPackage?: ProofPackage;
 }
 
 export type BankPayResult =
@@ -44,6 +54,18 @@ export class BankClient {
           merchant: input.merchant,
           reference: input.reference,
           idempotency_key: input.idempotencyKey,
+          // PaSO Proof/Verify §4.1's member names, verbatim. The key is
+          // OMITTED rather than sent as null when there is no package: the
+          // bank's zod schema marks it `.optional()`, and an explicit null
+          // would fail that while meaning the same thing.
+          ...(input.proofPackage
+            ? {
+                proof_package: {
+                  signed_request: input.proofPackage.signedRequest,
+                  vp_token: input.proofPackage.vpToken,
+                },
+              }
+            : {}),
         }),
         cache: "no-store",
       });

@@ -5,13 +5,19 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FoundryClient } from "@demo/foundry-client";
 import { createDb, type Db } from "../db/index.js";
-import { orderItems, orders, paymentSessions } from "../db/schema.js";
+import {
+  orderItems,
+  orders,
+  paymentSessions,
+  verifierEvents,
+} from "../db/schema.js";
 import { seed } from "../db/seed.js";
-import { BankClient } from "./bank.js";
+import type { BankClient } from "./bank.js";
 import {
   refreshPaymentSessionState,
   startPaymentSession,
 } from "./payment-sessions.js";
+import { PROOF_GRACE_MS } from "./proof-wait.js";
 
 let dir: string;
 let db: Db;
@@ -158,11 +164,50 @@ function stubBank(
 }
 
 /**
- * Starts a session for ord_1. Pass product ids to give the order a basket —
- * an age-restricted one makes the session a `payment_av` session, which is what
- * arms the age gate.
+ * Writes both of foundry's webhook events for `ver_1`, i.e. a COMPLETE proof
+ * package sitting in the inbox.
+ *
+ * `seedSession` calls this by default because it is the ordinary case: foundry
+ * dispatches both events at the moment the wallet's response is submitted,
+ * normally well before the browser's next ~2s poll observes `verified`. A test
+ * that wants the other case uses `seedSessionAwaitingProof` and exercises the
+ * grace window instead.
  */
-async function seedSession(...productIds: string[]): Promise<string> {
+function seedProofPackage(
+  signedRequest = "hdr.pay.sig",
+  vpToken: unknown = { dpc: ["eyJ..."] },
+  receivedAt = 1,
+): void {
+  db.insert(verifierEvents)
+    .values({
+      txId: "ver_1",
+      event: "presentation_request_delivered",
+      transport: "dc_api_signed",
+      signedRequest,
+      vpTokenJson: null,
+      receivedAt,
+    })
+    .run();
+  db.insert(verifierEvents)
+    .values({
+      txId: "ver_1",
+      event: "verification_completed",
+      transport: null,
+      signedRequest: null,
+      vpTokenJson: JSON.stringify(vpToken),
+      receivedAt: receivedAt + 1,
+    })
+    .run();
+}
+
+/**
+ * Starts a session for ord_1 whose proof package has NOT arrived. Pass product
+ * ids to give the order a basket — an age-restricted one makes the session a
+ * `payment_av` session, which is what arms the age gate.
+ */
+async function seedSessionAwaitingProof(
+  ...productIds: string[]
+): Promise<string> {
   for (const productId of productIds) {
     db.insert(orderItems)
       .values({ orderId: "ord_1", productId, quantity: 1, unitPriceCents: 100 })
@@ -178,6 +223,17 @@ async function seedSession(...productIds: string[]): Promise<string> {
   );
   if (!started.ok) throw new Error("setup failed");
   return started.sessionId;
+}
+
+/**
+ * The same session with its proof package already delivered, which is what
+ * every test below that reaches the bank needs: without a package the settle
+ * path holds the debit for `PROOF_GRACE_MS` rather than sending it.
+ */
+async function seedSession(...productIds: string[]): Promise<string> {
+  const sessionId = await seedSessionAwaitingProof(...productIds);
+  seedProofPackage();
+  return sessionId;
 }
 
 describe("refreshPaymentSessionState — verification phase", () => {
@@ -690,5 +746,142 @@ describe("refreshPaymentSessionState — settlement phase", () => {
       "sess_nope",
     );
     expect(result).toEqual({ ok: false, reason: "not_found" });
+  });
+});
+
+describe("refreshPaymentSessionState — the proof package", () => {
+  it("sends the proof package on the debit once both events have arrived", async () => {
+    const sessionId = await seedSessionAwaitingProof();
+    seedProofPackage("hdr.pay.sig", { dpc: ["eyJ..."] });
+    let sent: unknown;
+    const bank = stubBank({ ok: true, bankTxId: "tx_proof" }, (input) => {
+      sent = input;
+    });
+
+    await refreshPaymentSessionState(
+      db,
+      stubFoundry(verdict()),
+      bank,
+      sessionId,
+      1_000,
+    );
+
+    expect(sent).toMatchObject({
+      proofPackage: { signedRequest: "hdr.pay.sig", vpToken: { dpc: ["eyJ..."] } },
+    });
+  });
+
+  it("does not debit while the grace window is open and no package has arrived", async () => {
+    const sessionId = await seedSessionAwaitingProof();
+    const bank = stubBank({ ok: true, bankTxId: "tx_never" });
+
+    await refreshPaymentSessionState(
+      db,
+      stubFoundry(verdict()),
+      bank,
+      sessionId,
+      1_000,
+    );
+
+    // The gates passed, so the row is `verified` and verified_at is set — but
+    // nothing has been sent to the bank.
+    const row = db
+      .select()
+      .from(paymentSessions)
+      .where(eq(paymentSessions.id, sessionId))
+      .get()!;
+    expect(row.state).toBe("verified");
+    expect(row.verifiedAt).toBe(1_000);
+    expect(bank.pay).not.toHaveBeenCalled();
+  });
+
+  it("debits without a package once the grace window has expired", async () => {
+    const sessionId = await seedSessionAwaitingProof();
+    const bank = stubBank({ ok: true, bankTxId: "tx_late" });
+
+    await refreshPaymentSessionState(
+      db,
+      stubFoundry(verdict()),
+      bank,
+      sessionId,
+      1_000,
+    );
+    expect(bank.pay).not.toHaveBeenCalled();
+
+    // A later poll, past the window. This one enters through the resume branch.
+    await refreshPaymentSessionState(
+      db,
+      stubFoundry(verdict()),
+      bank,
+      sessionId,
+      1_000 + PROOF_GRACE_MS,
+    );
+
+    expect(bank.pay).toHaveBeenCalledTimes(1);
+    expect(
+      (bank.pay as unknown as { mock: { calls: [Record<string, unknown>][] } })
+        .mock.calls[0]![0],
+    ).not.toHaveProperty("proofPackage");
+    expect(
+      db.select().from(paymentSessions).where(eq(paymentSessions.id, sessionId)).get()!
+        .state,
+    ).toBe("completed");
+  });
+
+  it("sends a package that arrived during the wait, on a later poll", async () => {
+    const sessionId = await seedSessionAwaitingProof();
+    let sent: unknown;
+    const bank = stubBank({ ok: true, bankTxId: "tx_arrived" }, (input) => {
+      sent = input;
+    });
+
+    await refreshPaymentSessionState(
+      db,
+      stubFoundry(verdict()),
+      bank,
+      sessionId,
+      1_000,
+    );
+    expect(bank.pay).not.toHaveBeenCalled();
+
+    seedProofPackage("late.pay.sig", { dpc: ["late"] }, 1_100);
+
+    await refreshPaymentSessionState(
+      db,
+      stubFoundry(verdict()),
+      bank,
+      sessionId,
+      1_200,
+    );
+
+    expect(bank.pay).toHaveBeenCalledTimes(1);
+    expect(sent).toMatchObject({
+      proofPackage: { signedRequest: "late.pay.sig" },
+    });
+  });
+
+  it("still debits when the session has no foundry verification id to look up", async () => {
+    // Fail forward: nothing to assemble a package from is not a reason to stall
+    // a payment. `verifiedAt` is null on this row's resume, so the wait is off.
+    const sessionId = await seedSessionAwaitingProof();
+    db.update(paymentSessions)
+      .set({
+        state: "verified",
+        foundryVerificationId: null,
+        disclosedClaimsJson: JSON.stringify([dpcCredential]),
+      })
+      .where(eq(paymentSessions.id, sessionId))
+      .run();
+
+    const bank = stubBank({ ok: true, bankTxId: "tx_noid" });
+    await refreshPaymentSessionState(
+      db,
+      stubFoundry(verdict()),
+      bank,
+      sessionId,
+      9_999,
+    );
+
+    expect(bank.pay).toHaveBeenCalledTimes(1);
   });
 });
