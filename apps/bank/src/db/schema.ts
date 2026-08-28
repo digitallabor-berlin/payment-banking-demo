@@ -116,6 +116,34 @@ export const transactions = sqliteTable(
 );
 
 /**
+ * The PaSO Proof/Verify §4.1 proof package the merchant forwarded with a debit.
+ *
+ * A separate table rather than two more columns on `transactions`, because a
+ * `vp_token` is kilobytes and `listTransactions` reads a page of twenty rows on
+ * every dashboard render. The ledger query must not pay for an artefact only a
+ * dialog reads.
+ *
+ * The primary key IS the transaction id: at most one package per transaction,
+ * enforced by the database rather than by a convention in `processPayment`. A
+ * replayed debit short-circuits before it can write a second one, and if that
+ * ever changed the constraint would say so loudly.
+ *
+ * The bank STORES this and does not verify it (design D4). None of PaSO §3's
+ * checks are run here — no signature verification, no `request_integrity`, no
+ * `jti` replay cache — and no UI copy may imply otherwise.
+ */
+export const transactionProofs = sqliteTable("transaction_proofs", {
+ transactionId: text("transaction_id")
+  .primaryKey()
+  .references(() => transactions.id),
+ /** The signed Authorization Request, compact JWS, verbatim. */
+ signedRequest: text("signed_request").notNull(),
+ /** `JSON.stringify` of the `vp_token` exactly as the wallet produced it. */
+ vpTokenJson: text("vp_token_json").notNull(),
+ receivedAt: integer("received_at").notNull(),
+});
+
+/**
  * One row per wallet-login attempt.
  *
  * `state` is a superset of foundry's own verification state, for the reason
@@ -201,6 +229,7 @@ export type Account = typeof accounts.$inferSelect;
 export type Card = typeof cards.$inferSelect;
 export type Credential = typeof credentials.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
+export type TransactionProof = typeof transactionProofs.$inferSelect;
 export type CredentialState = Credential["state"];
 export type LoginSession = typeof loginSessions.$inferSelect;
 export type LoginSessionState = LoginSession["state"];

@@ -4,7 +4,12 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "../db/index.js";
-import { accounts, credentials, transactions } from "../db/schema.js";
+import {
+  accounts,
+  credentials,
+  transactionProofs,
+  transactions,
+} from "../db/schema.js";
 import { seed } from "../db/seed.js";
 import { processPayment } from "./payments.js";
 
@@ -410,5 +415,65 @@ describe("processPayment", () => {
     });
 
     expect(result).toEqual({ ok: false, reason: "unknown_credential" });
+  });
+});
+
+describe("processPayment with a proof package", () => {
+  it("stores the package against the transaction it wrote", () => {
+    const result = processPayment(
+      db,
+      baseInput({
+        proofPackage: {
+          signedRequest: "hdr.pay.sig",
+          vpToken: { dpc: ["eyJ..."] },
+        },
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const proofs = db.select().from(transactionProofs).all();
+    expect(proofs).toHaveLength(1);
+    expect(proofs[0]!.transactionId).toBe(result.bankTxId);
+    expect(proofs[0]!.signedRequest).toBe("hdr.pay.sig");
+    expect(JSON.parse(proofs[0]!.vpTokenJson)).toEqual({ dpc: ["eyJ..."] });
+  });
+
+  it("debits normally when no package is sent", () => {
+    const result = processPayment(db, baseInput());
+
+    expect(result.ok).toBe(true);
+    expect(db.select().from(transactionProofs).all()).toHaveLength(0);
+  });
+
+  it("writes no proof when the debit is refused", () => {
+    // Atomicity in the direction that matters: a package must never outlive a
+    // transaction that was never created.
+    const result = processPayment(
+      db,
+      baseInput({
+        amountCents: 999_999_999,
+        idempotencyKey: "sess_broke",
+        proofPackage: { signedRequest: "hdr.pay.sig", vpToken: {} },
+      }),
+    );
+
+    expect(result).toEqual({ ok: false, reason: "insufficient_funds" });
+    expect(db.select().from(transactionProofs).all()).toHaveLength(0);
+  });
+
+  it("leaves the original package alone on an idempotent replay", () => {
+    processPayment(
+      db,
+      baseInput({ proofPackage: { signedRequest: "first", vpToken: 1 } }),
+    );
+    processPayment(
+      db,
+      baseInput({ proofPackage: { signedRequest: "second", vpToken: 2 } }),
+    );
+
+    const proofs = db.select().from(transactionProofs).all();
+    expect(proofs).toHaveLength(1);
+    expect(proofs[0]!.signedRequest).toBe("first");
   });
 });

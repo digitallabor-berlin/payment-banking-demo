@@ -10,6 +10,7 @@ import {
   cards,
   credentials,
   loginSessions,
+  transactionProofs,
   transactions,
   users,
 } from "./schema.js";
@@ -386,6 +387,50 @@ describe("login_sessions", () => {
       db
         .insert(loginSessions)
         .values({ id: "login_3", userId: "nobody", createdAt: 3000 })
+        .run(),
+    ).toThrow();
+  });
+});
+
+describe("transaction_proofs", () => {
+  it("holds at most one package per transaction", () => {
+    seed(db);
+    const txId = db.select().from(transactions).all()[0]!.id;
+
+    db.insert(transactionProofs)
+      .values({
+        transactionId: txId,
+        signedRequest: "a.b.c",
+        vpTokenJson: '{"dpc":["x"]}',
+        receivedAt: 5,
+      })
+      .run();
+
+    expect(() =>
+      db
+        .insert(transactionProofs)
+        .values({
+          transactionId: txId,
+          signedRequest: "d.e.f",
+          vpTokenJson: "{}",
+          receivedAt: 6,
+        })
+        .run(),
+    ).toThrow();
+  });
+
+  it("refuses a package for a transaction that does not exist", () => {
+    // The foreign key is what makes "at most one package per transaction" mean
+    // anything: without it a proof could name any string.
+    expect(() =>
+      db
+        .insert(transactionProofs)
+        .values({
+          transactionId: "tx_nope",
+          signedRequest: "a.b.c",
+          vpTokenJson: "{}",
+          receivedAt: 5,
+        })
         .run(),
     ).toThrow();
   });

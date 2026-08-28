@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/index.js";
-import { accounts, cards, credentials, transactions } from "../db/schema.js";
+import {
+  accounts,
+  cards,
+  credentials,
+  transactionProofs,
+  transactions,
+} from "../db/schema.js";
 import { isPaymentCredentialType } from "./credential-types.js";
 
 export interface ProcessPaymentInput {
@@ -11,6 +17,15 @@ export interface ProcessPaymentInput {
   merchant: string;
   reference: string;
   idempotencyKey: string;
+  /**
+   * The PaSO Proof/Verify §4.1 package, when the merchant had one.
+   *
+   * Optional, and its absence is ordinary rather than exceptional: it is
+   * assembled from foundry's best-effort webhook, whose artefact gate is off by
+   * default. The debit does not depend on it and no check reads it — the bank
+   * stores this and does not verify it (design D4).
+   */
+  proofPackage?: { signedRequest: string; vpToken: unknown };
 }
 
 export type ProcessPaymentResult =
@@ -120,6 +135,19 @@ export function processPayment(
           idempotencyKey: input.idempotencyKey,
         })
         .run();
+      // Same SQL transaction as the debit, deliberately: a package must never
+      // outlive a transaction that was rolled back, and a transaction must
+      // never lose a package that was sent with it.
+      if (input.proofPackage) {
+        tx.insert(transactionProofs)
+          .values({
+            transactionId: bankTxId,
+            signedRequest: input.proofPackage.signedRequest,
+            vpTokenJson: JSON.stringify(input.proofPackage.vpToken),
+            receivedAt: now,
+          })
+          .run();
+      }
       return { ok: true, bankTxId, newBalanceCents } as const;
     });
   } catch (error) {

@@ -13,6 +13,20 @@ const bodySchema = z.object({
   merchant: z.string().min(1),
   reference: z.string().min(1),
   idempotency_key: z.string().min(1),
+  /**
+   * PaSO Proof/Verify §4.1, member names verbatim from the spec.
+   *
+   * `.optional()` rather than `.nullable()`: the merchant omits the key when it
+   * has no package (see `BankClient.pay`), and accepting an explicit null too
+   * would admit a second spelling of the same fact.
+   *
+   * `vp_token` is `z.unknown()` — its shape is the wallet's, not ours, and
+   * narrowing it here would reject a conformant token from a wallet we have
+   * never seen. It is stored verbatim and decoded only for display.
+   */
+  proof_package: z
+    .object({ signed_request: z.string().min(1), vp_token: z.unknown() })
+    .optional(),
 });
 
 export async function POST(request: Request) {
@@ -37,6 +51,14 @@ export async function POST(request: Request) {
     merchant: parsed.data.merchant,
     reference: parsed.data.reference,
     idempotencyKey: parsed.data.idempotency_key,
+    ...(parsed.data.proof_package
+      ? {
+          proofPackage: {
+            signedRequest: parsed.data.proof_package.signed_request,
+            vpToken: parsed.data.proof_package.vp_token,
+          },
+        }
+      : {}),
   });
 
   if (!result.ok) {
