@@ -123,9 +123,9 @@ describe("formatReceivedAt", () => {
     // One derivation, not two: the day shown here must never drift from the
     // day the same package's transaction shows in the ledger.
     const ms = Date.UTC(2026, 11, 31, 23, 59, 59);
-    expect(formatReceivedAt(ms, "de").startsWith(formatBookedAt(ms, "de"))).toBe(
-      true,
-    );
+    expect(
+      formatReceivedAt(ms, "de").startsWith(formatBookedAt(ms, "de")),
+    ).toBe(true);
   });
 
   it("does not roll over near midnight UTC", () => {

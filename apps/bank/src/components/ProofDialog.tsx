@@ -130,11 +130,7 @@ export function ProofDialog({
 
           {body ? (
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <div
-                className="proof-segment"
-                role="group"
-                aria-label={t.title}
-              >
+              <div className="proof-segment" role="group" aria-label={t.title}>
                 <button
                   type="button"
                   aria-current={raw ? undefined : "true"}
@@ -164,27 +160,29 @@ export function ProofDialog({
         <div className="proof-body">
           {failed ? (
             <p className="mt-4 text-sm">{t.loadFailed}</p>
-          ) : body ? raw ? (
-            <div className="proof-specimen">
-              <div className="proof-specimen-head">
-                <span className="proof-specimen-name">{t.title}</span>
-                <span className="proof-specimen-tag">application/json</span>
+          ) : body ? (
+            raw ? (
+              <div className="proof-specimen">
+                <div className="proof-specimen-head">
+                  <span className="proof-specimen-name">{t.title}</span>
+                  <span className="proof-specimen-tag">application/json</span>
+                </div>
+                <pre className="proof-data max-h-none">
+                  {JSON.stringify(body.proofPackage, null, 2)}
+                </pre>
               </div>
-              <pre className="proof-data max-h-none">
-                {JSON.stringify(body.proofPackage, null, 2)}
-              </pre>
-            </div>
-          ) : (
-            <>
-              <Specimen
-                name={t.signedRequest}
-                tag="compact JWS"
-                result={decodeJwsCompact(body.proofPackage.signed_request)}
-                raw={body.proofPackage.signed_request}
-                t={t}
-              />
-              <VpToken value={body.proofPackage.vp_token} t={t} />
-            </>
+            ) : (
+              <>
+                <Specimen
+                  name={t.signedRequest}
+                  tag="compact JWS"
+                  result={decodeJwsCompact(body.proofPackage.signed_request)}
+                  raw={body.proofPackage.signed_request}
+                  t={t}
+                />
+                <VpToken value={body.proofPackage.vp_token} t={t} />
+              </>
+            )
           ) : (
             <p className="mt-4 text-sm">{t.loading}</p>
           )}
