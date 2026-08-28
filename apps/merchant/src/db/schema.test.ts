@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "./index.js";
-import { orders, paymentSessions, products } from "./schema.js";
+import {
+  orders,
+  paymentSessions,
+  products,
+  verifierEvents,
+} from "./schema.js";
 import { seed } from "./seed.js";
 
 let dir: string;
@@ -164,5 +169,58 @@ describe("payment_sessions retries", () => {
     const row = db.select().from(paymentSessions).get();
     expect(row?.transport).toBe("request_uri");
     expect(row?.dcApiProtocol).toBeNull();
+  });
+});
+
+describe("verifier_events", () => {
+  it("accepts a request event with no vp_token", () => {
+    db.insert(verifierEvents)
+      .values({
+        txId: "ver_1",
+        event: "presentation_request_delivered",
+        transport: "request_uri",
+        signedRequest: "eyJ0eXAi.eyJhdWQi.c2ln",
+        vpTokenJson: null,
+        receivedAt: 10,
+      })
+      .run();
+
+    const rows = db.select().from(verifierEvents).all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.vpTokenJson).toBeNull();
+  });
+
+  it("accepts a completion event with no signed request", () => {
+    db.insert(verifierEvents)
+      .values({
+        txId: "ver_1",
+        event: "verification_completed",
+        transport: null,
+        signedRequest: null,
+        vpTokenJson: JSON.stringify({ dpc: ["eyJ..."] }),
+        receivedAt: 11,
+      })
+      .run();
+
+    expect(db.select().from(verifierEvents).all()[0]!.signedRequest).toBeNull();
+  });
+
+  it("keeps every delivery of the same transaction rather than replacing it", () => {
+    // Design D6: `presentation_request_delivered` fires per FETCH and each copy
+    // is different bytes. There is no unique constraint on tx_id, deliberately.
+    for (const [i, jws] of ["a.b.c", "d.e.f"].entries()) {
+      db.insert(verifierEvents)
+        .values({
+          txId: "ver_1",
+          event: "presentation_request_delivered",
+          transport: "request_uri",
+          signedRequest: jws,
+          vpTokenJson: null,
+          receivedAt: 20 + i,
+        })
+        .run();
+    }
+
+    expect(db.select().from(verifierEvents).all()).toHaveLength(2);
   });
 });

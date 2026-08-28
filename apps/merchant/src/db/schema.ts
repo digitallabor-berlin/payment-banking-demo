@@ -156,6 +156,46 @@ export const paymentSessions = sqliteTable("payment_sessions", {
  createdAt: integer("created_at").notNull(),
 });
 
+/**
+ * Verification events delivered by foundry's artifact webhook.
+ *
+ * An INBOX rather than columns on `payment_sessions`, for three reasons
+ * (design D7):
+ *
+ * 1. `presentation_request_delivered` is dispatched INSIDE foundry's
+ *    `create_verification_request`, so it can reach us before
+ *    `startPaymentSession` has written `foundry_verification_id` onto the
+ *    session row. A direct write would have nothing to write to.
+ * 2. That event fires per DELIVERY, not per transaction — on `request_uri` it
+ *    fires for every `GET /vp/request/:id`, and ECDSA signing is randomized, so
+ *    each copy is genuinely different bytes. Rows accumulate; the reader picks.
+ * 3. The grace period in `refreshPaymentSessionState` needs something to poll.
+ *
+ * Deliberately no unique constraint on `tx_id` — see reason 2. No foreign key
+ * to `payment_sessions` either: reason 1 means the session row may not carry
+ * that id yet, and a `presentation_request_delivered` for the BANK's wallet
+ * login is stored too (it is a request object, not holder data).
+ */
+export const verifierEvents = sqliteTable("verifier_events", {
+ id: integer("id").primaryKey({ autoIncrement: true }),
+ /** foundry's `verification_id`. */
+ txId: text("tx_id").notNull(),
+ event: text("event", {
+  enum: ["presentation_request_delivered", "verification_completed"],
+ }).notNull(),
+ /** From the request event only. NULL on a completion. */
+ transport: text("transport"),
+ /**
+  * foundry's `request_object_jws` — the PaSO `signed_request`. NULL when
+  * foundry's `verifier.webhook.include_raw_artifacts` is off, which is its
+  * default: the event still fires, it just carries no artefact.
+  */
+ signedRequest: text("signed_request"),
+ /** `JSON.stringify(vp_token)`. NULL for the same reason as above. */
+ vpTokenJson: text("vp_token_json"),
+ receivedAt: integer("received_at").notNull(),
+});
+
 export type Product = typeof products.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
@@ -163,3 +203,4 @@ export type NamedQueryRef = PaymentSession["namedQueryRef"];
 export type PaymentSession = typeof paymentSessions.$inferSelect;
 export type OrderStatus = Order["status"];
 export type PaymentSessionState = PaymentSession["state"];
+export type VerifierEventRow = typeof verifierEvents.$inferSelect;
