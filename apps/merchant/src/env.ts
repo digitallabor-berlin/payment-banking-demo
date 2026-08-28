@@ -19,6 +19,17 @@ const schema = z.object({
   * a boot crash rather than a silent bad demo.
   */
  MERCHANT_PAYEE_ID: z.string().min(1),
+ /**
+  * Shared HMAC key for foundry's verification-artifact webhook, matching
+  * `verifier.webhook.secret` / `secret_env` on the foundry that posts to
+  * `/api/verifier-events`.
+  *
+  * Required with no default, like MERCHANT_PAYEE_ID and unlike MERCHANT_NAME.
+  * An optional secret degrades that route to an unauthenticated endpoint that
+  * accepts holder credentials from anyone, so a missing value must crash the
+  * process at boot rather than quietly widen it.
+  */
+ FOUNDRY_WEBHOOK_SECRET: z.string().min(1),
 });
 
 export type Env = z.infer<typeof schema>;

@@ -42,6 +42,7 @@ RUN pnpm install --frozen-lockfile
 # `[cause]`, not as an env error at the top of the log.
 ENV FOUNDRY_ADMIN_KEY=build-only \
     BANK_API_KEY=build-only \
+    FOUNDRY_WEBHOOK_SECRET=build-only \
     MERCHANT_PAYEE_ID=build-only \
     SESSION_SECRET=build-only-secret-0123456789012345678901234567890123
 RUN pnpm --filter @demo/bank run build \

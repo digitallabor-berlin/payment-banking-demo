@@ -12,6 +12,7 @@ export default defineConfig({
       BANK_API_KEY: "test-bank-key",
       MERCHANT_NAME: "Demo Shop",
       MERCHANT_PAYEE_ID: "Payee-id-123",
+      FOUNDRY_WEBHOOK_SECRET: "test-webhook-secret",
     },
   },
   resolve: {

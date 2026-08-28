@@ -5,6 +5,7 @@ const complete = {
   FOUNDRY_ADMIN_KEY: "admin-key",
   BANK_API_KEY: "bank-key",
   MERCHANT_PAYEE_ID: "Payee-id-123",
+  FOUNDRY_WEBHOOK_SECRET: "webhook-secret",
 };
 
 describe("parseEnv", () => {
@@ -38,6 +39,14 @@ describe("parseEnv", () => {
 
   it("carries MERCHANT_PAYEE_ID through verbatim", () => {
     expect(parseEnv(complete).MERCHANT_PAYEE_ID).toBe("Payee-id-123");
+  });
+
+  it("requires FOUNDRY_WEBHOOK_SECRET rather than defaulting it", () => {
+    // The HMAC IS the authentication on /api/verifier-events. An optional
+    // secret degrades that route to an unauthenticated endpoint accepting
+    // holder credentials from anyone, so absence must be a boot failure.
+    const { FOUNDRY_WEBHOOK_SECRET: _omitted, ...withoutSecret } = complete;
+    expect(() => parseEnv(withoutSecret)).toThrowError(/FOUNDRY_WEBHOOK_SECRET/);
   });
 
   it("rejects a non-URL BANK_API_URL", () => {
