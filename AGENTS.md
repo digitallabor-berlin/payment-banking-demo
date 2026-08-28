@@ -53,8 +53,34 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**756 tests** (494 bank + 212 merchant + 13 foundry-client + 37 ui), measured
-2026-08-27.
+**847 tests** (531 bank + 266 merchant + 13 foundry-client + 37 ui), measured
+2026-08-28.
+
+That was **756** before the PaSO proof-package work, which added 91 — and this
+is the first entry here whose two ends were reconciled *before* being written
+down rather than after: the per-project deltas (+54 merchant, +37 bank) sum to
+the run's own total, so neither number is a guess. `apps/merchant` (+54): 18 new
+in `lib/verifier-events.test.ts`, 9 new in `lib/proof-package.test.ts`, 7 new in
+`lib/proof-wait.test.ts`, 7 new in `app/api/verifier-events/route.test.ts`, 3 new
+in `lib/bank.test.ts`, +5 in `lib/settle.test.ts`, +4 in `db/schema.test.ts`, +1
+in `env.test.ts`. `apps/bank` (+37): 18 new in `lib/proof-decode.test.ts`, 4 new
+in `app/api/transactions/[id]/proof/route.test.ts`, +9 in `lib/queries.test.ts`,
++4 in `lib/payments.test.ts`, +2 in `db/schema.test.ts`.
+
+Three things that number hides. `lib/bank.test.ts` is a file **the plan did not
+ask for**, and without it the snake_case `POST /api/payments` body would have had
+no test at all — `settle.test.ts` stubs `BankClient.pay` wholesale, so it only
+ever sees the camelCase `BankPayInput`, and the wire projection beneath it is
+exactly the seam that lost `dcApiProtocol`. `messages.test.ts` again added
+**zero** against eighteen new leaves in both catalogs, so `pnpm typecheck` is once
+more the real gate for copy. And the +5 in `settle.test.ts` is net of a *fixture*
+rewrite: `seedSession` now seeds a complete proof package, because every settle
+test that reaches the bank would otherwise sit out the grace window — the
+fixture changed, never an assertion.
+
+The count is also the least interesting part of that work. See the
+`Buffer`-in-a-browser bullet under **The PaSO proof package**: a decoder with 16
+green tests was a total no-op in the only place it runs.
 
 That was **752** before the `SheetSession` de-duplication that followed the fix
 below, which added 4, all in `apps/merchant/src/lib/checkout-session.test.ts`
@@ -1235,6 +1261,126 @@ them without reading the linked reasoning first.
   a non-empty list still fails the way it always did: silently, inside the
   wallet.
 
+### The PaSO proof package
+
+- **A decoder that runs in a browser must not touch `Buffer`, and a green test
+  suite cannot tell you it does.** `apps/bank/src/lib/proof-decode.ts` originally
+  used `Buffer.from(segment, "base64url")`. Its only consumer is `ProofDialog`, a
+  **client** component, where `Buffer` does not exist — so every call raised a
+  `ReferenceError` that landed in the function's own `try/catch` and became
+  `{ ok: false, reason: "could not decode base64url" }`. The decoder was a total
+  no-op in the only place it runs, while all sixteen of its unit tests passed,
+  because every vitest project here is `environment: "node"`. Found by opening the
+  dialog in real headless Chrome, where the whole thing read *"Could not be
+  decoded — shown as received."*
+
+  It is now `atob` + `TextDecoder`, which both Node 18+ and every browser have,
+  and two tests `vi.stubGlobal("Buffer", undefined)` — the only tests in the suite
+  that could have caught it. One of them exists for `atob` specifically: it
+  returns a **binary** string, one char per byte, so without the `TextDecoder`
+  every non-ASCII claim is mangled (`Müller` → `MÃ¼ller`). Both must build their
+  fixtures *before* the stub, since the test file's own `b64u` helper uses
+  `Buffer` too. The general rule this is an instance of: `environment: "node"`
+  means a `.ts` file's tests prove nothing about whether it works in the browser,
+  and "decisions in `.ts`" does not by itself make a decision *correct* there.
+
+- **`verifier_events` is an INBOX, and the asymmetry between its two event types
+  is the security boundary.** foundry dispatches
+  `presentation_request_delivered` *inside* `create_verification_request`, so it
+  can arrive before `startPaymentSession` has written `foundry_verification_id`
+  onto the session row — which is why the table has no foreign key and why that
+  event is stored **unconditionally**. It carries a request *object*, our own or
+  the bank's public ask, holding no holder data. A `verification_completed` is
+  stored **only** when a payment session already claims its `tx_id`: one foundry
+  serves both apps, so an unmatched completion is the **bank's wallet-login
+  `vp_token`** — a holder credential from a flow the merchant has nothing to do
+  with. Dropping it is the point, not an oversight. The timing is safe in a way
+  the other event's is not: a wallet cannot answer a request that was never
+  created.
+
+  There is deliberately **no unique constraint on `tx_id`**. On `request_uri` the
+  request event fires per *fetch* and ECDSA signing is randomized, so each copy is
+  genuinely different bytes. Rows accumulate; `proofPackageFor` picks the newest
+  non-NULL.
+
+- **The webhook HMAC covers the RAW body, so `request.json()` must never be
+  called first.** foundry signs the exact bytes it transmits (its sink calls
+  `.body(..)`), and parse-then-stringify is not byte-preserving — key order,
+  whitespace and number formatting all differ. `POST /api/verifier-events` reads
+  `request.text()`, verifies, and only then `JSON.parse`s. `verifyWebhookSignature`
+  returns false for every rejection rather than throwing, including a length
+  mismatch (`timingSafeEqual` throws on those) and a non-hex header
+  (`Buffer.from(_, "hex")` silently truncates rather than throwing, so the hex
+  shape is checked with a regex instead of inferred from the decode). An
+  unauthenticated caller must not be able to produce a 500.
+
+  **Every path but a failed signature answers 2xx.** foundry is fire-and-forget
+  and at-most-once: it never retries, and a non-2xx is a `warn` in its log and
+  nothing else. So an unknown event type, an unparseable body and a deliberately
+  dropped completion all answer 204 — but a bad signature answers **401**, because
+  a caller offering us holder credentials must be refused rather than believed.
+  Verified over real HTTP against a running merchant: 204 + one row with a valid
+  HMAC, 401 + nothing with an invalid one. A 204 for both would mean the check is
+  inert.
+
+- **`FOUNDRY_WEBHOOK_SECRET` is required with no default**, like
+  `MERCHANT_PAYEE_ID` and unlike `MERCHANT_NAME`. An optional secret degrades that
+  route to an unauthenticated endpoint that accepts holder credentials from
+  anyone. As always, that means three edits, not one: `env.ts`, the merchant's
+  `vitest.config.ts` `test.env` block, and the root `Dockerfile`'s build-stage
+  `ENV`.
+
+- **The settle path waits for the package and then gives up, and every branch of
+  that decision fails FORWARD.** `shouldWaitForProof` (`lib/proof-wait.ts`) holds
+  the debit for `PROOF_GRACE_MS` = **6 s**, three of the browser's ~2s polls. A
+  missing `verifiedAt` and a clock that appears to run backwards both mean "debit
+  now": the package is an audit artefact, and no artefact is worth a payment that
+  never completes. The window closes on wall-clock, so it cannot deadlock waiting
+  for an event that never comes.
+
+  `verifiedAt` is **re-read off the row** inside `refreshPaymentSessionState`
+  rather than taken from a local, because on every poll after the first the
+  function enters through the resume branch, which never writes it. The row is the
+  only place that knows. Note the consequence for the tests:
+  `settle.test.ts`'s `seedSession` now seeds a complete package by default, or
+  every settle test would sit out the grace window and never reach the bank.
+
+- **The bank STORES the package and verifies NOTHING in it (design D4).** None of
+  PaSO §3's checks are run — no signature verification, no `request_integrity`, no
+  `jti` replay cache — and no UI copy may imply otherwise. That is why the ledger
+  glyph is a **seal, not a tick**: a checkmark would read as "the bank verified
+  this". The `proof.disclaimer` catalog entry says it in as many words in both
+  locales, and every string in that block is written to keep the claim honest.
+
+- **`transaction_proofs` is its own table keyed BY the transaction id.** Not two
+  more columns on `transactions`, because a `vp_token` is kilobytes and
+  `listTransactions` reads twenty rows on every dashboard render — the ledger
+  query must not pay for an artefact only a dialog reads. `TransactionDto` carries
+  a `hasProof` **boolean**, filled by **one `IN` query per page** rather than a
+  lookup per row, and the package itself is fetched by id when the dialog opens.
+  The primary key being the transaction id means the database enforces
+  at-most-one-per-transaction rather than a convention in `processPayment`; the
+  insert sits **inside that function's existing SQL transaction**, so a package
+  can never outlive a rolled-back debit.
+
+- **`GET /api/transactions/{id}/proof` answers 404 for absent, unowned AND
+  nonexistent.** A transaction id is guessable and the payload is a holder's
+  wallet presentation, so "this is not yours" must not be distinguishable from
+  "this does not exist". Ownership is checked in `getTransactionProof`, not in the
+  route, for the same reason `listTransactions` scopes by account. The route reads
+  its dynamic segment by **plain string splitting**, not `new URL(request.url)`,
+  which throws: `withSession` passes `(session, request)` and nothing else, and an
+  unreadable id must fall through to the same 404 rather than become a 500.
+
+- **`lib/bank.test.ts` exists because `settle.test.ts` structurally cannot see the
+  wire body.** That file stubs `BankClient.pay` wholesale, so it asserts on the
+  camelCase `BankPayInput` and never on the snake_case JSON the bank's zod schema
+  parses. `proof_package` / `signed_request` / `vp_token` are PaSO's own member
+  names and appear at exactly two boundaries — `BankClient.pay`'s body and the
+  bank route's schema. The key is **omitted** rather than sent as null when there
+  is no package, because the bank marks it `.optional()` and an explicit null
+  would fail that while meaning the same thing.
+
 ## Known-unverifiable
 
 The wallet leg cannot be exercised in this environment: no phone and no EUDI
@@ -1312,6 +1458,40 @@ back to the QR), or it answers with a KB-JWT whose audience foundry refuses
 is the diagnostic to hand the operator — it is the same flow over the previously
 exercised unsigned form, so a wallet that succeeds there and fails by default has
 localised the problem to the signature.
+
+**No real PaSO proof package has ever existed**, as of 2026-08-28, and this one
+is weaker than everything above it: the others are unverified *legs* of a
+shipped path, while this depends on a foundry feature that **is not
+implemented**. The verification-artifact webhook is a design this repo consumes,
+not something any foundry emits, so no foundry has ever POSTed to
+`/api/verifier-events` and no `signed_request`/`vp_token` pair has ever been
+assembled from real events.
+
+What *is* verified, over real HTTP against a running merchant, is our side of the
+authentication: a correctly signed body answers **204** and writes one
+`verifier_events` row, the same body under a wrong signature answers **401** and
+writes nothing. Note exactly what that proves — the probe signs with `openssl`
+using the scheme foundry's `sign_body` is *designed* to use, so it demonstrates
+our verifier is not inert, **not** that we agree with foundry's signer. The
+viewer was likewise verified in real headless Chrome against a **hand-seeded**
+package, which is how the `Buffer` no-op was caught; every SD-JWT the decoder has
+ever parsed was constructed by this repo.
+
+Three operator dependencies gate all of it, from the design's §8: foundry must
+implement and enable the webhook; `verifier.webhook.url` must point at the
+merchant's `/api/verifier-events`; and `verifier.webhook.secret` must match
+`FOUNDRY_WEBHOOK_SECRET` **with `include_raw_artifacts` on** — it is off by
+default, and with it off both events still fire while carrying no artefacts,
+which produces no package at all. Until then every payment takes the full 6 s
+grace period and settles with no package, which is the designed degradation
+rather than a fault.
+
+One caveat outlives the operator work, design D6/§9: on `request_uri` foundry
+re-signs per fetch and ECDSA is randomized, so several genuinely different
+`signed_request` values may exist for one transaction and nothing records which
+the wallet consumed. `proofPackageFor` returns the **newest**, which is the
+closest available answer and not a correct one. Anyone implementing PaSO §3's
+`request_integrity` against this stored value must read the design's §9 first.
 
 A trap when checking any of this against the deployed admin API: a **local**
 foundry may own `127.0.0.1:9000` (IPv4) while `kubectl port-forward svc/foundry
