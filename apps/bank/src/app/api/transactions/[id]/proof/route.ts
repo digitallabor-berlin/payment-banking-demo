@@ -22,9 +22,14 @@ export const dynamic = "force-dynamic";
  * dynamic segment is read from the URL rather than from a `params` argument.
  * The path is `/api/transactions/{id}/proof`, so the id is the second-to-last
  * segment.
+ *
+ * Split as a plain string rather than through `new URL(..)`, which throws on a
+ * value it cannot parse. Nothing here may throw on a request shape we did not
+ * anticipate — an unreadable id must fall through to the same 404 as an absent
+ * one, not become a 500.
  */
 export const GET = withSession(async (session, request) => {
-  const id = new URL(request.url).pathname.split("/").at(-2) ?? "";
+  const id = request.url.split("?")[0]!.split("/").at(-2) ?? "";
   const body = getTransactionProof(getDb(), session.userId, id);
   if (!body) return NextResponse.json({ error: "not_found" }, { status: 404 });
   return NextResponse.json(body);
