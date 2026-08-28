@@ -111,36 +111,61 @@ thing no test covers is the dialog itself."*
   translates the whole dialog including `Kopfdaten` and `Nutzdaten`; Copy flips
   to `Kopiert`.
 
-## NOT verified — read this before trusting any of the above
+## Deployed, and the part that is now real
 
-**No real proof package has ever existed.** foundry's verification-artifact
-webhook is unimplemented — it is a design this repo consumes, not a shipped
-feature — so nothing in this work has been exercised against a real verifier.
-Every claim above rests on tests and on data seeded by hand. In particular:
+**Superseded, same day.** The section below originally said foundry's webhook was
+unimplemented and all three of the design's §8 operator dependencies were open.
+That was wrong — it was written from the app repo without checking
+`dl-infra-k8s`, where the webhook was already configured. Corrected after
+deploying:
 
-- No foundry has ever POSTed to `/api/verifier-events`. The HMAC scheme
-  (`sha256=<lowercase hex>` over the raw body) is implemented to match foundry's
-  `sign_body` **as designed**, and the probe above signs it with `openssl` — it
-  proves our verification, not our agreement with foundry's signer.
-- No wallet has produced a `vp_token`, so the decoder has never met a real one.
-  Every SD-JWT it has parsed was constructed by this repo.
-- The `presentation_request_delivered` → `verification_completed` ordering, the
-  `include_raw_artifacts` gate, and the `skip_serializing_if` absent-key
-  behaviour are all read off the design and foundry's source, not observed.
+- `foundry_config.yml` declares `verifier.webhook` pointing at
+  `https://larder-shop.digitallabor.dev/api/verifier-events`, with
+  `secret_env: FOUNDRY_WEBHOOK_SECRET` and **`include_raw_artifacts: true`**. The
+  running pod logs `verification event webhook enabled
+  include_raw_artifacts=true`. All three dependencies are **satisfied**.
+- The merchant Deployment now carries `FOUNDRY_WEBHOOK_SECRET`, copied from ns
+  `foundry` by `make secrets` (`dl-infra-k8s` commit `8b1aa0f`). Without it the
+  merchant is a CrashLoopBackOff on rollout, not degraded 500s — `env.ts`
+  requires it with no default.
+- **Real events are arriving.** Driving sessions through the deployed merchant
+  wrote real `verifier_events` rows carrying a **3361-byte** `request_object_jws`
+  from foundry, HMAC-verified against foundry's own key. The public endpoint
+  answers 204 on a valid signature, 401 on an invalid one.
 
-Three operator dependencies remain open, from the design's §8:
+Three findings from that real data, one of which is a trap worth knowing:
 
-1. foundry must implement and enable the verification-artifact webhook.
-2. `verifier.webhook.url` must point at the merchant's `/api/verifier-events`.
-3. `verifier.webhook.secret` must match the merchant's `FOUNDRY_WEBHOOK_SECRET`,
-   and `verifier.webhook.include_raw_artifacts` must be **on** — it is off by
-   default, and with it off both events still fire while carrying no artefacts,
-   which produces no package at all.
+| transport | event at request creation | `signed_request` |
+| --- | --- | --- |
+| `dc_api_signed` | yes | **3361 bytes** — a package is possible |
+| `dc_api` (unsigned) | yes | **null**, twice of two trials — no JWS exists |
+| `request_uri` | **none** | fires per `GET /vp/request/:id` *fetch* |
 
-**Until all three land, every payment takes the full six-second grace period and
-then settles with no package.** That is the designed degradation, not a failure:
-`shouldWaitForProof` fails forward in every branch but one, because an audit
-artefact is never worth a payment that does not complete.
+The unsigned DC API form has no JWS to send, and PaSO §4.1 makes both members
+required — so **`?dcapi=unsigned` silently disables the proof package**.
+`proofPackageFor` returns null, which is correct, but that debugging affordance
+is no longer neutral: it is also a "produce no audit artefact" switch.
+
+## Still NOT verified
+
+**No complete package has ever been assembled.** Only the *first* of the two
+events has ever been received: every stored `vp_token_json` is null, because no
+wallet has completed a presentation against this deployment since the webhook
+went live. Consequently:
+
+- `verification_completed` has never been observed at all — its shape, and the
+  `skip_serializing_if` absent-key behaviour on `vp_token`, are still read off
+  the design rather than measured.
+- The decoder has never met a real `vp_token`. Every SD-JWT it has parsed was
+  constructed by this repo, and the viewer was verified against a hand-seeded
+  package (which is how the `Buffer` no-op was caught).
+- `transaction_proofs` in the deployed bank is still empty.
+
+**One real wallet payment over `dc_api_signed` closes all of this.** Until then
+every payment takes the full six-second grace period and settles with no
+package — the designed degradation, not a failure: `shouldWaitForProof` fails
+forward in every branch but one, because an audit artefact is never worth a
+payment that does not complete.
 
 One further caveat with teeth, design D6/§9: on the `request_uri` transport
 foundry re-signs the request object per fetch and ECDSA is randomized, so several

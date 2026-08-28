@@ -1372,6 +1372,22 @@ them without reading the linked reasoning first.
   which throws: `withSession` passes `(session, request)` and nothing else, and an
   unreadable id must fall through to the same 404 rather than become a 500.
 
+- **`?dcapi=unsigned` also switches OFF the proof package, and that is not
+  obvious from the flag's name.** Measured against the deployed foundry
+  2026-08-28: an unsigned DC API request creation delivers
+  `presentation_request_delivered` with **no `request_object_jws` at all** —
+  there is no JWS in that wire form to send — while `dc_api_signed` delivers a
+  real 3361-byte one. PaSO §4.1 requires both members, so `proofPackageFor`
+  returns null and the payment settles, after the full grace period, with no
+  audit artefact. The code is correct; the *affordance* is the hazard. Reach for
+  `?dcapi=unsigned` to isolate a wallet's signature handling, not as a general
+  "try the other DC API form" toggle, and never leave it on for a demo whose
+  point is the stored proof.
+
+  Note the third transport differs again: `request_uri` fires **no event at
+  request creation**, because foundry dispatches that event per `GET
+  /vp/request/:id` *fetch*. Nothing arrives until a wallet actually fetches.
+
 - **`lib/bank.test.ts` exists because `settle.test.ts` structurally cannot see the
   wire body.** That file stubs `BankClient.pay` wholesale, so it asserts on the
   camelCase `BankPayInput` and never on the snake_case JSON the bank's zod schema
@@ -1459,35 +1475,47 @@ is the diagnostic to hand the operator — it is the same flow over the previous
 exercised unsigned form, so a wallet that succeeds there and fails by default has
 localised the problem to the signature.
 
-**No real PaSO proof package has ever existed**, as of 2026-08-28, and this one
-is weaker than everything above it: the others are unverified *legs* of a
-shipped path, while this depends on a foundry feature that **is not
-implemented**. The verification-artifact webhook is a design this repo consumes,
-not something any foundry emits, so no foundry has ever POSTed to
-`/api/verifier-events` and no `signed_request`/`vp_token` pair has ever been
-assembled from real events.
+**foundry's webhook is LIVE and real events ARE arriving**, measured 2026-08-28
+against the deployed system — this file claimed the opposite for a few hours and
+the claim was simply wrong. `dl-infra-k8s/foundry/foundry_config.yml` declares
+`verifier.webhook` with `url:
+https://larder-shop.digitallabor.dev/api/verifier-events`, `secret_env:
+FOUNDRY_WEBHOOK_SECRET` and **`include_raw_artifacts: true`**, and the running
+pod logs `verification event webhook enabled include_raw_artifacts=true` at
+startup. So all three operator dependencies the design's §8 listed are
+**satisfied**, and the merchant's Deployment now carries the matching secret
+(copied from ns `foundry` by `make secrets`; the two are verified byte-identical).
 
-What *is* verified, over real HTTP against a running merchant, is our side of the
-authentication: a correctly signed body answers **204** and writes one
-`verifier_events` row, the same body under a wrong signature answers **401** and
-writes nothing. Note exactly what that proves — the probe signs with `openssl`
-using the scheme foundry's `sign_body` is *designed* to use, so it demonstrates
-our verifier is not inert, **not** that we agree with foundry's signer. The
-viewer was likewise verified in real headless Chrome against a **hand-seeded**
-package, which is how the `Buffer` no-op was caught; every SD-JWT the decoder has
-ever parsed was constructed by this repo.
+Observed, not inferred: driving real sessions through the deployed merchant
+wrote real `verifier_events` rows carrying a **3361-byte** `request_object_jws`
+from foundry, HMAC-verified against foundry's own key. The public endpoint
+answers **204** on a valid signature and **401** on an invalid one.
 
-Three operator dependencies gate all of it, from the design's §8: foundry must
-implement and enable the webhook; `verifier.webhook.url` must point at the
-merchant's `/api/verifier-events`; and `verifier.webhook.secret` must match
-`FOUNDRY_WEBHOOK_SECRET` **with `include_raw_artifacts` on** — it is off by
-default, and with it off both events still fire while carrying no artefacts,
-which produces no package at all. Until then every payment takes the full 6 s
-grace period and settles with no package, which is the designed degradation
-rather than a fault.
+Three things that measurement settled, and one of them is a trap:
 
-One caveat outlives the operator work, design D6/§9: on `request_uri` foundry
-re-signs per fetch and ECDSA is randomized, so several genuinely different
+- **`dc_api_signed` is the ONLY transport that can produce a package today.** It
+  delivers a real JWS at request-creation time.
+- **`dc_api` (unsigned) delivers the event with NO `request_object_jws` at all** —
+  `signed_request` is null, twice out of two trials, because the unsigned DC API
+  form has no JWS to send. PaSO §4.1 makes both members required, so
+  `proofPackageFor` correctly returns null and **`?dcapi=unsigned` silently
+  disables the proof package entirely**. That debugging affordance is therefore
+  not neutral any more: it is also a "produce no audit artefact" switch.
+- **`request_uri` fires NO event at creation.** foundry dispatches
+  `presentation_request_delivered` per `GET /vp/request/:id` *fetch*, so nothing
+  arrives until a wallet actually fetches the request object.
+
+What remains genuinely unobserved is the **second** event. No wallet has
+completed a presentation against this deployment since the webhook went live, so
+`verification_completed` has never been received, no `vp_token` has ever been
+stored, and therefore **no complete package has ever been assembled** — every
+`vp_token_json` is still null. The decoder has still only ever parsed SD-JWTs
+this repo constructed, and the viewer was verified against a hand-seeded package
+(which is how the `Buffer` no-op was caught). One real wallet payment over
+`dc_api_signed` is all that is needed now; ask the operator for it.
+
+One caveat outlives all of that, design D6/§9: on `request_uri` foundry re-signs
+per fetch and ECDSA is randomized, so several genuinely different
 `signed_request` values may exist for one transaction and nothing records which
 the wallet consumed. `proofPackageFor` returns the **newest**, which is the
 closest available answer and not a correct one. Anyone implementing PaSO §3's
