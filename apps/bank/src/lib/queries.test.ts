@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDb, type Db } from "../db/index.js";
-import { credentials, transactions } from "../db/schema.js";
+import {
+  credentials,
+  transactionProofs,
+  transactions,
+} from "../db/schema.js";
 import { seed } from "../db/seed.js";
 import {
   AGE_CREDENTIAL_TYPE_IDS,
@@ -15,6 +19,7 @@ import {
 import {
   getAgeCredentialState,
   getAuthenticatorCredentialState,
+  getTransactionProof,
   getWeroCredentialState,
   listAccounts,
   listCards,
@@ -881,5 +886,98 @@ describe("getAgeCredentialState per format", () => {
     expect(getAgeCredentialState(db, "user_anna").formats).toEqual(
       NO_AGE_FORMATS,
     );
+  });
+});
+
+describe("listTransactions hasProof", () => {
+  it("is false for a transaction with no stored package", () => {
+    const rows = listTransactions(db, "user_anna", 20, 0);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.hasProof === false)).toBe(true);
+  });
+
+  it("is true only for the transaction that has one", () => {
+    const target = listTransactions(db, "user_anna", 20, 0)[0]!;
+    db.insert(transactionProofs)
+      .values({
+        transactionId: target.id,
+        signedRequest: "a.b.c",
+        vpTokenJson: "{}",
+        receivedAt: 1,
+      })
+      .run();
+
+    const rows = listTransactions(db, "user_anna", 20, 0);
+    expect(rows.filter((r) => r.hasProof).map((r) => r.id)).toEqual([target.id]);
+  });
+
+  it("returns an empty page without touching the proof table", () => {
+    // `inArray` over an empty id list is not universally safe in drizzle, and
+    // the page is empty far more often than it is not — a user with no
+    // transactions at all.
+    expect(listTransactions(db, "user_nobody", 20, 0)).toEqual([]);
+  });
+});
+
+describe("getTransactionProof", () => {
+  it("returns the package under the spec's member names", () => {
+    const target = listTransactions(db, "user_anna", 20, 0)[0]!;
+    db.insert(transactionProofs)
+      .values({
+        transactionId: target.id,
+        signedRequest: "a.b.c",
+        vpTokenJson: '{"dpc":["x"]}',
+        receivedAt: 7,
+      })
+      .run();
+
+    expect(getTransactionProof(db, "user_anna", target.id)).toEqual({
+      proofPackage: { signed_request: "a.b.c", vp_token: { dpc: ["x"] } },
+      receivedAt: 7,
+    });
+  });
+
+  it("returns null for a transaction with no package", () => {
+    const target = listTransactions(db, "user_anna", 20, 0)[0]!;
+    expect(getTransactionProof(db, "user_anna", target.id)).toBeNull();
+  });
+
+  it("returns null for a transaction belonging to someone else", () => {
+    // Ownership, not just existence. Guessing a transaction id must not be
+    // enough to read another customer's wallet presentation.
+    const target = listTransactions(db, "user_anna", 20, 0)[0]!;
+    db.insert(transactionProofs)
+      .values({
+        transactionId: target.id,
+        signedRequest: "a.b.c",
+        vpTokenJson: "{}",
+        receivedAt: 7,
+      })
+      .run();
+
+    expect(getTransactionProof(db, "user_ben", target.id)).toBeNull();
+  });
+
+  it("returns null for a user with no accounts at all", () => {
+    const target = listTransactions(db, "user_anna", 20, 0)[0]!;
+    expect(getTransactionProof(db, "user_nobody", target.id)).toBeNull();
+  });
+
+  it("returns null for an id that does not exist", () => {
+    expect(getTransactionProof(db, "user_anna", "tx_nope")).toBeNull();
+  });
+
+  it("returns null rather than throwing when the stored token is not JSON", () => {
+    const target = listTransactions(db, "user_anna", 20, 0)[0]!;
+    db.insert(transactionProofs)
+      .values({
+        transactionId: target.id,
+        signedRequest: "a.b.c",
+        vpTokenJson: "{ not json",
+        receivedAt: 7,
+      })
+      .run();
+
+    expect(getTransactionProof(db, "user_anna", target.id)).toBeNull();
   });
 });

@@ -1,6 +1,12 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/index.js";
-import { accounts, cards, credentials, transactions } from "../db/schema.js";
+import {
+ accounts,
+ cards,
+ credentials,
+ transactionProofs,
+ transactions,
+} from "../db/schema.js";
 import {
  AGE_CREDENTIAL_TYPE_IDS,
  CARD_FORMAT_TYPE_IDS,
@@ -99,6 +105,14 @@ export interface TransactionDto {
  reference: string;
  bookedAt: number;
  paidWithWallet: boolean;
+ /**
+  * Whether a PaSO proof package was stored with this transaction.
+  *
+  * A boolean rather than the package itself: a `vp_token` is kilobytes and
+  * this DTO is rendered twenty at a time. The viewer fetches the package by id
+  * when it opens.
+  */
+ hasProof: boolean;
 }
 
 export function listAccounts(db: Db, userId: string): AccountDto[] {
@@ -336,21 +350,113 @@ export function listTransactions(
 
  if (owned.length === 0) return [];
 
- return db
+ const rows = db
   .select()
   .from(transactions)
   .where(inArray(transactions.accountId, owned))
   .orderBy(desc(transactions.bookedAt))
   .limit(limit)
   .offset(offset)
+  .all();
+
+ // One IN query over the page, not a lookup per row. The page is at most a
+ // hundred ids and this runs on every dashboard render.
+ const withProof = new Set(
+  rows.length === 0
+   ? []
+   : db
+     .select({ id: transactionProofs.transactionId })
+     .from(transactionProofs)
+     .where(
+      inArray(
+       transactionProofs.transactionId,
+       rows.map((row) => row.id),
+      ),
+     )
+     .all()
+     .map((row) => row.id),
+ );
+
+ return rows.map((row) => ({
+  id: row.id,
+  amountCents: row.amountCents,
+  currency: row.currency,
+  counterparty: row.counterparty,
+  reference: row.reference,
+  bookedAt: row.bookedAt,
+  paidWithWallet: row.credentialId !== null,
+  hasProof: withProof.has(row.id),
+ }));
+}
+
+/**
+ * The body of `GET /api/transactions/{id}/proof`.
+ *
+ * `proofPackage` holds the spec's own member names — `signed_request` and
+ * `vp_token` — because it IS the PaSO Proof/Verify §4.1 package, and the viewer
+ * shows it raw. Everything beside it is ours, and camelCase like every other
+ * DTO here. Mixing the two casings in one object is deliberate: the boundary
+ * between "the artefact" and "what we recorded about it" should be visible.
+ *
+ * Declared as a named type and used as `getTransactionProof`'s return
+ * ANNOTATION rather than inferred. That annotation is the guard: this repo has
+ * shipped a bug where a route's object literal silently omitted a member the
+ * client read (`dcApiProtocol`, 6e997da), and only a written-out return type
+ * turns that into a compile error.
+ */
+export interface TransactionProofBody {
+ proofPackage: { signed_request: string; vp_token: unknown };
+ receivedAt: number;
+}
+
+/**
+ * The stored proof package for one transaction, scoped to its owner.
+ *
+ * Ownership is checked here rather than in the route, for the same reason
+ * `listTransactions` scopes by account: a transaction id is guessable, and a
+ * proof package contains a holder's wallet presentation. A transaction that
+ * exists but belongs to someone else is indistinguishable from one that does
+ * not exist — both are null.
+ */
+export function getTransactionProof(
+ db: Db,
+ userId: string,
+ transactionId: string,
+): TransactionProofBody | null {
+ const owned = db
+  .select({ id: accounts.id })
+  .from(accounts)
+  .where(eq(accounts.userId, userId))
   .all()
-  .map((row) => ({
-   id: row.id,
-   amountCents: row.amountCents,
-   currency: row.currency,
-   counterparty: row.counterparty,
-   reference: row.reference,
-   bookedAt: row.bookedAt,
-   paidWithWallet: row.credentialId !== null,
-  }));
+  .map((row) => row.id);
+ if (owned.length === 0) return null;
+
+ const transaction = db
+  .select({ accountId: transactions.accountId })
+  .from(transactions)
+  .where(eq(transactions.id, transactionId))
+  .get();
+ if (!transaction || !owned.includes(transaction.accountId)) return null;
+
+ const proof = db
+  .select()
+  .from(transactionProofs)
+  .where(eq(transactionProofs.transactionId, transactionId))
+  .get();
+ if (!proof) return null;
+
+ // Written by us, so this cannot fail in practice — but it is read back from a
+ // database that outlives the process that wrote it, and a throw here would be
+ // a 500 on a page that is otherwise fine.
+ let vpToken: unknown;
+ try {
+  vpToken = JSON.parse(proof.vpTokenJson);
+ } catch {
+  return null;
+ }
+
+ return {
+  proofPackage: { signed_request: proof.signedRequest, vp_token: vpToken },
+  receivedAt: proof.receivedAt,
+ };
 }
