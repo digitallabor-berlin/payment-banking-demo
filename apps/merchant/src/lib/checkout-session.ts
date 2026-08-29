@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import { orders, paymentSessions } from "../db/schema.js";
+import { isNeutralCheckoutCustomer } from "./neutral-checkout.js";
 import type { StartedPaymentSession } from "./payment-sessions.js";
 import type { PresentationTransport } from "./transport.js";
 
@@ -29,6 +30,17 @@ export interface SheetSession {
   * so the identifier and the request object cannot drift apart.
   */
  dcApiProtocol: string | null;
+ /**
+  * True when the sheet renders in the shop's own styling rather than EudiPay's.
+  *
+  * Not a column: it is derived from `orders.customer_name` by both constructors
+  * of this type, so a session can never disagree with the name printed on its
+  * own order. It also means the flag survives a reload and the coarse-pointer
+  * wallet handover — which navigates the tab away entirely and comes back with
+  * nothing but the URL — because it is re-derived from the database rather than
+  * remembered by the browser.
+  */
+ neutralChrome: boolean;
  initialState: string;
  initialFailureReason?: string;
 }
@@ -73,6 +85,7 @@ export function loadCheckoutSession(
    ? JSON.parse(session.dcApiRequestJson)
    : null,
   dcApiProtocol: session.dcApiProtocol ?? null,
+  neutralChrome: isNeutralCheckoutCustomer(order.customerName),
   initialState: session.state,
   ...(session.failureReason
    ? { initialFailureReason: session.failureReason }
@@ -118,6 +131,9 @@ export function sheetSessionFromStart(
   ageRequested: started.ageRequested,
   dcApiRequest: started.dcApiRequest,
   dcApiProtocol: started.dcApiProtocol,
+  // Forwarded, not re-derived: this branch has no order row in hand, and
+  // `startPaymentSession` already read the name off the one it loaded.
+  neutralChrome: started.neutralChrome,
   initialState: started.state,
  };
 }

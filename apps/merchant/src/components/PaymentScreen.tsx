@@ -21,6 +21,8 @@ import { useCart } from "@/lib/useCart.js";
 // glyph at the centre, so importing the standalone mark here would both put two
 // cards on one sheet and trip `noUnusedLocals`.
 import { EudiPayRing } from "./EudiPayRing.js";
+import { LarderMark } from "./LarderMark.js";
+import { PaymentProgressBar } from "./PaymentProgressBar.js";
 
 /** EudiPay brand blue — also the QR's dark modules (spec §9.5). */
 const BRAND_BLUE = "#004DD7";
@@ -42,6 +44,17 @@ export interface PaymentScreenProps {
    * downgrades the session to request_uri when foundry did not supply one.
    */
   dcApiProtocol: string | null;
+  /**
+   * Render in the shop's own styling rather than EudiPay's.
+   *
+   * Only the CHROME changes — `selectSheetView` is untouched, so both faces
+   * have the same five phases, the same copy and the same actions. Keeping one
+   * state machine under two skins is what stops the neutral flow quietly
+   * becoming a second payment implementation.
+   *
+   * Derived server-side from the order's customer name; see `SheetSession`.
+   */
+  neutralChrome: boolean;
   /** A session that was already terminal when the page rendered. */
   initialState: string;
   initialFailureReason?: string;
@@ -69,6 +82,7 @@ export function PaymentScreen({
   ageRequested,
   dcApiRequest,
   dcApiProtocol,
+  neutralChrome,
   initialState,
   initialFailureReason,
   onClose,
@@ -292,23 +306,43 @@ export function PaymentScreen({
         : "Try again";
 
   return (
-    <div className="eudipay-overlay">
+    /* One `data-chrome` attribute carries the whole skin: the class names below
+       are unchanged, and globals.css overrides the handful of declarations that
+       are EudiPay-specific under `[data-chrome="shop"]`. Duplicating the class
+       set would be two stylesheets to keep in step for one sheet. */
+    <div
+      className="eudipay-overlay"
+      data-chrome={neutralChrome ? "shop" : undefined}
+    >
       <div
         ref={sheetRef}
         className="eudipay-sheet"
         role="dialog"
         aria-modal="true"
-        aria-label="EudiPay payment"
+        aria-label={neutralChrome ? "Payment" : "EudiPay payment"}
         tabIndex={-1}
         onKeyDown={onKeyDown}
       >
-        <EudiPayRing
-          litStars={view.litStars}
-          animate={view.animate}
-          glyph={view.glyph}
-          className="mx-auto block h-28 w-28"
-        />
-        <p className="eudipay-mark">EudiPay</p>
+        {neutralChrome ? (
+          <>
+            <LarderMark className="mx-auto block h-9 w-9" />
+            <PaymentProgressBar
+              glyph={view.glyph}
+              animate={view.animate}
+              className="mt-4"
+            />
+          </>
+        ) : (
+          <>
+            <EudiPayRing
+              litStars={view.litStars}
+              animate={view.animate}
+              glyph={view.glyph}
+              className="mx-auto block h-28 w-28"
+            />
+            <p className="eudipay-mark">EudiPay</p>
+          </>
+        )}
 
         <div className="eudipay-rule" />
 

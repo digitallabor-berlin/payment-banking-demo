@@ -182,6 +182,7 @@ describe("POST /api/payment-sessions", () => {
         "dcApiProtocol",
         "dcApiRequest",
         "initialState",
+        "neutralChrome",
         "openid4vpUri",
         "orderId",
         "sessionId",

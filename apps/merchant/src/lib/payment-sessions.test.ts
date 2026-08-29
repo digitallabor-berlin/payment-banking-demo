@@ -42,6 +42,20 @@ beforeEach(() => {
       createdAt: 1,
     })
     .run();
+  // The demo customer, whose checkout is answered in the shop's own sheet
+  // chrome rather than EudiPay's. The name is read back off the ORDER ROW, so
+  // the flag is re-derived on every reload rather than remembered by a browser.
+  db.insert(orders)
+    .values({
+      id: "ord_neutral",
+      totalCents: 2_500,
+      currency: "EUR",
+      customerName: "John Smith",
+      customerEmail: "john@example.com",
+      status: "pending",
+      createdAt: 1,
+    })
+    .run();
 });
 
 afterEach(() => {
@@ -149,6 +163,7 @@ describe("startPaymentSession", () => {
       ageRequested: false,
       dcApiRequest: null,
       dcApiProtocol: null,
+      neutralChrome: false,
       state: "pending",
     });
 
@@ -430,6 +445,7 @@ describe("startPaymentSession", () => {
       ageRequested: false,
       dcApiRequest: { client_id: "x509_hash:abc", nonce: "n1" },
       dcApiProtocol: "openid4vp-v1-unsigned",
+      neutralChrome: false,
       state: "pending",
     });
 
@@ -564,6 +580,40 @@ describe("startPaymentSession — the result the sheet is built from", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.ageRequested).toBe(false);
+  });
+
+  /**
+   * The neutral chrome is decided HERE, from the persisted order row — exactly
+   * as the amount and the named query already are. The shopper types a name
+   * into a form, but what the sheet renders is read back out of the database,
+   * so a reload and the coarse-pointer wallet handover (which navigates the tab
+   * away entirely and returns with nothing but the URL) rebuild the same sheet.
+   */
+  it("reports neutralChrome for the demo customer", async () => {
+    const result = await startPaymentSession(
+      db,
+      stubClient(verificationOk),
+      "ord_neutral",
+      "Larder",
+      "PAYEE-1",
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.neutralChrome).toBe(true);
+  });
+
+  it("reports neutralChrome false for every other customer", async () => {
+    stockOrder("cheese");
+    const result = await startPaymentSession(
+      db,
+      stubClient(verificationOk),
+      "ord_1",
+      "Larder",
+      "PAYEE-1",
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.neutralChrome).toBe(false);
   });
 });
 

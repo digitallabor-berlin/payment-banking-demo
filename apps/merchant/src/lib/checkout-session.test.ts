@@ -16,13 +16,17 @@ let db: Db;
 
 const NOW = 1_700_000_000_000;
 
-function insertOrder(id: string, totalCents: number): void {
+function insertOrder(
+  id: string,
+  totalCents: number,
+  customerName = "Ada Lovelace",
+): void {
   db.insert(orders)
     .values({
       id,
       totalCents,
       currency: "EUR",
-      customerName: "Ada Lovelace",
+      customerName,
       customerEmail: "ada@example.test",
       status: "pending",
       createdAt: NOW,
@@ -66,8 +70,34 @@ describe("loadCheckoutSession", () => {
       ageRequested: false,
       dcApiRequest: null,
       dcApiProtocol: null,
+      neutralChrome: false,
       initialState: "pending",
     });
+  });
+
+  /**
+   * The demo flag is derived from the order this session belongs to, not stored
+   * on the session — there is no column for it, and adding one would let a row
+   * disagree with the name printed on its own order. The only cost is that
+   * renaming the customer after the fact would change the sheet's chrome, which
+   * nothing in this app can do.
+   */
+  it("derives neutralChrome from the order's customer name", () => {
+    insertOrder("ord_neutral", 2500, "John Smith");
+    db.insert(paymentSessions)
+      .values({
+        id: "sess_neutral",
+        orderId: "ord_neutral",
+        state: "pending",
+        transport: "dc_api",
+        dcApiRequestJson: '{"nonce":"n1"}',
+        dcApiProtocol: "openid4vp-v1-unsigned",
+        namedQueryRef: "payment",
+        createdAt: NOW,
+      })
+      .run();
+
+    expect(loadCheckoutSession(db, "sess_neutral")?.neutralChrome).toBe(true);
   });
 
   // A deep link or a reload has to rebuild the DC API call from the row alone,
@@ -186,6 +216,7 @@ describe("sheetSessionFromStart", () => {
     ageRequested: false,
     dcApiRequest: null,
     dcApiProtocol: null,
+    neutralChrome: false,
     state: "pending",
   };
 
@@ -202,8 +233,17 @@ describe("sheetSessionFromStart", () => {
       ageRequested: false,
       dcApiRequest: null,
       dcApiProtocol: null,
+      neutralChrome: false,
       initialState: "pending",
     });
+  });
+
+  // Forwarded verbatim, not re-derived: this constructor has no order row to
+  // read, so `startPaymentSession` is the one place that consults the name.
+  it("forwards the neutral chrome flag", () => {
+    expect(
+      sheetSessionFromStart({ ...startedRequestUri, neutralChrome: true }),
+    ).toMatchObject({ neutralChrome: true });
   });
 
   it("empties a null uri and carries the signed protocol identifier", () => {
@@ -263,6 +303,7 @@ describe("sheetSessionFromStart", () => {
       ageRequested: false,
       dcApiRequest: { request: "eyJ0.eyJ1.sig" },
       dcApiProtocol: "openid4vp-v1-signed",
+      neutralChrome: false,
       state: "pending",
     });
 

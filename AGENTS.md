@@ -53,8 +53,32 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**847 tests** (531 bank + 266 merchant + 13 foundry-client + 37 ui), measured
-2026-08-28.
+**861 tests** (535 bank + 276 merchant + 13 foundry-client + 37 ui), measured
+2026-08-29.
+
+That was **851** before the neutral-checkout work, not the **847** this file
+asserted — and as with the signed-DC-API entry below, the discrepancy is worth
+more than the delta. The bank measured **535** at HEAD against the 531 recorded
+here, and that correction is *provable* rather than argued: `git status` showed
+zero changed files under `apps/bank` or `packages/`, so those four tests cannot
+be mine. The other three projects' figures were exact. This is the second time
+the bank's figure alone has drifted; when a count disagrees, measure both ends.
+
+The work itself added 10, all in `apps/merchant`: 6 in the new
+`lib/neutral-checkout.test.ts`, +2 in `lib/payment-sessions.test.ts` and +2 in
+`lib/checkout-session.test.ts`. 266 + 10 = 276, which is the run's own merchant
+total, so the per-file split reconciles rather than being asserted.
+
+Two things that number hides, both about tests that did **not** grow.
+`route.test.ts` gained **zero** — its exact key-set assertion simply took one
+more string, which is the honest edit: the body gained a member, it did not gain
+a behaviour. And four *existing* whole-object `toEqual` assertions had to be
+amended by hand (two in `payment-sessions.test.ts`, two in
+`checkout-session.test.ts`), which is exactly what those assertions are for —
+a subset check would have let `neutralChrome` land unnoticed in both
+constructors of `SheetSession`. Nothing in `.tsx` or CSS is covered at all here,
+so the progress bar, the chrome swap and every override in `globals.css` rest
+entirely on the browser verification below, not on the suite.
 
 That was **756** before the PaSO proof-package work, which added 91 — and this
 is the first entry here whose two ends were reconciled *before* being written
@@ -903,6 +927,64 @@ them without reading the linked reasoning first.
   `isAgeRestricted`, which `selectNamedQuery` also calls so the shelf tag and the
   `payment` → `payment_av` escalation cannot disagree. There is no `products`
   column.
+
+- **`John Smith` is a live trigger, not a fixture name.** A checkout under that
+  name (trimmed, case-folded — inner whitespace is significant, so `John  Smith`
+  is *not* a match) gets two things at once: the **unsigned** DC API wire form
+  regardless of `?dcapi=`, and the sheet in the shop's own styling instead of
+  EudiPay's. `isNeutralCheckoutCustomer` in `lib/neutral-checkout.ts` is the one
+  predicate behind both, and it is one predicate on purpose — a neutral face over
+  a signed request object is a demo of something nobody asked for, and two rules
+  would drift the first time either was touched. Do not use that name for a
+  fixture in a manual test unless you mean it.
+
+  Note what it therefore switches **off**, which the name does not say: the
+  unsigned DC API form delivers `presentation_request_delivered` with no
+  `request_object_jws` at all, so a `John Smith` payment produces **no PaSO proof
+  package** (see the `?dcapi=unsigned` bullet under *The PaSO proof package* —
+  this is the same hazard reached by a different door, and this door is not
+  labelled).
+
+- **`neutralChrome` is derived from `orders.customer_name`, never carried from
+  the browser.** It is not a column and must not become one: a column could
+  disagree with the name printed on its own order. Both constructors of
+  `SheetSession` set it — `loadCheckoutSession` re-derives it from the row it
+  already reads, and `sheetSessionFromStart` forwards what `startPaymentSession`
+  derived — which is what makes it survive a reload and the coarse-pointer wallet
+  handover, the two paths that come back with nothing but the URL. The `:
+  SheetSession` return annotation is again the guard that made adding it safe;
+  see the route-projection bullet under **DC API** for what happens without it.
+
+- **The neutral sheet is one `data-chrome="shop"` attribute, not a second
+  sheet.** `selectSheetView` is **untouched**: both faces have the same five
+  phases, the same copy, the same actions and the same failure table. Only the
+  chrome differs — `EudiPayRing` → `PaymentProgressBar`, the `EudiPay` wordmark →
+  `LarderMark`, `aria-label` → `"Payment"`, and a block of overrides in
+  `globals.css`. Those overrides are `(0,3,0)` selectors against the `(0,1,0)`
+  they correct, so **ordering within the file is not load-bearing** — including
+  against the later `.eudipay-sheet :where(…):focus-visible` rule, whose `#ffcc00`
+  is very nearly invisible on white and is deliberately overridden back to
+  `--color-signal`. A duplicated `.shop-*` class set was rejected: it is two
+  stylesheets to keep in step for one sheet, which is the split this file's own
+  header blames for the original spacing defects.
+
+- **The progress bar's 38% and its `translateX(263%)` are ONE number.**
+  `transform` percentages resolve against the *element's* own width, not the
+  track's, so clearing a 38%-wide bar across the full track takes 100/38 ≈ 263%
+  of itself. Change one and the other is wrong — the bar either stops short or
+  overshoots, and neither is visible in a test. Measured in real headless Chrome:
+  fill `132.234px` of a `348px` track = 38.0%, and 263% of 132.234 = 347.8px ≈ the
+  track. The three `data-tone` values are load-bearing rather than decorative: a
+  declined payment still wearing the in-flight blue reads as still running.
+
+- **A `completed` sheet is only on screen for 1500ms**, and `tools/cdp`'s
+  `page.goto` waits 1500ms of its own — so verifying the approved state needs a
+  raw `page.send("Page.navigate", …)` or it loses the race to the `/success`
+  redirect every time. Likewise, a *local* `settling` sheet goes terminal in
+  under a second because the poll fails against a foundry that declares no
+  `payment` query; pause the poll with `Fetch.enable` on `*/api/payment-sessions/*`
+  and never fulfil it to hold the animating state still. Both were needed to see
+  this bar move at all.
 
 ### The bank's card face
 

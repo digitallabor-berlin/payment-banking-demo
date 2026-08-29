@@ -15,6 +15,7 @@ import {
   passedTransactionDataBinding,
 } from "./checks.js";
 import { buildTransactionData, selectNamedQuery } from "./dcql.js";
+import { isNeutralCheckoutCustomer } from "./neutral-checkout.js";
 import { listOrderProductIds } from "./orders.js";
 import { proofPackageFor, type ProofPackage } from "./proof-package.js";
 import { shouldWaitForProof } from "./proof-wait.js";
@@ -56,6 +57,14 @@ export type StartPaymentSessionResult =
        * exactly as foundry returned it. Null under request_uri.
        */
       dcApiProtocol: string | null;
+      /**
+       * True when the sheet should render in the shop's own styling instead of
+       * EudiPay's. Derived HERE, from the order row's customer name, for the
+       * same reason `amountCents` and `ageRequested` are: the browser is not
+       * consulted about what a session presents, only about what transport it
+       * can carry.
+       */
+      neutralChrome: boolean;
       state: "pending";
     }
   | {
@@ -186,6 +195,7 @@ export async function startPaymentSession(
       ageRequested: namedQueryRef === "payment_av",
       dcApiRequest,
       dcApiProtocol,
+      neutralChrome: isNeutralCheckoutCustomer(order.customerName),
       state: "pending",
     };
   } catch {

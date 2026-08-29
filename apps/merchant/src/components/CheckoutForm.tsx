@@ -7,6 +7,7 @@ import { cartHasAgeRestricted } from "@/lib/cart.js";
 import type { SheetSession } from "@/lib/checkout-session.js";
 import { isAgeRestricted } from "@/lib/dcql.js";
 import { formatEuroCents } from "@/lib/format.js";
+import { isNeutralCheckoutCustomer } from "@/lib/neutral-checkout.js";
 import {
   presentationProtocolFor,
   selectTransport,
@@ -31,11 +32,28 @@ export function CheckoutForm({
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  /**
+   * The demo customer is served the UNSIGNED wire form regardless of `?dcapi=`.
+   *
+   * Read from the live name field rather than at submit, because detection has
+   * to have resolved before the click: `useDcApiSupport` is an effect, and the
+   * transport is fixed when the session is created. Typing the name therefore
+   * re-runs detection under the other protocol identifier, which is the honest
+   * wiring even though it cannot change the answer on the only build we can
+   * measure — HeadlessChrome 151's `userAgentAllowsProtocol` returns true for
+   * every string, including a bogus one.
+   *
+   * The same predicate decides the sheet's chrome, but on the SERVER, from the
+   * order row. Two readings of one name, never two rules.
+   */
+  const effectiveForm: DcApiForm = isNeutralCheckoutCustomer(name)
+    ? "unsigned"
+    : dcApiForm;
   // Detection must happen HERE, not on the pay page: `transport` changes the
   // OpenID4VP wire and is therefore fixed when the session is created.
   const dcApiSupported = useDcApiSupport(
     "get",
-    presentationProtocolFor(dcApiForm),
+    presentationProtocolFor(effectiveForm),
   );
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -67,7 +85,7 @@ export function CheckoutForm({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           orderId: order.orderId,
-          transport: selectTransport(dcApiSupported, dcApiForm),
+          transport: selectTransport(dcApiSupported, effectiveForm),
         }),
       });
       if (!sessionResponse.ok) {
@@ -168,7 +186,7 @@ export function CheckoutForm({
         >
           {pending
             ? "Starting payment…"
-            : `Pay ${formatEuroCents(totalCents)} with your EUDI Wallet`}
+            : `Pay ${formatEuroCents(totalCents)} with your wallet`}
         </button>
       </form>
 

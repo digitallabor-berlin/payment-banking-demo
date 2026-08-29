@@ -636,6 +636,177 @@ body {
   fill: #ffcc00;
 }
 
+/* ------------------------------------------------- the shop's own sheet ---- */
+
+/*
+ * The neutral chrome, worn by the same sheet for the demo customer.
+ *
+ * These are OVERRIDES on the .eudipay-* classes rather than a parallel class
+ * set, and that is the whole point: one sheet, one state machine
+ * (`selectSheetView` is untouched), two skins. A duplicated stylesheet would be
+ * two files to keep in step, and the spacing defects this file's header warns
+ * about came from exactly that kind of split.
+ *
+ * Every selector here is (0,3,0) against the (0,1,0) it corrects, so ordering
+ * within this file is not load-bearing — including against the focus-visible
+ * rule further down, whose #ffcc00 is very nearly invisible on white.
+ *
+ * What is NOT overridden is as deliberate: the layout, the padding, the rhythm,
+ * the mobile bottom-sheet behaviour and the QR frame all stay as they are. Only
+ * colour, type and the status indicator are EudiPay's to give up.
+ */
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-sheet {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  /* The shop's surfaces separate by hairline; the sheet keeps a shadow because
+   * it is a modal over content, which is the one place depth is honest here. */
+  box-shadow:
+    inset 0 0 0 1px var(--color-border),
+    0 26px 60px -26px rgb(11 18 32 / 0.32);
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-rule {
+  background: var(--color-border);
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-eyebrow {
+  color: var(--color-muted-foreground);
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-eyebrow.is-alarm {
+  color: var(--color-destructive);
+}
+
+/* The shop's display face, not EudiPay's. The amount stays the largest thing
+ * on the sheet in every state — that part is not brand, it is the shopper's
+ * actual question. */
+.eudipay-overlay[data-chrome="shop"] .eudipay-amount,
+.eudipay-overlay[data-chrome="shop"] .eudipay-headline {
+  font-family: var(--font-display);
+  font-variation-settings: normal;
+  letter-spacing: -0.03em;
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-strip {
+  background: var(--color-border);
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-cell {
+  background: var(--color-surface);
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-cell-k {
+  color: var(--color-muted-foreground);
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-pill {
+  background: var(--color-shelf);
+  color: var(--color-ink);
+}
+
+/* White-on-white otherwise: the QR's own quiet zone must stay #FFFFFF for
+ * scanner contrast, so the frame is given an edge instead of a fill. */
+.eudipay-overlay[data-chrome="shop"] .eudipay-qr-frame {
+  box-shadow: inset 0 0 0 1px var(--color-border);
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-body,
+.eudipay-overlay[data-chrome="shop"] .eudipay-checks {
+  color: var(--color-muted-foreground);
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-button-primary {
+  background: var(--color-signal);
+  color: #ffffff;
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-button-primary:hover:not(:disabled) {
+  background: var(--color-signal-dark);
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-button-secondary {
+  background: transparent;
+  color: var(--color-ink);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-button-secondary:hover:not(:disabled) {
+  background: var(--color-shelf);
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-cancel {
+  color: var(--color-muted-foreground);
+}
+
+.eudipay-overlay[data-chrome="shop"] .eudipay-cancel:hover {
+  color: var(--color-ink);
+}
+
+/* The sheet-scoped star yellow is unreadable on this ground; back to the
+ * page's own focus colour. */
+.eudipay-overlay[data-chrome="shop"] .eudipay-sheet :where(a, button, summary):focus-visible {
+  outline-color: var(--color-signal);
+}
+
+/* ------------------------------------------------- the progress track ---- */
+
+/*
+ * The neutral sheet's status indicator, standing in for the twelve-star ring.
+ *
+ * A track can only say "something is happening", which is the correct claim for
+ * a shop's own checkout — the ring's stars say something about EudiPay. The
+ * three tones are the part that must survive: a declined payment still showing
+ * the in-flight colour would read as running.
+ */
+.shop-progress {
+  position: relative;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--color-shelf);
+  overflow: hidden;
+}
+
+/* Full-width when static. The terminal states are the ones that sit still, and
+ * a finished payment showing a part-filled bar would contradict its own copy. */
+.shop-progress-fill {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 100%;
+  border-radius: inherit;
+  background: var(--color-signal);
+}
+
+.shop-progress[data-tone="check"] .shop-progress-fill {
+  background: var(--color-success);
+}
+
+.shop-progress[data-tone="alert"] .shop-progress-fill {
+  background: var(--color-destructive);
+}
+
+/* Indeterminate: no percentage is known — the wallet is off-screen — so the bar
+ * sweeps rather than fills. */
+.shop-progress[data-sweeping="true"] .shop-progress-fill {
+  width: 38%;
+  animation: shop-progress-sweep 1.15s cubic-bezier(0.55, 0, 0.45, 1) infinite;
+}
+
+/*
+ * translateX resolves against the ELEMENT's width, not the track's, so clearing
+ * a 38%-wide bar across the full track takes 100/38 ≈ 263% of itself. Hardcoded
+ * because both numbers are in the rule above; change one and this changes.
+ */
+@keyframes shop-progress-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(263%);
+  }
+}
+
 /* Mobile: the sheet slides up from the bottom edge, as a payment sheet should. */
 @media (max-width: 480px) {
   .eudipay-overlay {
@@ -692,6 +863,17 @@ body {
    * SheetView.litStars instead of cycling. Nothing here spins. */
   .eudipay-star {
     transition: none;
+  }
+
+  /*
+   * Belt and braces: `PaymentProgressBar` already withholds `data-sweeping`
+   * under reduced motion, so this selector should never match. It is here
+   * because the component's guard is a hook — it resolves one effect late, and
+   * a bar that sweeps for a frame is exactly what the preference forbids.
+   */
+  .shop-progress[data-sweeping="true"] .shop-progress-fill {
+    width: 100%;
+    animation: none;
   }
 }
 
