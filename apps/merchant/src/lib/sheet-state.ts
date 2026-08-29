@@ -34,6 +34,21 @@ export interface SheetInput {
   ageRequested: boolean;
   redirecting: boolean;
   dcBusy: boolean;
+  /**
+   * The wallet answered and its response has been relayed; the server has not
+   * yet said what it thought of it.
+   *
+   * A SECOND flag rather than a `dcBusy` that is simply never cleared, because
+   * the two windows want different copy — "Opening your wallet…" is false once
+   * the wallet has closed. Once true it stays true: there is nothing to go back
+   * to, and every later state outranks it below.
+   *
+   * Without it the sheet spent the 2–3s until the poll's next tick in the
+   * `authorise` branch — a live "Approve in your wallet" button over a payment
+   * that had already been approved, and a motionless ring. Reported from a real
+   * payment.
+   */
+  dcSubmitted: boolean;
   dcError: DcError;
   pollStatus: "running" | "failed" | "timeout" | null;
   failureReason?: string;
@@ -201,19 +216,32 @@ export function selectSheetView(input: SheetInput): SheetView {
       ? "Your wallet will confirm the amount and that you're over 18."
       : "Your wallet will confirm the amount.";
 
-    if (input.dcBusy) {
+    /*
+     * Two windows, one layout. `dcBusy` is "the wallet is open"; `dcSubmitted`
+     * is "the wallet answered, the verdict has not". Both withdraw the button
+     * outright rather than disabling it — a disabled control still says "this
+     * is the thing to press", and there is nothing left to press.
+     *
+     * `dcBusy` is tested first so the transition reads forwards: the flags
+     * overlap for one render, and during it the wallet genuinely is still open.
+     */
+    if (input.dcBusy || input.dcSubmitted) {
       return {
         phase: "waiting",
         eyebrow: AUTHORISE,
         litStars: 6,
         glyph: "card",
         animate: true,
-        pill: "Opening your wallet…",
+        pill: input.dcBusy
+          ? "Opening your wallet…"
+          : "Confirming your payment…",
         headline: null,
         body,
         showQr: false,
         showWalletButton: false,
         primaryAction: null,
+        // Cancel stays: the money is not in flight yet. `settling` is where
+        // that becomes true, and it is strictly after this.
         showCancel: true,
         showBackToShop: false,
       };

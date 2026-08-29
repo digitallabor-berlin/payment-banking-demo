@@ -53,8 +53,28 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**861 tests** (535 bank + 276 merchant + 13 foundry-client + 37 ui), measured
+**872 tests** (535 bank + 287 merchant + 13 foundry-client + 37 ui), measured
 2026-08-29.
+
+That was **861** before the `dcSubmitted` fix, which added 11, all in one
+`apps/merchant` file — a single new describe in `lib/sheet-state.test.ts`
+(17 → 28). The per-file delta is the run's own merchant delta, 276 → 287, so it
+reconciles rather than being asserted.
+
+Only **4 of the 11 were red**, and which 7 were already green is the whole
+shape of the bug. The seven that passed before the implementation existed are
+the *ordering* cases — `settling`, `completed`, `failed` and `dcError` each
+outrank the new state, and a `request_uri` session ignores it — because they
+assert precedence that already held. They are there because `dcSubmitted` is
+**never cleared**: if any later state stopped outranking it, the sheet would
+report "Confirming your payment…" over a finished payment forever, and nothing
+else in the suite would notice. Tests that are green on arrival are not
+necessarily tests that were unnecessary.
+
+What the count does not cover, as usual: the `.tsx` change that sets the flag
+and the relay's new `!response.ok` guard are both untestable here
+(`environment: "node"`), so they rest entirely on the browser verification —
+see the `dcSubmitted` bullet under **The payment sheet**.
 
 That was **851** before the neutral-checkout work, not the **847** this file
 asserted — and as with the signed-DC-API entry below, the discrepancy is worth
@@ -976,6 +996,36 @@ them without reading the linked reasoning first.
   fill `132.234px` of a `348px` track = 38.0%, and 263% of 132.234 = 347.8px ≈ the
   track. The three `data-tone` values are load-bearing rather than decorative: a
   declined payment still wearing the in-flight blue reads as still running.
+
+- **`dcBusy` and `dcSubmitted` are TWO states, and collapsing them re-opens a
+  reported bug.** `payViaDcApi` cleared `dcBusy` in a `finally`, so it fired on
+  the **success** path too — and the session row stays `pending` until the
+  poll's next tick, so for 2–3s after a real wallet approval `selectSheetView`
+  fell through to `authorise`: a live "Approve in your wallet" button over an
+  already-approved payment, and a motionless indicator. Reported from a real
+  payment.
+
+  `dcBusy` means "the wallet is open"; `dcSubmitted` means "the wallet answered,
+  the verdict has not". The success path now sets the second and still clears
+  the first, which is correct — the wallet really has closed. They are not one
+  sticky flag because the copy differs: **"Opening your wallet…"** is false once
+  the wallet has closed, so `dcSubmitted` carries **"Confirming your payment…"**.
+  Both withdraw the button outright rather than disabling it; a disabled control
+  still says "this is the thing to press".
+
+  `dcSubmitted` is **never cleared**, which is why `sheet-state.test.ts` pins
+  that `settling`, `completed`, `failed` and `dcError` all outrank it. Cancel
+  deliberately stays available — the money is not in flight yet; `settling` is
+  where that becomes true.
+
+- **The relay's `!response.ok` check is load-bearing BECAUSE the success path is
+  sticky.** `fetch` does not throw on a non-2xx, so a 500 from
+  `POST /api/payment-sessions/{id}/dc-api-response` used to count as success.
+  That was survivable while the button came back on its own; with `dcSubmitted`
+  it would strand the sheet on "Confirming your payment…" until the poll timed
+  out. The guard routes it to `dcError = "failed"` and the existing recovery.
+  Verified in a browser by forcing the relay to 500: the sheet answers
+  "Couldn't open your wallet" with **Show QR code**, not a hang.
 
 - **A `completed` sheet is only on screen for 1500ms**, and `tools/cdp`'s
   `page.goto` waits 1500ms of its own — so verifying the approved state needs a

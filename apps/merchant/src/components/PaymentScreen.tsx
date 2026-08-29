@@ -96,6 +96,11 @@ export function PaymentScreen({
   const [retryError, setRetryError] = useState<string | null>(null);
   const [dcError, setDcError] = useState<DcError>(null);
   const [dcBusy, setDcBusy] = useState(false);
+  /**
+   * Sticky: the wallet answered and the relay accepted it, so there is no way
+   * back to the button. Cleared only by unmounting, which is what a retry does.
+   */
+  const [dcSubmitted, setDcSubmitted] = useState(false);
 
   const terminalAtRender =
     initialState === "completed" || initialState === "failed";
@@ -151,6 +156,7 @@ export function PaymentScreen({
     ageRequested,
     redirecting,
     dcBusy,
+    dcSubmitted,
     dcError,
     // PollOutcome's union is "terminal" | "timeout" | "failed" | "aborted".
     // Only two of those change what the sheet shows: `terminal` is already
@@ -270,15 +276,33 @@ export function PaymentScreen({
       const data = await invokeDcGet(
         prepareDcApiRequest(dcApiRequest, dcApiProtocol),
       );
-      await fetch(`/api/payment-sessions/${sessionId}/dc-api-response`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ response: data.response }),
-      });
-      // The poll already running picks up the verdict on its next tick.
+      const relayed = await fetch(
+        `/api/payment-sessions/${sessionId}/dc-api-response`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ response: data.response }),
+        },
+      );
+      // `fetch` does not throw on a non-2xx, so without this a 500 from the
+      // relay counted as success. That was survivable while the button came
+      // back; now that the success path is STICKY it would strand the sheet on
+      // "Confirming your payment…" until the poll timed out. Routed through
+      // dcError so the shopper reaches the existing recovery instead.
+      if (!relayed.ok) {
+        setDcError("failed");
+        return;
+      }
+      // The poll already running picks up the verdict on its next tick. Until
+      // it does, THIS is what keeps the button withdrawn and the indicator
+      // running — the row stays `pending` for a further second or two.
+      setDcSubmitted(true);
     } catch (err) {
       setDcError(isDcApiNotSupportedError(err) ? "unsupported" : "failed");
     } finally {
+      // Only ever describes the wallet call itself. Clearing it on success is
+      // correct — the wallet really has closed — and is precisely why the sheet
+      // fell back to `authorise` before `dcSubmitted` existed.
       setDcBusy(false);
     }
   }

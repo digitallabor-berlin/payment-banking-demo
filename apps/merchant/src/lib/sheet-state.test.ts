@@ -7,6 +7,7 @@ const base: SheetInput = {
   ageRequested: false,
   redirecting: false,
   dcBusy: false,
+  dcSubmitted: false,
   dcError: null,
   pollStatus: "running",
 };
@@ -79,6 +80,112 @@ describe("selectSheetView — waiting states", () => {
     expect(view.animate).toBe(true);
     expect(view.litStars).toBe(6);
     expect(view.showWalletButton).toBe(false);
+  });
+});
+
+/**
+ * The gap between the wallet answering and the server saying so.
+ *
+ * Reported from a real payment: for the 2–3s after a successful approval the
+ * sheet offered a live "Approve in your wallet" button and a motionless ring.
+ * `payViaDcApi` cleared `dcBusy` in a `finally`, so it fired on the SUCCESS
+ * path too, while the row stayed `pending` until the poll's next tick — and
+ * with `dcBusy: false` and a DC API transport this function fell straight
+ * through to `authorise`.
+ *
+ * `dcSubmitted` is that missing state, and it is deliberately a SECOND flag
+ * rather than a `dcBusy` that is never cleared: the two windows want different
+ * copy. "Opening your wallet…" is false once the wallet has closed.
+ */
+describe("selectSheetView — the wallet answered, the verdict has not", () => {
+  const submitted: SheetInput = {
+    ...base,
+    transport: "dc_api_signed",
+    dcBusy: false,
+    dcSubmitted: true,
+  };
+
+  // The bug, stated as the shopper saw it: a second press was possible.
+  it("withdraws the wallet button rather than merely disabling it", () => {
+    const view = selectSheetView(submitted);
+    expect(view.phase).toBe("waiting");
+    expect(view.showWalletButton).toBe(false);
+    expect(view.primaryAction).toBeNull();
+  });
+
+  // The other half of the report: the indicator had stopped.
+  it("keeps the indicator running", () => {
+    const view = selectSheetView(submitted);
+    expect(view.animate).toBe(true);
+    expect(view.litStars).toBe(6);
+    expect(view.glyph).toBe("card");
+  });
+
+  it("says the wallet is done and the payment is being confirmed", () => {
+    expect(selectSheetView(submitted).pill).toBe("Confirming your payment…");
+  });
+
+  // Distinct copy is the whole reason this is not just a sticky `dcBusy`.
+  it("does not reuse the opening-your-wallet pill", () => {
+    expect(selectSheetView({ ...submitted, dcBusy: true }).pill).toBe(
+      "Opening your wallet…",
+    );
+  });
+
+  it("applies to the unsigned form too", () => {
+    const view = selectSheetView({ ...submitted, transport: "dc_api" });
+    expect(view.phase).toBe("waiting");
+    expect(view.showWalletButton).toBe(false);
+    expect(view.pill).toBe("Confirming your payment…");
+  });
+
+  // Cancel stays: the money is not in flight yet — `settling` is where that
+  // becomes true, and this state is strictly before it.
+  it("still offers cancel, unlike settling", () => {
+    expect(selectSheetView(submitted).showCancel).toBe(true);
+  });
+
+  /**
+   * Ordering. `dcSubmitted` is never cleared, so every later state must
+   * outrank it — otherwise the sheet would report "Confirming your payment…"
+   * over a completed or declined payment forever.
+   */
+  it("is outranked by settling", () => {
+    const view = selectSheetView({ ...submitted, state: "settling" });
+    expect(view.phase).toBe("settling");
+    expect(view.pill).toBe("Contacting your bank…");
+  });
+
+  it("is outranked by a completed payment", () => {
+    const view = selectSheetView({ ...submitted, state: "completed" });
+    expect(view.phase).toBe("approved");
+    expect(view.headline).toBe("Payment approved");
+  });
+
+  it("is outranked by a failed payment", () => {
+    const view = selectSheetView({
+      ...submitted,
+      state: "failed",
+      failureReason: "insufficient_funds",
+    });
+    expect(view.phase).toBe("declined");
+    expect(view.primaryAction).toBe("retry");
+  });
+
+  // A relay that failed sets dcError, and that must win — otherwise the
+  // sticky flag hides the one view offering a way out.
+  it("is outranked by a dc error, which is the only way out", () => {
+    const view = selectSheetView({ ...submitted, dcError: "failed" });
+    expect(view.phase).toBe("declined");
+    expect(view.primaryAction).toBe("show-qr");
+  });
+
+  // The QR flow never reaches this state: nothing sets dcSubmitted without a
+  // DC API call. Pinned so a future refactor cannot leak it across.
+  it("has no effect on a request_uri session", () => {
+    const view = selectSheetView({ ...base, dcSubmitted: true });
+    expect(view.showQr).toBe(true);
+    expect(view.pill).toBe("Waiting for your wallet");
   });
 });
 
