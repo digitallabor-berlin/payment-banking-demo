@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="{{ site.lang | default: 'en' }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ page.title | default: site.title }}</title>
+    <meta
+      name="description"
+      content="{{ page.description | default: site.description }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ '/assets/css/style.css' | relative_url }}"
+    />
+  </head>
+  <body>
+    <header class="site-nav">
+      <div class="container site-nav__inner">
+        <a class="site-nav__mark" href="{{ '/' | relative_url }}">Jumpstart</a>
+        {%- comment -%} The section nav is in-page anchors, so it only belongs
+        on the page that has those sections. On any other page the same four
+        links would be four dead ends. {%- endcomment -%} {% if page.section_nav
+        %}
+        <nav aria-label="Sections">
+          <a href="#what">What this is</a>
+          <a href="#walkthrough">Walkthrough</a>
+          <a href="#credentials">Credentials</a>
+          <a href="#built-on">Built on</a>
+        </nav>
+        {% else %}
+        <nav aria-label="Sections">
+          <a href="{{ '/' | relative_url }}">Back to the walkthrough</a>
+        </nav>
+        {% endif %}
+      </div>
+    </header>
+
+    {{ content }}
+
+    <footer class="site-footer">
+      <div class="container">
+        <p class="site-footer__org">Digitallabor Berlin</p>
+        <p class="site-footer__fine">
+          Fira Sans and Fira Mono are used under the
+          <a href="{{ '/assets/fonts/OFL.txt' | relative_url }}"
+            >SIL Open Font License 1.1</a
+          >. This page loads no third-party resources and sets no cookies.
+        </p>
+        <p class="site-footer__legal">
+          <a href="{{ '/imprint/' | relative_url }}">Legal notice</a>
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>

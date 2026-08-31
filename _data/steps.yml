@@ -1,0 +1,110 @@
+# The six walkthrough steps. Copy lives here so a wording fix is a YAML edit
+# and never a markup edit.
+#
+# `shots` illustrates a step. Each entry is:
+#   src     — a served webp under assets/img/screenshots/, generated from the
+#             master in _src/img/ by _src/optimize.sh. Never point at a master.
+#   kind    — `phone` (1008x2244 capture) or `wide` (3024x1964 laptop capture).
+#             CSS reserves the right box per kind, so mixing aspect ratios
+#             within a kind would letterbox rather than distort.
+#   caption — visible under the image AND the only description a screen reader
+#             gets, because the img carries an empty alt: a caption plus an alt
+#             saying the same thing is announced twice.
+
+- n: 1
+  title: "Install the wallet"
+  body: >-
+    Download and install the elpaso wallet on an **Android** phone:
+    [elpaso-release.apk](https://github.com/digitallabor-berlin/elpaso/releases/download/latest/elpaso-release.apk).
+    You will need to allow installation from an unknown source. Everything
+    that follows happens between this wallet, the bank and the shop.
+
+- n: 2
+  title: "Log in to the bank"
+  body: >-
+    Open [Sparkasse Musterstadt](https://sparkasse-musterstadt.digitallabor.dev/)
+    and sign in as `anna` with the password `demo1234`. You land on a dashboard
+    with two headings — **Payments** and **Credentials** — which is where every
+    credential below is issued from.
+  shots:
+    - src: "/assets/img/screenshots/bank.webp"
+      kind: wide
+      caption: "Sparkasse Musterstadt, on a laptop"
+
+- n: 3
+  title: "Issue your credentials"
+  body: >-
+    Under **Payments** you will find the Sparkassen-Card and Wero; under
+    **Credentials**, the age verification and the Sparkassen Authenticator.
+    Issue all four — each takes one tap. Pick either handover route for any of
+    them; both are described above. Two of the four also offer an *Add to
+    Google Wallet* badge, which needs a **non-public beta** build of Google
+    Wallet — the other two offer a single wallet button. What each credential
+    actually contains is set out under [Credentials](#credentials).
+  shots:
+    - src: "/assets/img/screenshots/wallet_issuance_dcapi.webp"
+      kind: phone
+      caption: "Issuance over the Digital Credentials API"
+    - src: "/assets/img/screenshots/wallet_add_credential.webp"
+      kind: phone
+      caption: "Adding the credential in the wallet"
+    - src: "/assets/img/screenshots/google_wallet_age_payment_credentials.webp"
+      kind: phone
+      caption: "The age and payment credentials in Google Wallet"
+
+- n: 4
+  title: "Log in without a password"
+  body: >-
+    Sign out of the bank, then choose to log in with your wallet instead of a
+    password. The bank asks for the Sparkassen Authenticator and binds the
+    request to the current moment: the presentation must be signed over a
+    `login_datetime`, and the bank **requires that binding back**. A wallet that
+    ignored it could not log in — which is what stops a captured presentation
+    from being replayed later.
+
+
+    What the wallet puts on screen is the bank's wording, not the wallet's: the
+    bank sends a typed PaSO `transaction_data` entry, and the type is what tells
+    the wallet which shape of approval it is rendering. The relying party
+    describes what is being approved; the wallet presents it and signs over it.
+  shots:
+    - src: "/assets/img/screenshots/wallet_login_dcapi.webp"
+      kind: phone
+      caption: "Login over the Digital Credentials API"
+    - src: "/assets/img/screenshots/wallet_login_deeplink.webp"
+      kind: phone
+      caption: "The same login over a deep link"
+
+- n: 5
+  title: "Pay at Larder"
+  body: >-
+    Open [Larder](https://larder-shop.digitallabor.dev/), add a few items and
+    check out. The payment sheet asks your wallet for a payment credential —
+    the Sparkassen-Card or Wero, whichever you hold — with the **amount bound
+    into the request**, so approving in the wallet approves that exact sum.
+    Add a **Beer**, **Wine** or **Aperitif** and the shop additionally asks for
+    your age credential; the rest of the shelf does not.
+  shots:
+    - src: "/assets/img/screenshots/larder_store.webp"
+      kind: wide
+      caption: "Larder, on a laptop"
+    - src: "/assets/img/screenshots/payment_start.webp"
+      kind: phone
+      caption: "Starting the payment"
+    - src: "/assets/img/screenshots/payment_multi_wallet_selection.webp"
+      kind: phone
+      caption: "Choosing which wallet answers"
+    - src: "/assets/img/screenshots/payment_and_age_dc_api.webp"
+      kind: phone
+      caption: "Payment and age over the Digital Credentials API"
+    - src: "/assets/img/screenshots/wallet_payment_age_deeplink.webp"
+      kind: phone
+      caption: "The same request over a deep link"
+
+- n: 6
+  title: "See the result"
+  body: >-
+    The shop settles by debiting the bank over its API. Go back to the bank and
+    look under **Recent transactions** — your purchase is there, carrying the
+    PaSO proof package the shop collected: the signed request object and the
+    wallet's response, stored side by side.

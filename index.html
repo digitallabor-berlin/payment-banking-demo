@@ -1,0 +1,212 @@
+---
+layout: default
+title: "Jumpstart — an OpenID4VC wallet as a payment instrument"
+section_nav: true
+---
+
+<section class="hero">
+  <div class="container">
+    <p class="hero__badge">
+      A reference implementation of the
+      <a
+        href="https://aptitude-consortium.github.io/payments-and-sca-for-openid/latest"
+        >PaSO specifications</a
+      >
+    </p>
+    <h1>Use a digital wallet as a payment instrument.</h1>
+    <p class="hero__lede">
+      Issue payment credentials from a bank into your wallet, then spend them at
+      a shop — with the amount cryptographically bound to your approval.
+      Everything below runs against live deployments.
+    </p>
+    <p class="hero__actions">
+      <a
+        class="btn btn--primary"
+        href="https://github.com/digitallabor-berlin/elpaso/releases/download/latest/elpaso-release.apk"
+      >
+        Download the wallet
+      </a>
+      <a
+        class="btn btn--ghost"
+        href="https://sparkasse-musterstadt.digitallabor.dev/"
+      >
+        Open the bank
+      </a>
+    </p>
+  </div>
+</section>
+
+<aside class="demo-band">
+  <div class="container demo-band__inner">
+    <div>
+      <p class="eyebrow">Demo environment</p>
+      <p class="demo-band__text">
+        Fake customers, fake money, fake shop. Nothing here touches a real
+        account and no real payment is ever made.
+      </p>
+    </div>
+    <p class="demo-band__creds">
+      Sign in as <code>anna</code> / <code>demo1234</code>
+    </p>
+  </div>
+</aside>
+
+<main>
+  <section id="what" class="section">
+    <div class="container">
+      <h2>What this is</h2>
+      <p>
+        Two live applications showing a digital wallet that supports
+        <strong>OpenID4VC</strong> used as a <strong>payment instrument</strong>
+        rather than only as an identity document. A bank issues payment
+        credentials into your wallet; a shop asks for one at checkout and is
+        paid.
+      </p>
+      <p>
+        It is a reference implementation of the
+        <a
+          href="https://aptitude-consortium.github.io/payments-and-sca-for-openid/latest"
+          >Payments and SCA for OpenID (PaSO)</a
+        >
+        specifications, and it uses
+        <a href="https://github.com/digitallabor-berlin/foundry">foundry</a> as
+        its credential issuer and verifier.
+      </p>
+      <p>
+        The bank is
+        <a href="https://sparkasse-musterstadt.digitallabor.dev/"
+          >Sparkasse Musterstadt</a
+        >. The shop is
+        <a href="https://larder-shop.digitallabor.dev/">Larder</a>, a grocer.
+        Both are running right now, and the walkthrough below is meant to be
+        followed rather than read.
+      </p>
+    </div>
+  </section>
+
+  <section id="transports" class="section section--alt">
+    <div class="container">
+      <h2>Two ways the wallet is reached</h2>
+      <p class="section__lede">
+        Both work for <strong>issuance and verification</strong> alike — getting
+        a credential into the wallet, and proving one out of it.
+      </p>
+      <div class="routes">
+        <div class="route">
+          <h3>QR code or deep link</h3>
+          <p>
+            <strong>Two devices.</strong> The bank or the shop is open on a
+            laptop and shows a QR code; you scan it with the phone holding your
+            wallet. This always works, and it is the fallback whenever the other
+            route cannot be used.
+          </p>
+        </div>
+        <div class="route">
+          <h3>Digital Credentials API</h3>
+          <p>
+            <strong>One device.</strong> The browser hands the request straight
+            to a wallet on the same phone — no QR, no scanning. Needs Chrome on
+            Android. The request the wallet receives is signed by default.
+          </p>
+        </div>
+      </div>
+      <p class="note">
+        On Safari the wallet button reports that issuance is not supported and a
+        QR code appears instead — Safari can present a credential but cannot
+        receive one.
+      </p>
+    </div>
+  </section>
+  <section id="walkthrough" class="section">
+    <div class="container">
+      <h2>Walkthrough</h2>
+      <ol class="steps">
+        {% for step in site.data.steps %} {% include step.html step=step %} {%
+        endfor %}
+      </ol>
+    </div>
+  </section>
+
+  <section id="credentials" class="section section--alt">
+    <div class="container">
+      <h2>The four credentials</h2>
+      <p class="section__lede">
+        Two of them pay. One proves an age and nothing else. One proves you are
+        a customer and authorises transactions with your bank that require
+        strong customer authentication.
+      </p>
+      <p class="note">
+        The Sparkassen-Card and Wero appear here as
+        <strong
+          >worked examples of a card scheme and an account-to-account
+          scheme</strong
+        >, modelled for this demo. Nothing on this page describes what the real
+        products do, support or intend to support.
+      </p>
+      <div class="creds">
+        {% for credential in site.data.credentials %} {% include
+        credential-card.html credential=credential %} {% endfor %}
+      </div>
+    </div>
+  </section>
+  <section id="built-on" class="section">
+    <div class="container">
+      <h2>Built on</h2>
+      <ul class="stack">
+        <li class="stack__item">
+          <span class="stack__mark stack__mark--type" aria-hidden="true"
+            >PaSO</span
+          >
+          <div class="stack__text">
+            <a
+              href="https://aptitude-consortium.github.io/payments-and-sca-for-openid/latest"
+              >Payments and SCA for OpenID</a
+            >
+            <p>The specifications this demo implements.</p>
+          </div>
+        </li>
+        <li class="stack__item">
+          <img
+            class="stack__mark"
+            src="{{ '/assets/img/foundry-logo.webp' | relative_url }}"
+            alt=""
+            loading="lazy"
+            decoding="async"
+          />
+          <div class="stack__text">
+            <a href="https://github.com/digitallabor-berlin/foundry">foundry</a>
+            <p>The credential issuer and verifier behind both applications.</p>
+          </div>
+        </li>
+        <li class="stack__item">
+          <img
+            class="stack__mark"
+            src="{{ '/assets/img/elpaso-logo.webp' | relative_url }}"
+            alt=""
+            loading="lazy"
+            decoding="async"
+          />
+          <div class="stack__text">
+            <a href="https://github.com/digitallabor-berlin/elpaso">elpaso</a>
+            <p>The wallet you install in step one.</p>
+          </div>
+        </li>
+        <li class="stack__item">
+          <span class="stack__mark stack__mark--type" aria-hidden="true"
+            >EMV</span
+          >
+          <div class="stack__text">
+            <a
+              href="https://www.emvco.com/knowledge-hub/defining-an-emv-digital-payment-credential/"
+              >EMVCo Digital Payment Credential</a
+            >
+            <p>
+              EMVCo's draft proposal for carrying a payment card as a digital
+              credential. Reading here, not conformance anywhere.
+            </p>
+          </div>
+        </li>
+      </ul>
+    </div>
+  </section>
+</main>

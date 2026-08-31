@@ -1,0 +1,25 @@
+title: Jumpstart
+description: >-
+  Run the payment-banking demo end to end: install the wallet, issue the
+  credentials, log in without a password, and pay at the shop.
+
+url: "https://digitallabor-berlin.github.io"
+baseurl: "/payment-banking-demo"
+lang: en
+
+# No `theme:` and no `plugins:` on purpose. GitHub Pages' native build serves
+# this site as-is; adding either would break that and require a Gemfile.
+
+# The site shares this branch with the internal design doc and plan. This key
+# is the only thing keeping them off the public web root — check.sh asserts
+# the result rather than trusting the key to stay here.
+# _src holds the 6.2 MB image masters. Jekyll already skips underscore-prefixed
+# directories, but listing it makes the intent explicit rather than incidental,
+# and check.sh asserts the outcome either way.
+exclude:
+  - check.sh
+  - docs
+  - README.md
+  - _src
+  - .agents
+  - skills-lock.json
