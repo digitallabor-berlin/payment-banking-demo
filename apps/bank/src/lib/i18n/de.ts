@@ -85,6 +85,9 @@ export const de: Messages = {
     qrAlt: "QR-Code für die Limitänderung",
     waiting: "Warten auf Ihre Wallet…",
     preparing: "Wird vorbereitet…",
+    walletUnavailable:
+      "Ihre Wallet hat nicht geantwortet. Sie können stattdessen einen Code mit der Wallet-App auf Ihrem Telefon scannen.",
+    showQrCode: "QR-Code anzeigen",
     successTitle: "Limit geändert",
     successBody: (limit) =>
       `Ihr tägliches Überweisungslimit beträgt jetzt ${limit}.`,

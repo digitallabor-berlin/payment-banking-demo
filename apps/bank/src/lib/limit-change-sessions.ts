@@ -164,6 +164,21 @@ export async function startLimitChange(
     const minted = await client.createAdHocMetadata(
       buildLimitChangeAdHocMetadataRequest(),
     );
+    // CHECKED AT RUNTIME, not just typed. `FoundryClient.request` does
+    // `JSON.parse(text) as T` and throws only on a non-2xx or a non-JSON body,
+    // so a 200 carrying `{}`, a null, or a renamed field leaves this
+    // `undefined` with nothing raised. `JSON.stringify` would then DROP
+    // `metadata` from the entry silently, and foundry — measured — accepts an
+    // entry with no `metadata` at HTTP 200. The anti-goal would ship looking
+    // like success.
+    //
+    // The `metadataJwt: string` parameter is a compile-time claim that an `as`
+    // cast makes on an untyped wire body, which is the same trap AGENTS.md
+    // records about `as` over `.json()`.
+    if (typeof minted.jwt !== "string" || minted.jwt.length === 0) {
+      failLimitChange(db, sessionId, "metadata_unavailable");
+      return { ok: false, reason: "metadata_unavailable" };
+    }
     metadataJwt = minted.jwt;
   } catch {
     failLimitChange(db, sessionId, "metadata_unavailable");
@@ -318,11 +333,21 @@ export function getLimitChangeStatus(
  * Then four gates, in this order:
  *
  *   1. foundry reports the presentation verified;
- *   2. `transaction_data_binding` passed on the credential that answered the
+ *   2. `extractAuthSubject` yields a `sub` — a pure READ, which settles
+ *      nothing;
+ *   3. `transaction_data_binding` passed on the credential that answered the
  *      authenticator query;
- *   3. `extractAuthSubject` yields a `sub`;
- *   4. that `sub` resolves to an authenticator credential owned by
+ *   4. that `sub` RESOLVES to an authenticator credential owned by
  *      `started_by_user_id`.
+ *
+ * Note 2 and 3 in that order, which is not the order the design's prose lists
+ * them in and is the order `login-sessions.ts` documents as correct. Reading a
+ * claim out of a JSON blob is inert; the gate belongs before the claim is
+ * *used*, not before it is read. The distinction is only observable in the
+ * `failure_reason` a verdict gets when it is both unbound and carries a `sub`
+ * nothing matches — every gate still precedes the single `verified` write — but
+ * two tests pin it, because a maintainer "correcting" the code to match a
+ * numbered list would silently collapse two distinct wallet failures into one.
  *
  * **(4) IS THE GATE THIS FLOW ADDS OVER WALLET LOGIN, AND IT LIVES HERE RATHER
  * THAN IN APPLY.** Login resolves a `sub` to whoever owns that credential —
@@ -453,6 +478,15 @@ export async function refreshLimitChangeState(
   return done();
 }
 
+/**
+ * Thrown inside `applyLimitChange`'s transaction to roll it back when the
+ * account's limit moved between the snapshot read and the write.
+ *
+ * A throw rather than a returned value because that is how better-sqlite3
+ * rolls a transaction back; it is caught immediately below and never escapes.
+ */
+class StaleSnapshotError extends Error {}
+
 /** Terminal-with-a-reason. `expired` is a reason here, never a state. */
 function failLimitChange(db: Db, sessionId: string, reason: string): void {
   db.update(limitChangeSessions)
@@ -529,29 +563,88 @@ export function applyLimitChange(
     return { ok: false, reason: "limit_changed" };
   }
 
-  // A GUARDED WRITE, not a read-then-write. `.changes` is what decides whether
-  // THIS call won the race to consume the session; checking the state above
-  // and then updating unconditionally would let two concurrent applies both
-  // proceed, and the second would write a limit against a snapshot the first
-  // had already invalidated.
-  const consumed = db
-    .update(limitChangeSessions)
-    .set({ state: "applied" })
-    .where(
-      and(
-        eq(limitChangeSessions.id, input.sessionId),
-        eq(limitChangeSessions.state, "verified"),
-      ),
-    )
-    .run();
-  if (consumed.changes !== 1) return { ok: false, reason: "already_applied" };
+  // ONE TRANSACTION over both writes, as `processPayment` already does for the
+  // debit and its proof package. Without it, a throw between them (SQLITE_BUSY,
+  // a full disk) leaves the session `applied` with the limit UNWRITTEN — and
+  // the retry then answers 410, which the dialog shows as a generic failure.
+  // The holder would be told their change did not happen, correctly, and have
+  // no way to make it happen.
+  try {
+    return applyWithin(db, input.sessionId, row);
+  } catch (error) {
+    // The CAS below rolled the transaction back: another connection moved the
+    // limit between the read above and the write. Same answer as the
+    // pre-check, and the session is still claimable because the rollback
+    // un-consumed it.
+    if (error instanceof StaleSnapshotError) {
+      return { ok: false, reason: "limit_changed" };
+    }
+    throw error;
+  }
+}
 
-  db.update(accounts)
-    .set({ dailyLimitCents: row.newLimitCents })
-    .where(eq(accounts.id, row.accountId))
-    .run();
+/**
+ * `applyLimitChange`'s two writes, in one transaction.
+ *
+ * Separated only so the `StaleSnapshotError` catch above reads as a decision
+ * rather than as plumbing wrapped around twenty lines.
+ */
+function applyWithin(
+  db: Db,
+  sessionId: string,
+  row: LimitChangeSession,
+): ApplyLimitChangeResult {
+  return db.transaction((tx) => {
+    // A GUARDED WRITE, not a read-then-write. `.changes` is what decides
+    // whether THIS call won the race to consume the session; checking the
+    // state above and then updating unconditionally would let two concurrent
+    // applies both proceed, and the second would write a limit against a
+    // snapshot the first had already invalidated.
+    //
+    // Within one process better-sqlite3 is synchronous and nothing can
+    // interleave, so this guard only earns its keep across connections — which
+    // is exactly the deployment shape nobody checks before introducing.
+    const consumed = tx
+      .update(limitChangeSessions)
+      .set({ state: "applied" })
+      .where(
+        and(
+          eq(limitChangeSessions.id, sessionId),
+          eq(limitChangeSessions.state, "verified"),
+        ),
+      )
+      .run();
+    if (consumed.changes !== 1) {
+      return { ok: false, reason: "already_applied" } as ApplyLimitChangeResult;
+    }
 
-  return { ok: true, dailyLimitCents: row.newLimitCents };
+    // Compare-and-swap on the snapshot as well, so the stale-snapshot refusal
+    // above holds even if another connection moved the limit between that read
+    // and this write. `.changes` of 0 rolls the whole transaction back by
+    // throwing, leaving the session claimable rather than consumed-and-unapplied.
+    //
+    // UNTESTED, and honestly so: within one process better-sqlite3 is
+    // synchronous and nothing can interleave between the read above and this
+    // write, so this branch is unreachable from any test in this suite. It is
+    // defence for the deployment shape nobody checks before introducing, not
+    // for the one that exists.
+    const written = tx
+      .update(accounts)
+      .set({ dailyLimitCents: row.newLimitCents })
+      .where(
+        and(
+          eq(accounts.id, row.accountId),
+          eq(accounts.dailyLimitCents, row.oldLimitCents),
+        ),
+      )
+      .run();
+    if (written.changes !== 1) throw new StaleSnapshotError();
+
+    return {
+      ok: true,
+      dailyLimitCents: row.newLimitCents,
+    } as ApplyLimitChangeResult;
+  });
 }
 
 export type RelayLimitChangeResult =

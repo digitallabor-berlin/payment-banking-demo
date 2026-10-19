@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isLimitTerminal,
   limitFailureKey,
+  needsQrRecovery,
   selectLimitPhase,
 } from "./limit-dialog-state.js";
 
@@ -94,5 +95,59 @@ describe("limitFailureKey", () => {
     for (const reason of named) {
       expect(limitFailureKey(reason)).not.toBe("verificationFailed");
     }
+  });
+});
+describe("selectLimitPhase when the start itself failed", () => {
+  /**
+   * Found by the final review. `state === null` was consulted BEFORE
+   * `pollFailed`, so a failed start fell back to the chooser and rendered
+   * nothing at all — the holder pressed Continue, the button greyed out for a
+   * moment and came back, with no message.
+   *
+   * That is not a rare path: no local foundry declares `sparkassen_auth`, so
+   * locally it is every attempt. It is also exactly the case the design's
+   * anti-goal resolves with "an error message is better than this".
+   */
+  it("reports a failed start as an error rather than the chooser", () => {
+    expect(selectLimitPhase(null, false, true)).toBe("error");
+  });
+
+  it("still shows the chooser before anything has been attempted", () => {
+    expect(selectLimitPhase(null, false, false)).toBe("choose");
+  });
+
+  it("lets a successful apply outrank even a failed start", () => {
+    expect(selectLimitPhase(null, true, true)).toBe("success");
+  });
+});
+
+describe("needsQrRecovery", () => {
+  /**
+   * Found by the final review. `selectLoginAffordance` answers "qr" or
+   * "deep-link" once `dcError` is set, but BOTH of the dialog's branches for
+   * those require a `uri` — and a DC API session has none by construction
+   * (foundry inlines the request object and returns neither URI). So any
+   * wallet failure used to leave the dialog with no button, no message and no
+   * way out until the session expired five minutes later, at which point the
+   * holder read copy blaming time for what was a cancel.
+   *
+   * The commonest way to reach it is the commonest real-world mis-tap:
+   * dismissing Chrome's wallet picker.
+   */
+  it("offers recovery when a DC API session's wallet call failed", () => {
+    expect(needsQrRecovery("failed", null)).toBe(true);
+    expect(needsQrRecovery("unsupported", null)).toBe(true);
+  });
+
+  it("offers nothing while the wallet call is still in play", () => {
+    expect(needsQrRecovery(null, null)).toBe(false);
+  });
+
+  it("offers nothing once a URI exists to render", () => {
+    // The recovery creates a NEW request_uri session rather than re-rendering
+    // this one — a DC API session cannot become a QR. Once that session has
+    // landed, the ordinary qr/deep-link branches can draw it.
+    expect(needsQrRecovery("failed", "openid4vp://x")).toBe(false);
+    expect(needsQrRecovery("unsupported", "openid4vp://x")).toBe(false);
   });
 });

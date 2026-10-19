@@ -540,6 +540,36 @@ describe("limit_change_sessions", () => {
     ).toThrow();
   });
 
+  /**
+   * Found by the final review and measured before being fixed. `seed()` deletes
+   * users and accounts, this table has NOT NULL FKs to both, and `createDb`
+   * sets `foreign_keys = ON` — so one abandoned limit-change attempt used to
+   * make `pnpm seed` throw partway through, after it had already deleted every
+   * transaction, credential and card. Locally that is EVERY attempt, because no
+   * local foundry declares `sparkassen_auth`.
+   */
+  it("does not block a re-seed", () => {
+    db.insert(limitChangeSessions)
+      .values(values({ state: "failed", failureReason: "metadata_unavailable" }))
+      .run();
+
+    expect(() => seed(db)).not.toThrow();
+    expect(db.select().from(limitChangeSessions).all()).toHaveLength(0);
+  });
+
+  it("leaves the database whole when a re-seed is attempted", () => {
+    db.insert(limitChangeSessions).values(values()).run();
+    seed(db);
+
+    // The half-wiped state is what made the original defect destructive rather
+    // than merely noisy: seed() is not atomic, so a throw on `accounts` left
+    // cards and transactions already gone.
+    expect(db.select().from(users).all()).toHaveLength(2);
+    expect(db.select().from(accounts).all()).toHaveLength(2);
+    expect(db.select().from(cards).all()).toHaveLength(2);
+    expect(db.select().from(transactions).all()).toHaveLength(20);
+  });
+
   it("refuses an approved_by_user_id that names no user", () => {
     expect(() =>
       db

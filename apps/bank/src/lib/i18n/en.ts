@@ -81,6 +81,9 @@ export const en: Messages = {
     qrAlt: "QR code for the limit change request",
     waiting: "Waiting for your wallet…",
     preparing: "Preparing…",
+    walletUnavailable:
+      "Your wallet did not respond. You can scan a code with the wallet app on your phone instead.",
+    showQrCode: "Show QR code",
     successTitle: "Limit changed",
     successBody: (limit) => `Your daily transfer limit is now ${limit}.`,
     failedTitle: "Limit not changed",

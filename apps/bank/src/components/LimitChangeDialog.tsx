@@ -18,6 +18,7 @@ import { MESSAGES } from "@/lib/i18n/messages.js";
 import {
   isLimitTerminal,
   limitFailureKey,
+  needsQrRecovery,
   selectLimitPhase,
 } from "@/lib/limit-dialog-state.js";
 import {
@@ -82,7 +83,12 @@ export function LimitChangeDialog({
   const [session, setSession] = useState<LimitSession | null>(null);
   const [chosen, setChosen] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
-  const [startError, setStartError] = useState(false);
+  /**
+   * The `error` member of a non-2xx START, so a refused start says *why*
+   * rather than silently returning to the chooser. `selectLimitPhase` promotes
+   * `pollFailed` above `state === null` for the same reason.
+   */
+  const [startError, setStartError] = useState<string | undefined>(undefined);
   const [dcError, setDcError] = useState<LoginDcError>(null);
   const [applied, setApplied] = useState(false);
   /**
@@ -173,7 +179,7 @@ export function LimitChangeDialog({
   }, [session, value, applied, applyError, accountId, router]);
 
   const pollFailed =
-    startError ||
+    startError !== undefined ||
     applyError !== undefined ||
     (outcome !== null &&
       outcome.status !== "aborted" &&
@@ -185,16 +191,26 @@ export function LimitChangeDialog({
     pollFailed,
   );
   const affordance = selectLoginAffordance(dcSupported, dcError, isTouch);
-  const failureBody = t[limitFailureKey(applyError ?? value?.failureReason)];
+  const failureBody =
+    t[limitFailureKey(startError ?? applyError ?? value?.failureReason)];
+  const offerQrRecovery = needsQrRecovery(dcError, session?.uri ?? null);
 
   const presets = LIMIT_PRESETS_CENTS.filter((preset) =>
     isSelectablePreset(preset, dailyLimitCents),
   );
 
-  async function start() {
+  /**
+   * Opens a session for the chosen amount.
+   *
+   * `transport` is forced to `request_uri` by the QR recovery below. A DC API
+   * session cannot be re-rendered as a QR — foundry inlines its request object
+   * and returns no URI at all — so recovery means creating a NEW session, not
+   * drawing the existing one differently.
+   */
+  async function start(forceTransport?: "request_uri") {
     if (chosen === null) return;
     setStarting(true);
-    setStartError(false);
+    setStartError(undefined);
     try {
       const response = await fetch(
         `/api/accounts/${accountId}/limit-change`,
@@ -203,17 +219,34 @@ export function LimitChangeDialog({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             newLimitCents: chosen,
-            transport: selectTransport(dcSupported, dcApiForm),
+            transport:
+              forceTransport ?? selectTransport(dcSupported, dcApiForm),
           }),
         },
       );
       if (!response.ok) {
-        setStartError(true);
+        // `fetch` does not throw on a non-2xx. Carry foundry's reason through
+        // so `metadata_unavailable` and `invalid_limit` do not both read as
+        // nothing having happened.
+        const body = (await response.json().catch(() => null)) as {
+          error?: unknown;
+        } | null;
+        setStartError(
+          typeof body?.error === "string" ? body.error : "verification_failed",
+        );
         return;
       }
       setSession((await response.json()) as LimitSession);
+      // `dcError` is deliberately NOT cleared. The recovery session is
+      // cross-device and carries a URI, and `selectLoginAffordance` only
+      // answers "qr"/"deep-link" while `dcError` is set — clearing it sends
+      // the affordance straight back to the wallet button the holder just
+      // watched fail, which is what this did on its first attempt (caught in a
+      // browser, invisible to every test here). `needsQrRecovery` then goes
+      // false on its own, because the URI exists, so the recovery prompt hides
+      // itself without needing the flag reset.
     } catch {
-      setStartError(true);
+      setStartError("verification_failed");
     } finally {
       setStarting(false);
     }
@@ -296,7 +329,9 @@ export function LimitChangeDialog({
             <div className="mt-7 flex items-center gap-3">
               <button
                 type="button"
-                onClick={start}
+                // Wrapped, not passed directly: `start` now takes an optional
+                // transport, and React would hand it the MouseEvent.
+                onClick={() => start()}
                 disabled={chosen === null || starting}
                 className="btn btn-primary px-5 py-2.5 disabled:opacity-50"
               >
@@ -335,6 +370,28 @@ export function LimitChangeDialog({
                 <p className="mt-4 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
                   {t.confirmInApp}
                 </p>
+              </>
+            ) : null}
+
+            {/*
+              Without this the dialog loses its only button the moment the
+              wallet call fails — selectLoginAffordance answers qr/deep-link,
+              but both of those need a URI and a DC API session has none. The
+              holder would wait five minutes and then read `expired`.
+            */}
+            {offerQrRecovery ? (
+              <>
+                <p className="mt-6 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
+                  {t.walletUnavailable}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => start("request_uri")}
+                  disabled={starting}
+                  className="btn btn-primary mt-4 px-5 py-3 disabled:opacity-50"
+                >
+                  {t.showQrCode}
+                </button>
               </>
             ) : null}
 

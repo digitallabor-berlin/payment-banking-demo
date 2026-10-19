@@ -149,6 +149,13 @@ export interface Messages {
   waiting: string;
   /** While DC API detection is unresolved. NOT the QR fallback. */
   preparing: string;
+  /**
+   * Shown when the browser's wallet call failed or was dismissed. A DC API
+   * session carries no URI, so there is nothing to fall back to in place —
+   * `showQrCode` creates a NEW cross-device session instead.
+   */
+  walletUnavailable: string;
+  showQrCode: string;
   successTitle: string;
   /** Names the new amount, already formatted by the caller. */
   successBody: (limit: string) => string;

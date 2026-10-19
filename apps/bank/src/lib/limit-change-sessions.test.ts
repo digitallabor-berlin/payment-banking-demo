@@ -289,6 +289,39 @@ describe("startLimitChange", () => {
     expect(row?.foundryVerificationId).toBeNull();
   });
 
+  /**
+   * Found by the final review. `FoundryClient.request` does
+   * `JSON.parse(text) as T` and throws only on a non-2xx or non-JSON body, so a
+   * 200 carrying `{}` — a proxy, a renamed field, a future build — leaves
+   * `minted.jwt` undefined. `JSON.stringify` then DROPS `metadata` silently and
+   * the anti-goal entry goes out over the wire. The `metadataJwt: string`
+   * contract is a compile-time claim that an `as` cast makes for it, which is
+   * the exact lesson AGENTS.md already records about `as` over `.json()`.
+   *
+   * Measured 2026-10-19: foundry ACCEPTS an entry with `metadata` omitted, HTTP
+   * 200. So this ordering is the only enforcement that exists anywhere.
+   */
+  it.each([
+    ["an empty body", {}],
+    ["a null jwt", { jwt: null, exp: 1 }],
+    ["a renamed field", { token: "a.b.c", exp: 1 }],
+    ["an empty jwt", { jwt: "", exp: 1 }],
+  ])("creates NO verification request when the mint returns 200 with %s", async (
+    _label,
+    body,
+  ) => {
+    const captures: Capture[] = [];
+    const result = await startLimitChange(
+      db,
+      stubClient(captures, { mint: { status: 200, body }, verify: REQUEST_URI_OK }),
+      input,
+    );
+
+    expect(verifyCalls(captures)).toHaveLength(0);
+    expect(result).toEqual({ ok: false, reason: "metadata_unavailable" });
+    expect(onlyRow()?.state).toBe("failed");
+  });
+
   it("leaves the account's limit untouched when the mint fails", async () => {
     const captures: Capture[] = [];
     await startLimitChange(
@@ -657,17 +690,36 @@ describe("refreshLimitChangeState", () => {
   it("gates the binding before resolving the sub, not after", async () => {
     // An unbound presentation must never reach the point where a `sub` becomes
     // a customer: reading a claim out of a JSON blob is inert, turning it into
-    // an identity is the act. anna holds this credential, so the only thing
-    // that can produce a binding failure here is the ordering.
-    giveAuthenticator("user_anna", "sub-anna");
+    // an identity is the act.
+    //
+    // The `sub` here is deliberately one NO credential carries, so the two
+    // orderings give different answers: gate-then-resolve says
+    // transaction_data_binding_failed, resolve-then-gate says
+    // unknown_credential. The first version of this test used anna's own `sub`,
+    // which fails the binding check under BOTH orderings — it was green on
+    // arrival and pinned nothing. Found by the final review.
     const sessionId = await openSession();
     const result = await refreshLimitChangeState(
       db,
-      verdictClient(authVerdict("sub-anna", true, false)),
+      verdictClient(authVerdict("sub-nobody-holds", true, false)),
       { ...poll, sessionId },
     );
     if (!result.ok) throw new Error("expected ok");
-    expect(result.status.failureReason).not.toBe("unknown_credential");
+    expect(result.status.failureReason).toBe("transaction_data_binding_failed");
+  });
+
+  it("gates the binding before the OWNER check too", async () => {
+    // Same property one step further along: a stranger's unbound presentation
+    // must report the binding failure, not wrong_customer.
+    giveAuthenticator("user_ben", "sub-ben");
+    const sessionId = await openSession();
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("sub-ben", true, false)),
+      { ...poll, sessionId },
+    );
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.failureReason).toBe("transaction_data_binding_failed");
   });
 
   it("fails when the sub matches no credential", async () => {
@@ -856,13 +908,22 @@ describe("applyLimitChange", () => {
   });
 
   it("writes the limit exactly once", async () => {
+    // The replay happens with the account back AT THE SNAPSHOT, so the
+    // stale-snapshot gate cannot refuse it and only the `applied` guard can.
+    // The first version of this test left the account at 500_000, where the
+    // snapshot gate alone would have refused the replay even with the single-
+    // use guard deleted — it was green for the wrong reason. Found by the
+    // final review.
     const sessionId = await verifiedSession();
     applyLimitChange(db, { ...poll, sessionId });
-    // Move the account underneath. A second apply that re-wrote the limit
-    // would clobber this; one that is a true no-op leaves it alone.
-    setAccountLimit(500_000);
-    applyLimitChange(db, { ...poll, sessionId });
-    expect(accountLimit()).toBe(500_000);
+    expect(accountLimit()).toBe(200_000);
+
+    setAccountLimit(100_000);
+    expect(applyLimitChange(db, { ...poll, sessionId })).toEqual({
+      ok: false,
+      reason: "already_applied",
+    });
+    expect(accountLimit()).toBe(100_000);
   });
 
   /**

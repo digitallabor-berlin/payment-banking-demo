@@ -53,7 +53,7 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**1037 tests** (697 bank + 287 merchant + 16 foundry-client + 37 ui), measured
+**1050 tests** (710 bank + 287 merchant + 16 foundry-client + 37 ui), measured
 2026-10-19.
 
 That was **872** before the account-limit-change work — and for once this file
@@ -82,6 +82,20 @@ verification below. And one red run was a *fixture* bug rather than an
 implementation one: the test helper defaulted `now` to `1000` while the poll
 defaults to `Date.now()`, so eleven cases read `expired` instead of what they
 were about.
+
+The final **13** of those 165 came from the review's own fix pass, and they are
+the interesting ones: 2 proving `pnpm seed` survives a limit-change row, 4
+proving a 200 mint with no `jwt` still aborts, 4 proving a failed start says
+something, and 3 proving the QR recovery is offered. Two further tests in that
+pass added **zero** to the count and were the most valuable work in it — two
+existing assertions were *rewritten* because they were green for the wrong
+reason. `gates the binding before resolving the sub` used anna's own `sub`,
+which fails the binding check under **either** ordering, so it pinned nothing;
+it now uses a `sub` no credential carries, where the two orderings give
+different answers. `writes the limit exactly once` left the account at a value
+the stale-snapshot gate would refuse on its own, so it would have passed with
+the single-use guard deleted; it now replays with the account back at the
+snapshot. Both named a security property and tested neither.
 
 That was **861** before the `dcSubmitted` fix, which added 11, all in one
 `apps/merchant` file — a single new describe in `lib/sheet-state.test.ts`
@@ -500,6 +514,55 @@ them without reading the linked reasoning first.
   backfill — so a suppression check would hide the control from people who could
   use it and show it to people who cannot. The `unknownCredential` copy names
   the exact remedy and the authenticator tile is on the same page.
+
+- **A new table with an FK to `users` or `accounts` MUST be deleted in
+  `seed()`, or `pnpm seed` breaks the first time anything writes to it.**
+  `createDb` sets `foreign_keys = ON`, and `seed()` deletes both parents — so
+  `limit_change_sessions`, which has NOT NULL FKs to each, made the delete
+  sequence throw partway through. One abandoned limit-change attempt was
+  enough, and locally that is *every* attempt, because no local foundry
+  declares `sparkassen_auth`.
+
+  The damage was not the throw. `seed()` was not atomic, so it died having
+  already destroyed every transaction, credential and card: the documented
+  reset command left a dashboard with accounts and nothing else, and failed
+  identically forever after. It is now wrapped in `db.transaction`, which is
+  the real fix — the missing `delete` was only the first table to expose it,
+  and `transaction_proofs` and `login_sessions` were latent behind it.
+
+  Found by the final review, measured before being fixed, and it is exactly the
+  class of defect a green suite cannot see: nothing tested `seed()` twice.
+
+- **A 2xx is not a successful mint.** `FoundryClient.request` does
+  `JSON.parse(text) as T` and throws only on a non-2xx or a non-JSON body, so a
+  200 carrying `{}`, a null, or a renamed field leaves `minted.jwt` undefined
+  with nothing raised — and `JSON.stringify` then silently DROPS `metadata`
+  from the entry. Since foundry accepts an entry with no `metadata` (measured),
+  that is the anti-goal shipping as a 200. `startLimitChange` checks
+  `typeof minted.jwt === "string"` explicitly. The `metadataJwt: string`
+  parameter is a compile-time claim an `as` cast makes on an untyped wire body,
+  which is the same trap this file already records about `as` over `.json()`.
+
+- **A DC API session has no URI, so a wallet failure needs a NEW session rather
+  than a different rendering.** `selectLoginAffordance` answers `"qr"` or
+  `"deep-link"` as soon as `dcError` is set, but both of the dialog's branches
+  for those need a `uri` — which a DC API session never has. The dialog
+  therefore lost its only button and showed no message at all, until the
+  session expired five minutes later and the holder read copy blaming time for
+  a dismissed wallet picker. `needsQrRecovery` is the predicate; the button
+  POSTs a fresh `transport: "request_uri"` session.
+
+  **`dcError` must NOT be cleared when that session arrives.** Clearing it is
+  the obvious-looking thing and it sends the affordance straight back to the
+  wallet button the holder just watched fail — verified in a browser, where the
+  QR count went 0 → 0 instead of 0 → 1. Leaving it set routes the new session
+  to the QR branch, and `needsQrRecovery` goes false on its own because the URI
+  now exists. Nothing in the suite can see any of this: `.tsx` is matched by no
+  vitest project here.
+
+  Note `WalletLoginDialog` still has the identical gap. It was not touched —
+  fixing it is a separate change to a separate flow — so a wallet failure
+  during *login* still strands that dialog.
 
 - **`daily_limit_cents` gates nothing.** There is no transfer feature in this
   demo to enforce it against. The number is displayed and changed, and that is
