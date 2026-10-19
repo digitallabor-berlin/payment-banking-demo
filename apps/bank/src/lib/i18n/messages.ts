@@ -109,6 +109,73 @@ export interface Messages {
   type: string;
   available: string;
  };
+ /**
+  * The daily transfer limit row and its change dialog.
+  *
+  * NONE OF THIS IS THE WALLET'S COPY. The consent screen's strings — the claim
+  * names, the title, both action labels and the security hint — live in the
+  * ad-hoc metadata JWT (`limit-transaction-data.ts`), are sent in both locales
+  * at once, and are chosen by the WALLET from its own locale priority list.
+  * Two places hold user-facing strings about limit changes and they answer to
+  * different authorities: do not try to unify them. Their locale TAGS differ
+  * too — `en` / `de` here, `en-US` / `de-DE` there — and neither is derived
+  * from the other.
+  *
+  * The amounts are not here either. They are cents in `limit-presets.ts`,
+  * formatted at render through `formatEuroCents`, so this catalog never holds
+  * a number that a server would have to parse back out.
+  *
+  * The four failure strings are keyed by `limitFailureKey`'s output, so a new
+  * key there is a compile error here rather than a dialog that renders
+  * nothing.
+  */
+ limits: {
+  /** The row's caption in the account panel. */
+  dailyTransfer: string;
+  change: string;
+  dialogTitle: string;
+  /** Sets the expectation before the wallet opens. */
+  dialogLead: string;
+  currentLimit: string;
+  newLimit: string;
+  continue: string;
+  cancel: string;
+  close: string;
+  approveTitle: string;
+  confirmInApp: string;
+  openInWallet: string;
+  scanCode: string;
+  qrAlt: string;
+  waiting: string;
+  /** While DC API detection is unresolved. NOT the QR fallback. */
+  preparing: string;
+  successTitle: string;
+  /** Names the new amount, already formatted by the caller. */
+  successBody: (limit: string) => string;
+  failedTitle: string;
+  /** failure_reason `expired` */
+  expired: string;
+  /**
+   * failure_reason `unknown_credential` — a real, correctly-signed
+   * credential this bank cannot match to a customer. Commonest cause is one
+   * issued before the subject was persisted, so this names the remedy.
+   */
+  unknownCredential: string;
+  /**
+   * apply reason `limit_changed` — the account's limit moved while this
+   * approval was in flight, so what the holder signed over is no longer the
+   * transition that would happen. Reached through the apply response's
+   * `error`, never through the session's `failure_reason`.
+   */
+  limitChanged: string;
+  /**
+   * Everything else, including `wrong_customer` and `metadata_unavailable`.
+   * Deliberately generic: `wrong_customer` spelled out would tell whoever
+   * holds the phone that their presentation was valid but for somebody
+   * else's account.
+   */
+  verificationFailed: string;
+ };
  credential: {
   ageTitle: string;
  };

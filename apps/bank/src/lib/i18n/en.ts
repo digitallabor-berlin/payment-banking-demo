@@ -63,6 +63,35 @@ export const en: Messages = {
     type: "Current account",
     available: "Available balance",
   },
+  limits: {
+    dailyTransfer: "Daily transfer limit",
+    change: "Change",
+    dialogTitle: "Change your daily transfer limit",
+    dialogLead:
+      "Pick a new limit. You will confirm the change in your wallet before it takes effect.",
+    currentLimit: "Current limit",
+    newLimit: "New limit",
+    continue: "Continue",
+    cancel: "Cancel",
+    close: "Close",
+    approveTitle: "Confirm in your wallet",
+    confirmInApp: "Confirm the change in your wallet app.",
+    openInWallet: "Open in wallet",
+    scanCode: "Scan this code with the wallet app on your phone.",
+    qrAlt: "QR code for the limit change request",
+    waiting: "Waiting for your wallet…",
+    preparing: "Preparing…",
+    successTitle: "Limit changed",
+    successBody: (limit) => `Your daily transfer limit is now ${limit}.`,
+    failedTitle: "Limit not changed",
+    expired: "The request expired. Please try again.",
+    unknownCredential:
+      "This credential is valid, but we cannot match it to a customer. Add the Sparkassen Authenticator to your wallet again from your overview, then try once more.",
+    limitChanged:
+      "Your limit changed while we were waiting for your wallet, so this approval no longer matches. Please start again.",
+    verificationFailed:
+      "Your wallet's response could not be verified. Your limit is unchanged.",
+  },
   credential: {
     ageTitle: "Age verification",
   },
