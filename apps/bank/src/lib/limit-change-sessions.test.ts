@@ -5,9 +5,15 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FoundryClient } from "@demo/foundry-client";
 import { createDb, type Db } from "../db/index.js";
-import { accounts, limitChangeSessions } from "../db/schema.js";
+import { accounts, credentials, limitChangeSessions } from "../db/schema.js";
 import { seed } from "../db/seed.js";
-import { startLimitChange } from "./limit-change-sessions.js";
+import { SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID } from "./credential-types.js";
+import {
+  LIMIT_CHANGE_SESSION_TTL_MS,
+  getLimitChangeStatus,
+  refreshLimitChangeState,
+  startLimitChange,
+} from "./limit-change-sessions.js";
 
 let dir: string;
 let db: Db;
@@ -381,5 +387,402 @@ describe("startLimitChange", () => {
     if (!result.ok) throw new Error("expected ok");
     expect(result.session.sessionId).toMatch(/^limit_[0-9a-f-]{36}$/);
     expect(rowOf(result.session.sessionId)).toBeDefined();
+  });
+});
+/**
+ * A verdict shaped like the one foundry serves for the `sparkassen_auth` named
+ * query. `bound: false` models a wallet that ignored the `transaction_data`
+ * entry — the case the binding gate exists for.
+ */
+function authVerdict(sub: unknown, verified = true, bound = true) {
+  return {
+    id: "v_limit_1",
+    state: verified ? "verified" : "failed",
+    created_at: 0,
+    result: {
+      verified,
+      checks: [],
+      credentials: [
+        {
+          query_id: "sparkassen_auth",
+          format: "dc+sd-jwt",
+          claims: { sub },
+          checks: bound
+            ? [{ check: "transaction_data_binding", passed: true }]
+            : [],
+        },
+      ],
+    },
+  };
+}
+
+/** Counts polls as well as answering them, so "no traffic" is provable. */
+function verdictClient(
+  verdict: unknown,
+  calls: string[] = [],
+  status = 200,
+): FoundryClient {
+  const fetchImpl = (async (input: string | URL | Request) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes("/admin/verification/requests/")) {
+      return new Response(JSON.stringify(verdict), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const body = url.includes("/admin/paso/ad-hoc-metadata")
+      ? MINT_OK.body
+      : REQUEST_URI_OK.body;
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+
+  return new FoundryClient({
+    adminUrl: "http://f:9000",
+    adminKey: "k",
+    fetchImpl,
+  });
+}
+
+/**
+ * Opens a real pending session for `user_anna` / `acc_anna`.
+ *
+ * `now` defaults to the real clock because `refreshLimitChangeState`'s own
+ * `now` does: a fixed epoch here would put every session past
+ * `LIMIT_CHANGE_SESSION_TTL_MS` before the first poll, and every case below
+ * would read `expired` instead of what it is about. The expiry case passes a
+ * matched pair explicitly.
+ */
+async function openSession(now = Date.now()): Promise<string> {
+  const result = await startLimitChange(
+    db,
+    stubClient([], { mint: MINT_OK, verify: REQUEST_URI_OK }),
+    input,
+    now,
+  );
+  if (!result.ok) throw new Error(`expected ok, got ${result.reason}`);
+  return result.session.sessionId;
+}
+
+/** Issues an authenticator credential row carrying `sub`, owned by `userId`. */
+function giveAuthenticator(userId: string, sub: string): void {
+  db.insert(credentials)
+    .values({
+      id: `cred_${sub}`,
+      userId,
+      cardId: null,
+      credentialTypeId: SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID,
+      credentialId: sub,
+      state: "active",
+      createdAt: 1,
+    })
+    .run();
+}
+
+const poll = { userId: "user_anna", accountId: "acc_anna" };
+
+function accountLimit(id = "acc_anna"): number | undefined {
+  return db.select().from(accounts).where(eq(accounts.id, id)).get()
+    ?.dailyLimitCents;
+}
+
+describe("refreshLimitChangeState scoping", () => {
+  /** Review Focus 4 — the id is guessable and the flow writes to an account. */
+  it("answers not_found for another user's session", async () => {
+    const sessionId = await openSession();
+    const calls: string[] = [];
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("s"), calls),
+      { userId: "user_ben", accountId: "acc_anna", sessionId },
+    );
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("answers not_found for the right session under the wrong account", async () => {
+    const sessionId = await openSession();
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("s")),
+      { ...poll, accountId: "acc_ben", sessionId },
+    );
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("answers not_found for a nonexistent session", async () => {
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("s")),
+      { ...poll, sessionId: "limit_nope" },
+    );
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("getLimitChangeStatus is scoped the same three ways", async () => {
+    const sessionId = await openSession();
+    expect(getLimitChangeStatus(db, "user_anna", "acc_anna", sessionId)).toEqual(
+      { state: "pending", newLimitCents: 200_000 },
+    );
+    expect(
+      getLimitChangeStatus(db, "user_ben", "acc_anna", sessionId),
+    ).toBeNull();
+    expect(
+      getLimitChangeStatus(db, "user_anna", "acc_ben", sessionId),
+    ).toBeNull();
+    expect(
+      getLimitChangeStatus(db, "user_anna", "acc_anna", "limit_nope"),
+    ).toBeNull();
+  });
+});
+
+describe("refreshLimitChangeState", () => {
+  it("stops polling on a terminal state", async () => {
+    const sessionId = await openSession();
+    db.update(limitChangeSessions)
+      .set({ state: "failed", failureReason: "expired" })
+      .where(eq(limitChangeSessions.id, sessionId))
+      .run();
+
+    const calls: string[] = [];
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("s"), calls),
+      { ...poll, sessionId },
+    );
+    expect(result).toMatchObject({ ok: true, status: { state: "failed" } });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("stops polling once applied", async () => {
+    const sessionId = await openSession();
+    db.update(limitChangeSessions)
+      .set({ state: "applied" })
+      .where(eq(limitChangeSessions.id, sessionId))
+      .run();
+
+    const calls: string[] = [];
+    await refreshLimitChangeState(db, verdictClient(authVerdict("s"), calls), {
+      ...poll,
+      sessionId,
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("fails an expired session without calling foundry", async () => {
+    const sessionId = await openSession(1000);
+    const calls: string[] = [];
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("s"), calls),
+      { ...poll, sessionId },
+      1000 + LIMIT_CHANGE_SESSION_TTL_MS + 1,
+    );
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.state).toBe("failed");
+    expect(result.status.failureReason).toBe("expired");
+    // An abandoned tab must stop costing admin-API traffic the moment its
+    // window closes.
+    expect(calls).toHaveLength(0);
+  });
+
+  it("stays pending when foundry has no verdict yet", async () => {
+    const sessionId = await openSession();
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient({ id: "v_limit_1", state: "pending", created_at: 0 }),
+      { ...poll, sessionId },
+    );
+    expect(result).toMatchObject({ ok: true, status: { state: "pending" } });
+  });
+
+  it("stays pending when foundry is unreachable", async () => {
+    const sessionId = await openSession();
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("s"), [], 503),
+      { ...poll, sessionId },
+    );
+    // Transient. Only the client's consecutive-failure counter gives up.
+    expect(result).toMatchObject({ ok: true, status: { state: "pending" } });
+  });
+
+  it("fails on an unverified verdict", async () => {
+    const sessionId = await openSession();
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("s", false)),
+      { ...poll, sessionId },
+    );
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.failureReason).toBe("verification_failed");
+  });
+
+  it("fails when no authenticator credential answered", async () => {
+    const sessionId = await openSession();
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient({
+        id: "v_limit_1",
+        state: "verified",
+        created_at: 0,
+        result: { verified: true, checks: [], credentials: [] },
+      }),
+      { ...poll, sessionId },
+    );
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.failureReason).toBe("verification_failed");
+  });
+
+  it("fails when the wallet did not sign over transaction_data", async () => {
+    giveAuthenticator("user_anna", "sub-anna");
+    const sessionId = await openSession();
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("sub-anna", true, false)),
+      { ...poll, sessionId },
+    );
+    if (!result.ok) throw new Error("expected ok");
+    // Its own reason, so an operator can tell "the wallet does not honour
+    // transaction_data" from every other bad presentation. The holder sees the
+    // generic copy either way.
+    expect(result.status.failureReason).toBe("transaction_data_binding_failed");
+  });
+
+  it("gates the binding before resolving the sub, not after", async () => {
+    // An unbound presentation must never reach the point where a `sub` becomes
+    // a customer: reading a claim out of a JSON blob is inert, turning it into
+    // an identity is the act. anna holds this credential, so the only thing
+    // that can produce a binding failure here is the ordering.
+    giveAuthenticator("user_anna", "sub-anna");
+    const sessionId = await openSession();
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("sub-anna", true, false)),
+      { ...poll, sessionId },
+    );
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.failureReason).not.toBe("unknown_credential");
+  });
+
+  it("fails when the sub matches no credential", async () => {
+    const sessionId = await openSession();
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("sub-unknown")),
+      { ...poll, sessionId },
+    );
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.failureReason).toBe("unknown_credential");
+  });
+
+  /**
+   * The gate this flow adds over wallet login.
+   *
+   * Login resolves a `sub` to WHOEVER owns that authenticator — nobody is
+   * signed in yet, so that is the point. Here somebody is, and without this
+   * check any valid Sparkassen Authenticator presentation could approve any
+   * logged-in customer's limit change.
+   */
+  it("fails when the approving authenticator belongs to someone else", async () => {
+    giveAuthenticator("user_ben", "sub-ben");
+    const sessionId = await openSession();
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("sub-ben")),
+      { ...poll, sessionId },
+    );
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.failureReason).toBe("wrong_customer");
+    const row = rowOf(sessionId);
+    expect(row?.state).toBe("failed");
+    expect(row?.approvedByUserId).toBeNull();
+  });
+
+  it("distinguishes a stranger's credential from an unregistered one", async () => {
+    // Two different operator problems: one is a credential this bank issued to
+    // the wrong person for this session, the other is a credential it cannot
+    // match at all (commonest cause: issued before the sub was persisted).
+    giveAuthenticator("user_ben", "sub-ben");
+    const strangerSession = await openSession();
+    await refreshLimitChangeState(db, verdictClient(authVerdict("sub-ben")), {
+      ...poll,
+      sessionId: strangerSession,
+    });
+    const unknownSession = await openSession();
+    await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("sub-nobody")),
+      { ...poll, sessionId: unknownSession },
+    );
+
+    expect(rowOf(strangerSession)?.failureReason).toBe("wrong_customer");
+    expect(rowOf(unknownSession)?.failureReason).toBe("unknown_credential");
+  });
+
+  it("verifies and records who approved", async () => {
+    giveAuthenticator("user_anna", "sub-anna");
+    const sessionId = await openSession();
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("sub-anna")),
+      { ...poll, sessionId },
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      status: { state: "verified", newLimitCents: 200_000 },
+    });
+    const row = rowOf(sessionId);
+    expect(row?.state).toBe("verified");
+    expect(row?.approvedByUserId).toBe("user_anna");
+  });
+
+  it("writes no limit of its own", async () => {
+    giveAuthenticator("user_anna", "sub-anna");
+    const sessionId = await openSession();
+    await refreshLimitChangeState(db, verdictClient(authVerdict("sub-anna")), {
+      ...poll,
+      sessionId,
+    });
+    // The poll drives state only. Writing the limit is apply's job, on a POST.
+    expect(accountLimit()).toBe(100_000);
+  });
+
+  it("does not re-poll a verified session", async () => {
+    giveAuthenticator("user_anna", "sub-anna");
+    const sessionId = await openSession();
+    await refreshLimitChangeState(db, verdictClient(authVerdict("sub-anna")), {
+      ...poll,
+      sessionId,
+    });
+
+    const calls: string[] = [];
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("sub-anna"), calls),
+      { ...poll, sessionId },
+    );
+    expect(result).toMatchObject({ ok: true, status: { state: "verified" } });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("fails a session foundry never gave a verification id", async () => {
+    const sessionId = await openSession();
+    db.update(limitChangeSessions)
+      .set({ foundryVerificationId: null })
+      .where(eq(limitChangeSessions.id, sessionId))
+      .run();
+
+    const result = await refreshLimitChangeState(
+      db,
+      verdictClient(authVerdict("s")),
+      { ...poll, sessionId },
+    );
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.failureReason).toBe("verification_failed");
   });
 });

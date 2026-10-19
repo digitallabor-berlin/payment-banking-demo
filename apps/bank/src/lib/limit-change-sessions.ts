@@ -4,10 +4,16 @@ import type { FoundryClient } from "@demo/foundry-client";
 import type { Db } from "../db/index.js";
 import {
   accounts,
+  credentials,
   limitChangeSessions,
+  type LimitChangeSession,
   type LimitChangeSessionState,
 } from "../db/schema.js";
-import { SPARKASSEN_AUTH_NAMED_QUERY } from "./credential-types.js";
+import {
+  SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID,
+  SPARKASSEN_AUTH_NAMED_QUERY,
+} from "./credential-types.js";
+import { extractAuthSubject, passedLoginBinding } from "./login-checks.js";
 import { isValidNewLimit } from "./limit-presets.js";
 import {
   buildLimitChangeAdHocMetadataRequest,
@@ -231,6 +237,220 @@ export async function startLimitChange(
     failLimitChange(db, sessionId, "foundry_unavailable");
     return { ok: false, reason: "foundry_unavailable" };
   }
+}
+
+export interface LimitChangeStatusDto {
+  state: LimitChangeSessionState;
+  failureReason?: string;
+  /**
+   * Carried on the status rather than fetched separately, because the dialog's
+   * success copy names the amount and the only thing it still holds by then is
+   * a session id.
+   */
+  newLimitCents: number;
+}
+
+export type RefreshLimitChangeResult =
+  | { ok: true; status: LimitChangeStatusDto }
+  | { ok: false; reason: "not_found" };
+
+/**
+ * Reads one session, scoped THREE ways: by id, by the account it names, and by
+ * the customer who started it.
+ *
+ * All three absences answer the same `null`, and the route turns that into one
+ * 404. A session id is guessable and this flow writes to an account, so
+ * "this is not yours" must not be distinguishable from "this does not exist" —
+ * the same rule `getTransactionProof` follows.
+ *
+ * Scoped HERE rather than in the route, for the same reason: a route is one
+ * caller of many, and the check belongs with the read.
+ *
+ * No foundry traffic. `refreshLimitChangeState` does that.
+ */
+function loadSession(
+  db: Db,
+  userId: string,
+  accountId: string,
+  sessionId: string,
+): LimitChangeSession | undefined {
+  return db
+    .select()
+    .from(limitChangeSessions)
+    .where(
+      and(
+        eq(limitChangeSessions.id, sessionId),
+        eq(limitChangeSessions.startedByUserId, userId),
+        eq(limitChangeSessions.accountId, accountId),
+      ),
+    )
+    .get();
+}
+
+/** A plain lookup. No foundry traffic — `refreshLimitChangeState` does that. */
+export function getLimitChangeStatus(
+  db: Db,
+  userId: string,
+  accountId: string,
+  sessionId: string,
+): LimitChangeStatusDto | null {
+  const row = loadSession(db, userId, accountId, sessionId);
+  if (!row) return null;
+
+  return {
+    state: row.state,
+    failureReason: row.failureReason ?? undefined,
+    newLimitCents: row.newLimitCents,
+  };
+}
+
+/**
+ * Polled by the browser roughly every 2s. Drives `pending → verified | failed`
+ * and NOTHING else — writing the limit is `applyLimitChange`'s job, on a POST,
+ * because a GET with a side effect gets fired twice by a prefetch or a
+ * double-poll and here the side effect writes to an account.
+ *
+ * Order mirrors `refreshLoginSessionState` exactly: terminal (no traffic), then
+ * expiry (no traffic), then already-verified (no traffic), and only then
+ * foundry. An abandoned tab stops generating admin-API calls the moment its
+ * window closes.
+ *
+ * Then four gates, in this order:
+ *
+ *   1. foundry reports the presentation verified;
+ *   2. `transaction_data_binding` passed on the credential that answered the
+ *      authenticator query;
+ *   3. `extractAuthSubject` yields a `sub`;
+ *   4. that `sub` resolves to an authenticator credential owned by
+ *      `started_by_user_id`.
+ *
+ * **(4) IS THE GATE THIS FLOW ADDS OVER WALLET LOGIN, AND IT LIVES HERE RATHER
+ * THAN IN APPLY.** Login resolves a `sub` to whoever owns that credential —
+ * that is the point, nobody is signed in yet. Here somebody is, and without
+ * this check any valid Sparkassen Authenticator presentation could approve any
+ * logged-in customer's limit change. Putting it in apply instead would need a
+ * second `getVerificationStatus` call after the session had gone terminal and,
+ * worse, would let a stranger's valid presentation drive the session to
+ * `verified` — showing the holder a success-shaped dialog that apply then
+ * rejects. `verified` must mean *the right person approved*, or the state name
+ * is a lie.
+ *
+ * (2) sits between READING the `sub` and RESOLVING it, deliberately, for the
+ * reason `login-sessions.ts` documents: reading a claim out of a JSON blob is
+ * inert; turning it into a customer is the act, and an unbound presentation
+ * must never reach that point.
+ */
+export async function refreshLimitChangeState(
+  db: Db,
+  foundry: FoundryClient,
+  input: { userId: string; accountId: string; sessionId: string },
+  now: number = Date.now(),
+): Promise<RefreshLimitChangeResult> {
+  const row = loadSession(db, input.userId, input.accountId, input.sessionId);
+  if (!row) return { ok: false, reason: "not_found" };
+
+  const done = (): RefreshLimitChangeResult => ({
+    ok: true,
+    status: getLimitChangeStatus(
+      db,
+      input.userId,
+      input.accountId,
+      input.sessionId,
+    )!,
+  });
+
+  // Terminal: nothing left to learn.
+  if (row.state === "applied" || row.state === "failed") return done();
+
+  // Expiry BEFORE the foundry call, so an abandoned tab stops costing traffic.
+  // `expired` is a failure reason, not a fifth state.
+  if (now - row.createdAt > LIMIT_CHANGE_SESSION_TTL_MS) {
+    failLimitChange(db, input.sessionId, "expired");
+    return done();
+  }
+
+  // Approved and waiting for the apply. Re-polling foundry would tell us
+  // nothing we have not already recorded.
+  if (row.state === "verified") return done();
+
+  if (!row.foundryVerificationId) {
+    failLimitChange(db, input.sessionId, "verification_failed");
+    return done();
+  }
+
+  let verdict;
+  try {
+    verdict = await foundry.getVerificationStatus(row.foundryVerificationId);
+  } catch {
+    // Transient. Stay pending so a later poll can recover; only the client's
+    // consecutive-failure counter decides when to give up.
+    return done();
+  }
+
+  if (verdict.state === "pending") return done();
+
+  if (verdict.state === "failed" || verdict.result?.verified !== true) {
+    failLimitChange(db, input.sessionId, "verification_failed");
+    return done();
+  }
+
+  const subject = extractAuthSubject(verdict.result.credentials);
+  if (!subject) {
+    // Either no credential answered the authenticator query, or the one that
+    // did disclosed no usable `sub`. Both are the wallet's answer being wrong,
+    // not the customer being unknown.
+    failLimitChange(db, input.sessionId, "verification_failed");
+    return done();
+  }
+
+  if (!passedLoginBinding(verdict.result.credentials)) {
+    // A wallet that ignored the `transaction_data` entry yields a verdict that
+    // is `verified: true` and still worthless: nothing in it is tied to THESE
+    // two amounts, so it attests an approval of a transition the holder may
+    // never have seen. Its own reason, so an operator can tell this apart from
+    // every other bad presentation; the holder sees the generic copy.
+    failLimitChange(db, input.sessionId, "transaction_data_binding_failed");
+    return done();
+  }
+
+  const credential = db
+    .select()
+    .from(credentials)
+    .where(
+      and(
+        eq(credentials.credentialId, subject),
+        eq(credentials.credentialTypeId, SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID),
+      ),
+    )
+    .get();
+
+  if (!credential) {
+    // A real, correctly-signed credential this bank cannot match to a customer.
+    // Expected for anything issued before the sub was persisted; there is no
+    // backfill, and the copy for this reason names the remedy.
+    failLimitChange(db, input.sessionId, "unknown_credential");
+    return done();
+  }
+
+  if (credential.userId !== row.startedByUserId) {
+    // A stranger's valid authenticator. Its OWN reason, distinct from
+    // `unknown_credential`, so an operator can tell a credential issued to the
+    // wrong person from one this bank cannot place at all. The holder sees the
+    // same generic copy for both — neither is something they can act on.
+    failLimitChange(db, input.sessionId, "wrong_customer");
+    return done();
+  }
+
+  // Deliberately NOT gated on `credential.state === "active"`, for the reason
+  // wallet login is not: foundry's verdict is the authority that the credential
+  // is real and holder-bound; this row only answers WHOSE. Nothing here ever
+  // clears an `offered` row.
+  db.update(limitChangeSessions)
+    .set({ state: "verified", approvedByUserId: credential.userId })
+    .where(eq(limitChangeSessions.id, input.sessionId))
+    .run();
+
+  return done();
 }
 
 /** Terminal-with-a-reason. `expired` is a reason here, never a state. */
