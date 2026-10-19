@@ -277,13 +277,33 @@ Decisions:
   holder an English screen. PaSO §5.4 notes that a wallet MAY treat an entry
   with no compatible locale as incompatible, which makes this a correctness
   issue rather than a nicety.
-- **The locale tags are `en-US` and `de-DE`, not bare `en` and `de`.** An
-  earlier draft used the bare tags. Every locale tag the deployed foundry
-  publishes — in both the OID4VCI metadata and the `sparkassen_auth` credential
-  metadata's existing login entry — is region-tagged, so matching that is the
-  conservative choice: a wallet doing RFC4647 lookup degrades `de-DE` to `de`
-  but is not obliged to promote `de` to `de-DE`. Note these are *not* this
-  repo's own `Locale` values (`en` / `de`) and must not be derived from them.
+- **~~The locale tags are `en-US` and `de-DE`, not bare `en` and `de`.~~
+  SUPERSEDED 2026-10-19 — this was WRONG and it broke every real presentation.**
+
+  The original reasoning: every locale tag the deployed foundry publishes is
+  region-tagged, so matching that is the conservative choice, because "a wallet
+  doing RFC4647 lookup degrades `de-DE` to `de` but is not obliged to promote
+  `de` to `de-DE`".
+
+  That second clause is a correct description of RFC4647 §3.4 and the exact
+  opposite of the conclusion to draw from it. Lookup only ever **shortens** the
+  user's language range, so a region-tagged entry is strictly *less* reachable
+  than a bare one: `en-US` can be matched only by a user whose range is already
+  `en-US`, while `en` is matched by `en`, `en-US`, `en-GB`, `en-IE` and every
+  other variant. "Conservative" pointed the other way the whole time.
+
+  Measured against El Paso's `LocaleSelector`: with `en-US`/`de-DE` only, phones
+  set to `en-GB`, `de-AT`, `de-CH`, bare `en` or `fr-FR` all selected **no**
+  locale. PaSO View §4 is all-or-nothing, so that refuses the entire
+  presentation rather than degrading one label — the holder sees *"Transaction
+  can't be displayed"* and the limit change cannot proceed at all. That wallet's
+  own last-resort fallback is bare `en`, which also missed.
+
+  **The tags are now bare `en` and `de`.** The deployed foundry accepts them
+  (HTTP 200) and echoes them unchanged. They coincide with this repo's own
+  `Locale` values, which is a coincidence and not a derivation: the rule is
+  "the shortest tag that names the language", which is what makes an entry
+  reachable from the most ranges.
 - Every label is well inside §3.3's limits (60 for a claim display name, 100 for
   `transaction_title`, 40 for either action label). foundry enforces these at
   mint time and returns 400, so an over-long German string is a build-time
@@ -512,11 +532,13 @@ lives in the ad-hoc metadata JWT, is sent in both locales at once, and is chosen
 by the wallet. Two places hold user-facing strings about limit changes and they
 answer to different authorities; do not try to unify them.
 
-The locale *tags* differ too, and that is deliberate rather than an oversight:
-this app's `Locale` is `en` / `de`, while the JWT uses `en-US` / `de-DE` to
-match what the deployed foundry already publishes. Do not derive one from the
-other — a `Locale`-keyed lookup feeding the JWT would send a single locale,
-which is the one thing §5.4 warns can make the entry incompatible.
+The locale *tags* happen to coincide with this app's `Locale` values (`en` /
+`de`) since the correction above, but they are still not derived from them: the
+JWT always carries BOTH languages regardless of the UI locale, because a
+`Locale`-keyed lookup feeding the JWT would send a single locale, which is the
+one thing §5.4 warns can make the entry incompatible. The rule for the tags
+themselves is "the shortest tag that names the language" — see the superseded
+region-tag decision above for what happens otherwise.
 
 ## Operator dependencies: none. Measured 2026-10-19
 

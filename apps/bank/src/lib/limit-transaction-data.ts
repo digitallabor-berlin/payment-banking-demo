@@ -122,10 +122,34 @@ export function limitAmountString(cents: number): string {
  * and §5.4 lets a wallet treat an entry with no compatible locale as
  * incompatible. That makes it correctness, not polish.
  *
- * The tags are `en-US` / `de-DE`, NOT this app's own `Locale` values `en` /
- * `de`, and must never be derived from them. Every tag the deployed foundry
- * publishes is region-tagged, and a wallet doing RFC4647 lookup degrades
- * `de-DE` to `de` but is not obliged to promote `de` to `de-DE`.
+ * **THE TAGS ARE BARE `en` AND `de`, AND THEY MUST STAY THE SHORTEST TAG THAT
+ * NAMES THE LANGUAGE.** This was `en-US` / `de-DE` and it broke every real
+ * presentation with "Transaction can't be displayed" (reported 2026-10-19).
+ *
+ * The reasoning that produced the region tags was: every tag the deployed
+ * foundry publishes is region-tagged, and "a wallet doing RFC4647 lookup
+ * degrades `de-DE` to `de` but is not obliged to promote `de` to `de-DE`".
+ * The second half is a correct description of Lookup and the exact opposite of
+ * the conclusion to draw from it. RFC4647 §3.4 only ever SHORTENS the user's
+ * range, so a region tag is strictly *less* reachable than a bare one:
+ * `en-US` can be matched only by a user whose range is `en-US`, while `en` is
+ * matched by `en`, `en-US`, `en-GB`, `en-IE` and every other variant.
+ *
+ * Measured against El Paso's own `LocaleSelector`: with `en-US`/`de-DE` only,
+ * phones set to `en-GB`, `de-AT`, `de-CH`, bare `en` or `fr-FR` all failed to
+ * select any locale — and because PaSO View §4 is all-or-nothing, failing one
+ * array refuses the ENTIRE presentation rather than degrading one label. That
+ * wallet's last-resort fallback is bare `en`, which also missed.
+ *
+ * A locale-less default entry would be the other half of the belt-and-braces
+ * (PaSO View §4 defines the entry with no `locale` as the default), and is
+ * deliberately NOT added here: with bare tags present, every wallet whose
+ * fallback is English already resolves, and a second English string in each
+ * array is a second thing to keep in step. Add it if a wallet is found whose
+ * fallback is neither `en` nor the device language.
+ *
+ * Verified against the deployed foundry: bare tags mint at HTTP 200 and are
+ * echoed back unchanged.
  */
 export function buildLimitChangeAdHocMetadataRequest(): AdHocMetadataRequest {
   const metadata: LimitChangeAdHocMetadata = {
@@ -135,8 +159,8 @@ export function buildLimitChangeAdHocMetadataRequest(): AdHocMetadataRequest {
         mandatory: true,
         value_type: "iso_currency_amount",
         display: [
-          { locale: "en-US", name: "Current Account Limit" },
-          { locale: "de-DE", name: "Aktuelles Kontolimit" },
+          { locale: "en", name: "Current Account Limit" },
+          { locale: "de", name: "Aktuelles Kontolimit" },
         ],
       },
       {
@@ -144,19 +168,19 @@ export function buildLimitChangeAdHocMetadataRequest(): AdHocMetadataRequest {
         mandatory: true,
         value_type: "iso_currency_amount",
         display: [
-          { locale: "en-US", name: "New Account Limit" },
-          { locale: "de-DE", name: "Neues Kontolimit" },
+          { locale: "en", name: "New Account Limit" },
+          { locale: "de", name: "Neues Kontolimit" },
         ],
       },
     ],
     ui_labels: {
       transaction_title: [
-        { locale: "en-US", value: "Change your account limit" },
-        { locale: "de-DE", value: "Kontolimit ändern" },
+        { locale: "en", value: "Change your account limit" },
+        { locale: "de", value: "Kontolimit ändern" },
       ],
       affirmative_action_label: [
-        { locale: "en-US", value: "Confirm Limit Change" },
-        { locale: "de-DE", value: "Limitänderung bestätigen" },
+        { locale: "en", value: "Confirm Limit Change" },
+        { locale: "de", value: "Limitänderung bestätigen" },
       ],
       /**
        * Accepted and echoed by the deployed foundry — measured, not inferred.
@@ -165,8 +189,8 @@ export function buildLimitChangeAdHocMetadataRequest(): AdHocMetadataRequest {
        * is not measured.
        */
       denial_action_label: [
-        { locale: "en-US", value: "Cancel" },
-        { locale: "de-DE", value: "Abbrechen" },
+        { locale: "en", value: "Cancel" },
+        { locale: "de", value: "Abbrechen" },
       ],
       /**
        * Present deliberately, and this is the one label that says something
@@ -179,11 +203,11 @@ export function buildLimitChangeAdHocMetadataRequest(): AdHocMetadataRequest {
        */
       security_hint: [
         {
-          locale: "en-US",
+          locale: "en",
           value: "Sparkasse will never ask you to raise your limit.",
         },
         {
-          locale: "de-DE",
+          locale: "de",
           value: "Die Sparkasse wird Sie niemals bitten, Ihr Limit zu erhöhen.",
         },
       ],

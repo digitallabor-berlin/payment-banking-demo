@@ -151,7 +151,7 @@ describe("buildLimitChangeAdHocMetadataRequest", () => {
     );
   });
 
-  it("describes both claims with region-tagged locales and a currency value type", () => {
+  it("describes both claims with bare language tags and a currency value type", () => {
     const metadata = metadataOf();
     expect(metadata.claims.map((claim) => claim.path.join("."))).toEqual([
       "old_limit",
@@ -160,19 +160,19 @@ describe("buildLimitChangeAdHocMetadataRequest", () => {
     for (const claim of metadata.claims) {
       expect(claim.mandatory).toBe(true);
       expect(claim.value_type).toBe("iso_currency_amount");
-      expect(claim.display.map((d) => d.locale)).toEqual(["en-US", "de-DE"]);
+      expect(claim.display.map((d) => d.locale)).toEqual(["en", "de"]);
     }
   });
 
   it("uses the consent screen's claim names verbatim", () => {
     const metadata = metadataOf();
     expect(metadata.claims[0]?.display).toEqual([
-      { locale: "en-US", name: "Current Account Limit" },
-      { locale: "de-DE", name: "Aktuelles Kontolimit" },
+      { locale: "en", name: "Current Account Limit" },
+      { locale: "de", name: "Aktuelles Kontolimit" },
     ]);
     expect(metadata.claims[1]?.display).toEqual([
-      { locale: "en-US", name: "New Account Limit" },
-      { locale: "de-DE", name: "Neues Kontolimit" },
+      { locale: "en", name: "New Account Limit" },
+      { locale: "de", name: "Neues Kontolimit" },
     ]);
   });
 
@@ -187,8 +187,8 @@ describe("buildLimitChangeAdHocMetadataRequest", () => {
 
   it("uses the exact affirmative action the design fixes", () => {
     expect(metadataOf().ui_labels.affirmative_action_label).toEqual([
-      { locale: "en-US", value: "Confirm Limit Change" },
-      { locale: "de-DE", value: "Limitänderung bestätigen" },
+      { locale: "en", value: "Confirm Limit Change" },
+      { locale: "de", value: "Limitänderung bestätigen" },
     ]);
   });
 
@@ -199,11 +199,11 @@ describe("buildLimitChangeAdHocMetadataRequest", () => {
     // must survive whatever is driving the browser.
     expect(metadataOf().ui_labels.security_hint).toEqual([
       {
-        locale: "en-US",
+        locale: "en",
         value: "Sparkasse will never ask you to raise your limit.",
       },
       {
-        locale: "de-DE",
+        locale: "de",
         value: "Die Sparkasse wird Sie niemals bitten, Ihr Limit zu erhöhen.",
       },
     ]);
@@ -214,15 +214,38 @@ describe("buildLimitChangeAdHocMetadataRequest", () => {
     // observe. PaSO 5.4 lets a wallet treat an entry with no compatible locale
     // as incompatible, so this is correctness rather than polish.
     for (const label of Object.values(metadataOf().ui_labels)) {
-      expect(label.map((entry) => entry.locale)).toEqual(["en-US", "de-DE"]);
+      expect(label.map((entry) => entry.locale)).toEqual(["en", "de"]);
     }
   });
 
-  it("never uses this app's own locale tags", () => {
-    // This app's Locale is `en` / `de`; the JWT's tags are `en-US` / `de-DE`,
-    // matching every tag the deployed foundry publishes. A wallet doing
-    // RFC4647 lookup degrades de-DE to de but need not promote de to de-DE.
-    expect(JSON.stringify(metadataOf())).not.toMatch(/"locale":"(en|de)"/);
+  /**
+   * REPORTED BUG, 2026-10-19: a real wallet refused every limit change with
+   * "Transaction can't be displayed".
+   *
+   * This test previously asserted the OPPOSITE — that no bare `en`/`de` tag
+   * appears — on the reasoning that region tags matched what foundry
+   * publishes and that "a wallet doing RFC4647 lookup degrades de-DE to de but
+   * need not promote de to de-DE". That sentence is a correct description of
+   * the mechanism and the wrong conclusion drawn from it: because Lookup only
+   * ever SHORTENS the user's range, a region tag is strictly *less* reachable
+   * than a bare one. `en-US` is reachable only from `en-US`; `en` is reachable
+   * from `en`, `en-US`, `en-GB`, `en-IE` and every other variant.
+   *
+   * Measured against El Paso's own `LocaleSelector` (PaSO View §4 / RFC4647
+   * §3.4): with `en-US`/`de-DE` only, phones set to `en-GB`, `de-AT`, `de-CH`,
+   * bare `en` or `fr-FR` ALL failed to select a locale, and the wallet refused
+   * the whole presentation. Its last-resort fallback is bare `en`, which also
+   * missed. With bare tags, every one of those resolves — and a `de-AT` phone
+   * still reads German rather than falling through to English.
+   */
+  it("uses the shortest language tags, so RFC4647 lookup can reach them", () => {
+    const serialised = JSON.stringify(metadataOf());
+    // Every locale in the document is a bare language subtag.
+    const tags = [...serialised.matchAll(/"locale":"([^"]+)"/g)].map((m) => m[1]);
+    expect(tags.length).toBeGreaterThan(0);
+    expect([...new Set(tags)].sort()).toEqual(["de", "en"]);
+    // A region-tagged entry would be unreachable from a shorter range.
+    expect(serialised).not.toMatch(/"locale":"[a-z]{2}-/);
   });
 
   it("keeps every label inside PaSO 3.3's grapheme limits", () => {

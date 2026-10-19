@@ -473,20 +473,43 @@ them without reading the linked reasoning first.
   moves the account underneath between two applies, because asserting the final
   value alone cannot distinguish a no-op from a re-write.
 
-- **The amount string is `toFixed`, never `Intl`, and the locale tags are
-  `en-US` / `de-DE`.** `limitAmountString` produces `"EUR 1000.00"` — PaSO's own
+- **The amount string is `toFixed`, never `Intl`.** `limitAmountString`
+  produces `"EUR 1000.00"` — PaSO's own
   §A.4 shape — and it is hashed byte-for-byte into `transaction_data_hashes`, so
   a German separator baked in here would make the signed artefact depend on the
   browser's locale. The wallet localises it instead, via `iso_currency_amount`.
 
-  The JWT's locale tags are **not** this app's `Locale` (`en` / `de`) and must
-  never be derived from them: every tag the deployed foundry publishes is
-  region-tagged, and a wallet doing RFC4647 lookup degrades `de-DE` to `de` but
-  is not obliged to promote `de` to `de-DE`. Both locales are always sent,
-  regardless of the bank's current UI locale — the wallet picks by its own
-  priority list, which the bank cannot observe, and §5.4 lets it treat an entry
-  with no compatible locale as incompatible. A test asserts no bare tag appears
-  anywhere in the minted metadata.
+  **The locale tags must be the SHORTEST tag that names the language — bare
+  `en` and `de`, never `en-US`/`de-DE`.** This file asserted the opposite until
+  2026-10-19 and the assertion broke every real presentation.
+
+  The wrong reasoning was: foundry publishes region-tagged locales everywhere,
+  so match it, since "a wallet doing RFC4647 lookup degrades `de-DE` to `de`
+  but is not obliged to promote `de` to `de-DE`". That clause is a correct
+  description of RFC4647 §3.4 and the opposite of the conclusion to draw from
+  it: Lookup only ever **shortens** the user's range, so a region tag is
+  strictly *less* reachable. `en-US` is reachable only from `en-US`; `en` is
+  reachable from `en`, `en-US`, `en-GB`, `en-IE` and every other variant.
+
+  Measured against El Paso's own `LocaleSelector`: with `en-US`/`de-DE`, phones
+  on `en-GB`, `de-AT`, `de-CH`, bare `en` or `fr-FR` selected **no** locale.
+  PaSO View §4 is all-or-nothing, so that refuses the WHOLE presentation rather
+  than degrading one label, and the holder reads *"Transaction can't be
+  displayed"*. The wallet's last-resort fallback is bare `en`, which missed too.
+  A bare-tag document resolves for every one of those, and a `de-AT` phone still
+  reads German rather than falling through to English.
+
+  Both locales are always sent regardless of the bank's current UI locale — the
+  wallet picks by its own priority list, which the bank cannot observe, and
+  §5.4 lets it treat an entry with no compatible locale as incompatible. The
+  tags now coincide with this app's `Locale` values, which is a coincidence and
+  not a derivation.
+
+  A locale-less default entry (PaSO View §4 defines the entry with no `locale`
+  as the default) is the other half of the belt-and-braces and is deliberately
+  NOT sent: with bare tags, every wallet whose fallback is English already
+  resolves. Add it if a wallet turns up whose fallback is neither `en` nor the
+  device language.
 
 - **Two places hold limit-change copy and they answer to different
   authorities.** `MESSAGES[locale].limits` is the bank's own dialog; the consent
@@ -1886,7 +1909,29 @@ the *local* server and answers 401 with the deployed key, which reads as a bad
 secret. Forward to a distinct port (e.g. `9100:9000`) rather than trusting the
 address.
 
-**No wallet has answered a limit-change presentation either**, as of
+**A real wallet HAS now answered — and refused.** El Paso (`../elpaso`) was
+pointed at a real limit change on 2026-10-19 and reported *"Transaction can't
+be displayed"* on every attempt. That is `RefusalCause.Unrenderable`, not the
+signature path, so PaSO §5.3 **passed**: the wallet accepted the ad-hoc JWT,
+verified it against the credential, and then could not select a locale. Root
+cause was the bank's region-tagged locales — see the locale bullet above.
+
+So three things are no longer hypothetical. A real wallet accepts the ad-hoc
+metadata JWT this bank mints; it trusts `CN=Foundry Root CA
+(foundry.digitallabor.dev)`; and §5.3's signature and credential-binding checks
+pass against a real credential. The two §5.3 steps this file listed as
+unanswerable are answered, for this wallet.
+
+What is STILL unobserved: whether a wallet renders the consent screen the way
+the design's opening mockup draws it, and whether `iso_currency_amount` is
+implemented or falls back to the raw `"EUR 2000.00"`. Both need a human with
+the device to look at the screen — the fix above was verified against El Paso's
+`LocaleSelector` directly, not by watching it render. Nothing has driven
+`refreshLimitChangeState` past `pending` against a real verdict either, so the
+ownership gate and `applyLimitChange` remain unexercised outside the suite.
+
+**The original claim follows, as the record of what was believed before a
+wallet was tried.** No wallet had answered a limit-change presentation as of
 2026-10-19, and this flow adds PaSO §5.3 on top of every unknown wallet login
 already has. What IS verified, against the deployed foundry and in real headless
 Chrome, is everything up to the handover:
@@ -1904,8 +1949,9 @@ Chrome, is everything up to the handover:
   `transaction_data_type` equal to the entry's own `type`, `exp - iat` = 900,
   and an echoed metadata block carrying both claims with
   `iso_currency_amount`, all four `ui_labels` keys including
-  `denial_action_label` and `security_hint`, and both `en-US`/`de-DE` pairs
-  intact;
+  `denial_action_label` and `security_hint`, and both `en`/`de` pairs intact
+  (re-measured 2026-10-19 after the locale fix; this read `en-US`/`de-DE`
+  before it, which is the shape that broke the wallet);
 - a deliberately bogus `credential_ids` is **HTTP 400** `transaction_data[0]
   references credential id '<id>' which is not present in the DCQL query`, so
   the 200 above is evidence rather than serde dropping a field;
