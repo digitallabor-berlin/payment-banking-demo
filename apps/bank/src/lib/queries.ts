@@ -21,6 +21,13 @@ export interface AccountDto {
  iban: string;
  currency: string;
  balanceCents: number;
+ /**
+  * The daily transfer limit, in integer cents. Rendered through
+  * `formatEuroCents` like every other amount — the panel never formats it
+  * itself, and the limit-change presets are cents rather than copy for the
+  * same reason.
+  */
+ dailyLimitCents: number;
 }
 
 /** "none" also covers a card whose only credential attempt failed. */
@@ -122,6 +129,7 @@ export function listAccounts(db: Db, userId: string): AccountDto[] {
    iban: accounts.iban,
    currency: accounts.currency,
    balanceCents: accounts.balanceCents,
+   dailyLimitCents: accounts.dailyLimitCents,
   })
   .from(accounts)
   .where(eq(accounts.userId, userId))

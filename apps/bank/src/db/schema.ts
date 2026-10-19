@@ -20,6 +20,23 @@ export const accounts = sqliteTable("accounts", {
  iban: text("iban").notNull(),
  currency: text("currency").notNull().default("EUR"),
  balanceCents: integer("balance_cents").notNull(),
+ /**
+  * The daily transfer limit, in integer cents like every other money column.
+  *
+  * This GATES NOTHING. There is no transfer feature in this demo to enforce it
+  * against; the number is displayed and changed, and that is the whole of its
+  * behaviour. The feature being demonstrated is the wallet approving a
+  * non-payment decision about an account — the limit is what that decision is
+  * *about*, not a control.
+  *
+  * Per-account rather than per-customer, by requirement: a customer with two
+  * accounts sees two rows and changes them independently.
+  *
+  * Unlike this repo's `credential_type_id` and `transport` widenings — which
+  * were TypeScript claims about untyped text columns and needed no SQL — this
+  * is a REAL migration. The DEFAULT backfills every existing row to 1.000,00 €.
+  */
+ dailyLimitCents: integer("daily_limit_cents").notNull().default(100_000),
 });
 
 export const cards = sqliteTable("cards", {

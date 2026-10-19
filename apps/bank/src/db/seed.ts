@@ -143,6 +143,11 @@ export function seed(db: Db, now = Date.now()): void {
         iban: fixture.iban,
         currency: "EUR",
         balanceCents: fixture.balanceCents,
+        // Stated explicitly rather than left to the column DEFAULT, so the
+        // demo's starting number is visible in the fixtures rather than only
+        // in the schema. 1.000,00 € — the preset the dialog then refuses to
+        // offer, because it is the one already in force.
+        dailyLimitCents: 100_000,
       })
       .run();
 

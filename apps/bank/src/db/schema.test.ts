@@ -28,6 +28,56 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+describe("accounts.daily_limit_cents", () => {
+  beforeEach(() => {
+    db.insert(users)
+      .values({
+        id: "user_x",
+        username: "x",
+        passwordHash: "h",
+        displayName: "X",
+      })
+      .run();
+  });
+
+  it("defaults daily_limit_cents to 100000", () => {
+    db.insert(accounts)
+      .values({
+        id: "acc_x",
+        userId: "user_x",
+        iban: "DE02120300000000202051",
+        balanceCents: 1_000,
+      })
+      .run();
+
+    const row = db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, "acc_x"))
+      .get();
+    expect(row?.dailyLimitCents).toBe(100_000);
+  });
+
+  it("stores an explicit daily_limit_cents", () => {
+    db.insert(accounts)
+      .values({
+        id: "acc_y",
+        userId: "user_x",
+        iban: "DE02120300000000202051",
+        balanceCents: 1_000,
+        dailyLimitCents: 200_000,
+      })
+      .run();
+
+    const row = db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, "acc_y"))
+      .get();
+    expect(row?.dailyLimitCents).toBe(200_000);
+  });
+});
+
 describe("seed", () => {
   it("creates exactly two users with accounts and cards", () => {
     seed(db);
