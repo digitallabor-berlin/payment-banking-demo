@@ -43,6 +43,13 @@
       "when": 1792428066011,
       "tag": "0005_steep_sprite",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792428173641,
+      "tag": "0006_goofy_pretty_boy",
+      "breakpoints": true
     }
   ]
 }

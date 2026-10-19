@@ -241,6 +241,91 @@ export const loginSessions = sqliteTable("login_sessions", {
  createdAt: integer("created_at").notNull(),
 });
 
+/**
+ * One row per attempt to change an account's daily transfer limit.
+ *
+ * Modelled directly on `login_sessions` — same three transports, same soft
+ * fallback, same "write the row before calling foundry" discipline — and
+ * deliberately NOT generalised into a shared "approval session" abstraction
+ * with it. There are two instances, which is one too few.
+ *
+ * THE TWO USER COLUMNS ARE DELIBERATELY TWO. `login_sessions.user_id` is
+ * nullable and means the *resolved* identity, because at login time nobody is
+ * signed in yet. Here somebody is, so there are two distinct facts:
+ * `started_by_user_id` is the session cookie's owner at request time, and
+ * `approved_by_user_id` is whoever the wallet's disclosed `sub` resolved to.
+ * One column serving both would silently conflate them — and the gate that
+ * makes this flow safe is precisely that they must be equal.
+ *
+ * `verified` and `applied` are separate states for the reason `login_sessions`
+ * splits `verified` from `consumed`: collapsing them makes "the wallet
+ * approved" indistinguishable from "the limit was written", and that
+ * distinction is the whole of what makes the session single-use.
+ *
+ * There is no `expired` state. Expiry is a FAILURE REASON computed from
+ * `created_at` at read time, because nothing in this project runs a background
+ * sweep — a fifth state would be one nothing could ever write.
+ */
+export const limitChangeSessions = sqliteTable("limit_change_sessions", {
+ /** `limit_<uuid>`. */
+ id: text("id").primaryKey(),
+ /** Who opened the dialog. From the session cookie, at request time. */
+ startedByUserId: text("started_by_user_id")
+  .notNull()
+  .references(() => users.id),
+ /**
+  * Who the wallet's `sub` resolved to. NULL until the poll's gate runs, and
+  * only ever written equal to `started_by_user_id` — the gate refuses
+  * anything else with `wrong_customer`. Recorded rather than merely checked so
+  * the row says who approved rather than only that someone did.
+  */
+ approvedByUserId: text("approved_by_user_id").references(() => users.id),
+ accountId: text("account_id")
+  .notNull()
+  .references(() => accounts.id),
+ /**
+  * The account's limit at request time — a SNAPSHOT, not a re-read.
+  *
+  * It is half of what the holder signed over. If the account's limit moved
+  * underneath (two dialogs open on one account), applying `new_limit_cents`
+  * anyway would honour an approval of a transition that is no longer the one
+  * happening, so `applyLimitChange` refuses when the account no longer agrees.
+  */
+ oldLimitCents: integer("old_limit_cents").notNull(),
+ /** The other half of what the holder signed over. */
+ newLimitCents: integer("new_limit_cents").notNull(),
+ foundryVerificationId: text("foundry_verification_id"),
+ state: text("state", {
+  enum: ["pending", "verified", "applied", "failed"],
+ })
+  .notNull()
+  .default("pending"),
+ failureReason: text("failure_reason"),
+ openid4vpUri: text("openid4vp_uri"),
+ requestUri: text("request_uri"),
+ /**
+  * The transport foundry ACTUALLY served, not the one asked for — see
+  * `startLimitChange`'s soft fallback. On a `failed` row it holds what was
+  * attempted, so the row names the transport that failed.
+  */
+ transport: text("transport", {
+  enum: ["request_uri", "dc_api", "dc_api_signed"],
+ })
+  .notNull()
+  .default("request_uri"),
+ /** foundry's inline request object, verbatim. NULL under `request_uri`. */
+ dcApiRequestJson: text("dc_api_request_json"),
+ /**
+  * foundry's DC API exchange protocol identifier, stored verbatim and replayed
+  * verbatim. Persisted rather than derived from `transport` for the reason
+  * `login_sessions` documents: a signed request object sent under the unsigned
+  * identifier fails inside the wallet with no server-side trace.
+  */
+ dcApiProtocol: text("dc_api_protocol"),
+ /** The TTL is computed from this at read time. */
+ createdAt: integer("created_at").notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Card = typeof cards.$inferSelect;
@@ -250,3 +335,5 @@ export type TransactionProof = typeof transactionProofs.$inferSelect;
 export type CredentialState = Credential["state"];
 export type LoginSession = typeof loginSessions.$inferSelect;
 export type LoginSessionState = LoginSession["state"];
+export type LimitChangeSession = typeof limitChangeSessions.$inferSelect;
+export type LimitChangeSessionState = LimitChangeSession["state"];

@@ -9,6 +9,7 @@ import {
   accounts,
   cards,
   credentials,
+  limitChangeSessions,
   loginSessions,
   transactionProofs,
   transactions,
@@ -437,6 +438,113 @@ describe("login_sessions", () => {
       db
         .insert(loginSessions)
         .values({ id: "login_3", userId: "nobody", createdAt: 3000 })
+        .run(),
+    ).toThrow();
+  });
+});
+
+describe("limit_change_sessions", () => {
+  /** A complete row minus whatever the case under test is about. */
+  function values(over: Record<string, unknown> = {}) {
+    return {
+      id: "limit_1",
+      startedByUserId: "user_anna",
+      accountId: "acc_anna",
+      oldLimitCents: 100_000,
+      newLimitCents: 200_000,
+      createdAt: 1000,
+      ...over,
+    };
+  }
+
+  beforeEach(() => {
+    seed(db);
+  });
+
+  it("defaults a limit-change session to pending over request_uri", () => {
+    db.insert(limitChangeSessions).values(values()).run();
+
+    const row = db.select().from(limitChangeSessions).get();
+    expect(row?.state).toBe("pending");
+    expect(row?.transport).toBe("request_uri");
+    expect(row?.foundryVerificationId).toBeNull();
+    expect(row?.failureReason).toBeNull();
+    // NULL, not the empty string: a request_uri session performs no DC API
+    // invocation, so there is no protocol identifier to report.
+    expect(row?.dcApiProtocol).toBeNull();
+  });
+
+  // The same claim `login_sessions` makes about its own column: the `enum:` is
+  // a TypeScript claim about plain `text`, and this is what proves SQLite
+  // really accepts all three.
+  it("accepts the three transports", () => {
+    const transports = ["request_uri", "dc_api", "dc_api_signed"] as const;
+    for (const [index, transport] of transports.entries()) {
+      db.insert(limitChangeSessions)
+        .values(values({ id: `limit_t${index}`, transport }))
+        .run();
+    }
+
+    expect(
+      db
+        .select()
+        .from(limitChangeSessions)
+        .all()
+        .map((row) => row.transport),
+    ).toEqual([...transports]);
+  });
+
+  it("leaves approved_by_user_id null until the gate resolves it", () => {
+    db.insert(limitChangeSessions).values(values()).run();
+
+    const row = db.select().from(limitChangeSessions).get();
+    // Two user columns, not one. `started_by_user_id` is the cookie's owner at
+    // request time; this one is whoever the wallet's `sub` resolved to, and it
+    // is the gate's whole output — it cannot be known yet.
+    expect(row?.approvedByUserId).toBeNull();
+    expect(row?.startedByUserId).toBe("user_anna");
+  });
+
+  it("stores a resolved approver", () => {
+    db.insert(limitChangeSessions)
+      .values(values({ state: "verified", approvedByUserId: "user_anna" }))
+      .run();
+
+    const row = db.select().from(limitChangeSessions).get();
+    expect(row?.state).toBe("verified");
+    expect(row?.approvedByUserId).toBe("user_anna");
+  });
+
+  it.each([
+    ["started_by_user_id", "startedByUserId"],
+    ["account_id", "accountId"],
+    ["old_limit_cents", "oldLimitCents"],
+    ["new_limit_cents", "newLimitCents"],
+  ])("requires %s", (_column, key) => {
+    const incomplete = values();
+    delete (incomplete as Record<string, unknown>)[key];
+    expect(() =>
+      db
+        .insert(limitChangeSessions)
+        .values(incomplete as never)
+        .run(),
+    ).toThrow();
+  });
+
+  it("refuses an account_id that names no account", () => {
+    expect(() =>
+      db
+        .insert(limitChangeSessions)
+        .values(values({ accountId: "acc_nobody" }))
+        .run(),
+    ).toThrow();
+  });
+
+  it("refuses an approved_by_user_id that names no user", () => {
+    expect(() =>
+      db
+        .insert(limitChangeSessions)
+        .values(values({ approvedByUserId: "nobody" }))
         .run(),
     ).toThrow();
   });
