@@ -1,14 +1,24 @@
 import type { AccountDto } from "@/lib/queries.js";
-import { formatIban, splitEuroCents } from "@/lib/format.js";
+import { formatEuroCents, formatIban, splitEuroCents } from "@/lib/format.js";
 import type { Locale } from "@/lib/i18n/locale.js";
 import { MESSAGES } from "@/lib/i18n/messages.js";
+import type { DcApiForm } from "@/lib/transport.js";
+import { AccountLimitRow } from "./AccountLimitRow.js";
 
 export function AccountPanel({
   account,
   locale,
+  dcApiForm,
 }: {
   account: AccountDto;
   locale: Locale;
+  /**
+   * Which DC API wire form a limit change should ask for, read from
+   * `?dcapi=` server-side by the page and threaded through. NOT read with
+   * `useSearchParams` in the dialog: a client read there would need a Suspense
+   * boundary, and the wallet button must have the answer before the click.
+   */
+  dcApiForm: DcApiForm;
 }) {
   const { sign, major, minor } = splitEuroCents(account.balanceCents, locale);
 
@@ -41,6 +51,26 @@ export function AccountPanel({
       </p>
 
       <p className="eyebrow mt-3">{MESSAGES[locale].account.available}</p>
+
+      {/*
+        The limit is a property of the account, so it belongs on the account's
+        own panel — nothing new appears on the dashboard. Separated by a rule
+        because it is a different fact from the balance, not more of it.
+      */}
+      <div className="panel-divider mt-6 flex items-baseline justify-between gap-4 pt-4">
+        <div className="min-w-0">
+          <p className="eyebrow">{MESSAGES[locale].limits.dailyTransfer}</p>
+          <p className="mt-1 text-base font-semibold">
+            {formatEuroCents(account.dailyLimitCents, locale)}
+          </p>
+        </div>
+        <AccountLimitRow
+          accountId={account.id}
+          dailyLimitCents={account.dailyLimitCents}
+          locale={locale}
+          dcApiForm={dcApiForm}
+        />
+      </div>
     </section>
   );
 }
