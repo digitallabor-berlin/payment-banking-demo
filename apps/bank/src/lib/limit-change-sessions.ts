@@ -460,3 +460,148 @@ function failLimitChange(db: Db, sessionId: string, reason: string): void {
     .where(eq(limitChangeSessions.id, sessionId))
     .run();
 }
+export type ApplyLimitChangeResult =
+  | { ok: true; dailyLimitCents: number }
+  | {
+      ok: false;
+      reason:
+        | "not_found"
+        | "not_verified"
+        | "already_applied"
+        | "expired"
+        | "limit_changed";
+    };
+
+/**
+ * Writes the approved limit and moves `verified → applied`.
+ *
+ * A POST rather than part of the poll, for the reason the login flow mints its
+ * cookie on a POST: a GET with a side effect gets fired twice by a prefetch or
+ * a double-poll, and here the side effect writes to an account.
+ *
+ * Synchronous, because better-sqlite3 is. That is not incidental — the guarded
+ * UPDATE below is the whole single-use mechanism and is only meaningful as one
+ * statement rather than a read followed by a write.
+ *
+ * Re-checks only what is LOCAL and could have moved since the poll ran: the
+ * caller still owns the session and the account, the window is still open, and
+ * the account's limit still equals the snapshot. Everything the wallet said is
+ * already settled — this function never talks to foundry.
+ *
+ * Ownership is checked here and not in the route, for the same reason
+ * `getTransactionProof` checks it rather than its route: a route is one caller
+ * of many, and the check belongs with the read.
+ */
+export function applyLimitChange(
+  db: Db,
+  input: { userId: string; accountId: string; sessionId: string },
+  now: number = Date.now(),
+): ApplyLimitChangeResult {
+  const row = loadSession(db, input.userId, input.accountId, input.sessionId);
+  if (!row) return { ok: false, reason: "not_found" };
+
+  // Distinguished from `not_verified` so the route can answer 410 rather than
+  // 409: an applied session is gone for good, a pending one might yet arrive.
+  if (row.state === "applied") return { ok: false, reason: "already_applied" };
+  if (row.state !== "verified") return { ok: false, reason: "not_verified" };
+
+  if (now - row.createdAt > LIMIT_CHANGE_SESSION_TTL_MS) {
+    failLimitChange(db, input.sessionId, "expired");
+    return { ok: false, reason: "expired" };
+  }
+
+  const account = db
+    .select()
+    .from(accounts)
+    .where(eq(accounts.id, row.accountId))
+    .get();
+  if (!account) return { ok: false, reason: "not_found" };
+
+  // THE STALE-SNAPSHOT GATE, and it comes before the guarded write on purpose.
+  //
+  // `old_limit_cents` is half of what the holder signed over. If the account
+  // moved underneath — two dialogs open on one account — applying
+  // `new_limit_cents` anyway would honour an approval of a transition that is
+  // no longer the one happening. Refusing BEFORE the write leaves the session
+  // claimable, so the holder's approval is not burned for nothing: if whatever
+  // moved the limit is undone, this same session still applies.
+  if (account.dailyLimitCents !== row.oldLimitCents) {
+    return { ok: false, reason: "limit_changed" };
+  }
+
+  // A GUARDED WRITE, not a read-then-write. `.changes` is what decides whether
+  // THIS call won the race to consume the session; checking the state above
+  // and then updating unconditionally would let two concurrent applies both
+  // proceed, and the second would write a limit against a snapshot the first
+  // had already invalidated.
+  const consumed = db
+    .update(limitChangeSessions)
+    .set({ state: "applied" })
+    .where(
+      and(
+        eq(limitChangeSessions.id, input.sessionId),
+        eq(limitChangeSessions.state, "verified"),
+      ),
+    )
+    .run();
+  if (consumed.changes !== 1) return { ok: false, reason: "already_applied" };
+
+  db.update(accounts)
+    .set({ dailyLimitCents: row.newLimitCents })
+    .where(eq(accounts.id, row.accountId))
+    .run();
+
+  return { ok: true, dailyLimitCents: row.newLimitCents };
+}
+
+export type RelayLimitChangeResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: "not_found" | "no_verification" | "foundry_unavailable";
+    };
+
+/**
+ * Relays a browser Digital Credentials API response to foundry.
+ *
+ * Exists because foundry's `dc-api-response` endpoint is ADMIN authenticated:
+ * the browser cannot call it without the admin key, and the admin key must
+ * never leave the server.
+ *
+ * foundry verifies synchronously and returns a verdict, which is deliberately
+ * DISCARDED. The transaction state it also writes is what the poll already
+ * running in the dialog reads — one state path, not two. Applying the limit
+ * here instead would give same-device and cross-device changes two different
+ * routes to a write, and they would drift.
+ *
+ * `dc-api-relay.ts`'s shape with the ownership check added, DUPLICATED rather
+ * than generalised: the login relay takes no owner and is already tested where
+ * it lives, so a shared relay would need a table parameter and an optional
+ * owner to serve both — more surface than the eight lines it saves.
+ */
+export async function relayLimitChangeDcApiResponse(
+  db: Db,
+  client: FoundryClient,
+  input: {
+    userId: string;
+    accountId: string;
+    sessionId: string;
+    response: string;
+  },
+): Promise<RelayLimitChangeResult> {
+  const row = loadSession(db, input.userId, input.accountId, input.sessionId);
+  if (!row) return { ok: false, reason: "not_found" };
+  if (!row.foundryVerificationId) {
+    return { ok: false, reason: "no_verification" };
+  }
+
+  try {
+    await client.submitDcApiResponse(
+      row.foundryVerificationId,
+      input.response,
+    );
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: "foundry_unavailable" };
+  }
+}

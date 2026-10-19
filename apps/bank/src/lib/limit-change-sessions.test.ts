@@ -10,8 +10,10 @@ import { seed } from "../db/seed.js";
 import { SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID } from "./credential-types.js";
 import {
   LIMIT_CHANGE_SESSION_TTL_MS,
+  applyLimitChange,
   getLimitChangeStatus,
   refreshLimitChangeState,
+  relayLimitChangeDcApiResponse,
   startLimitChange,
 } from "./limit-change-sessions.js";
 
@@ -784,5 +786,269 @@ describe("refreshLimitChangeState", () => {
     );
     if (!result.ok) throw new Error("expected ok");
     expect(result.status.failureReason).toBe("verification_failed");
+  });
+});
+
+/** Drives a session all the way to `verified` by anna's own authenticator. */
+async function verifiedSession(now = Date.now()): Promise<string> {
+  giveAuthenticator("user_anna", "sub-anna");
+  const sessionId = await openSession(now);
+  await refreshLimitChangeState(
+    db,
+    verdictClient(authVerdict("sub-anna")),
+    { ...poll, sessionId },
+    now,
+  );
+  if (rowOf(sessionId)?.state !== "verified") {
+    throw new Error("fixture did not reach verified");
+  }
+  return sessionId;
+}
+
+function setAccountLimit(cents: number, id = "acc_anna"): void {
+  db.update(accounts)
+    .set({ dailyLimitCents: cents })
+    .where(eq(accounts.id, id))
+    .run();
+}
+
+describe("applyLimitChange", () => {
+  it("writes the new limit and consumes the session", async () => {
+    const sessionId = await verifiedSession();
+    const result = applyLimitChange(db, { ...poll, sessionId });
+
+    expect(result).toEqual({ ok: true, dailyLimitCents: 200_000 });
+    expect(accountLimit()).toBe(200_000);
+    expect(rowOf(sessionId)?.state).toBe("applied");
+  });
+
+  it("refuses a session that is still pending", async () => {
+    const sessionId = await openSession();
+    expect(applyLimitChange(db, { ...poll, sessionId })).toEqual({
+      ok: false,
+      reason: "not_verified",
+    });
+    expect(accountLimit()).toBe(100_000);
+  });
+
+  it("refuses a failed session", async () => {
+    const sessionId = await openSession();
+    db.update(limitChangeSessions)
+      .set({ state: "failed", failureReason: "wrong_customer" })
+      .where(eq(limitChangeSessions.id, sessionId))
+      .run();
+
+    expect(applyLimitChange(db, { ...poll, sessionId })).toEqual({
+      ok: false,
+      reason: "not_verified",
+    });
+    expect(accountLimit()).toBe(100_000);
+  });
+
+  /** Review Focus 5. */
+  it("refuses a second apply", async () => {
+    const sessionId = await verifiedSession();
+    applyLimitChange(db, { ...poll, sessionId });
+    expect(applyLimitChange(db, { ...poll, sessionId })).toEqual({
+      ok: false,
+      reason: "already_applied",
+    });
+  });
+
+  it("writes the limit exactly once", async () => {
+    const sessionId = await verifiedSession();
+    applyLimitChange(db, { ...poll, sessionId });
+    // Move the account underneath. A second apply that re-wrote the limit
+    // would clobber this; one that is a true no-op leaves it alone.
+    setAccountLimit(500_000);
+    applyLimitChange(db, { ...poll, sessionId });
+    expect(accountLimit()).toBe(500_000);
+  });
+
+  /**
+   * Review Focus 2 — two dialogs open on one account.
+   *
+   * `old_limit_cents` is half of what the holder signed over. Applying
+   * `new_limit_cents` against an account that has since moved would honour an
+   * approval of a transition that is no longer the one happening.
+   */
+  it("refuses to apply against a stale snapshot", async () => {
+    const sessionId = await verifiedSession();
+    setAccountLimit(500_000);
+
+    expect(applyLimitChange(db, { ...poll, sessionId })).toEqual({
+      ok: false,
+      reason: "limit_changed",
+    });
+    expect(accountLimit()).toBe(500_000);
+  });
+
+  it("leaves a stale-snapshot session claimable rather than consuming it", async () => {
+    // The gate must come BEFORE the guarded write, or a refused apply burns
+    // the session and the holder's approval is lost for nothing.
+    const sessionId = await verifiedSession();
+    setAccountLimit(500_000);
+    applyLimitChange(db, { ...poll, sessionId });
+
+    expect(rowOf(sessionId)?.state).toBe("verified");
+    setAccountLimit(100_000);
+    expect(applyLimitChange(db, { ...poll, sessionId })).toEqual({
+      ok: true,
+      dailyLimitCents: 200_000,
+    });
+  });
+
+  it("refuses an expired session", async () => {
+    const now = Date.now();
+    const sessionId = await verifiedSession(now);
+    expect(
+      applyLimitChange(
+        db,
+        { ...poll, sessionId },
+        now + LIMIT_CHANGE_SESSION_TTL_MS + 1,
+      ),
+    ).toEqual({ ok: false, reason: "expired" });
+    expect(accountLimit()).toBe(100_000);
+  });
+
+  /** Review Focus 4 — all three answer the same 404 at the route. */
+  it("refuses another user's session", async () => {
+    const sessionId = await verifiedSession();
+    expect(
+      applyLimitChange(db, {
+        userId: "user_ben",
+        accountId: "acc_anna",
+        sessionId,
+      }),
+    ).toEqual({ ok: false, reason: "not_found" });
+    expect(accountLimit()).toBe(100_000);
+  });
+
+  it("refuses the right session under the wrong account", async () => {
+    const sessionId = await verifiedSession();
+    expect(
+      applyLimitChange(db, { ...poll, accountId: "acc_ben", sessionId }),
+    ).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("refuses a nonexistent session", async () => {
+    expect(
+      applyLimitChange(db, { ...poll, sessionId: "limit_nope" }),
+    ).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("touches no other account", async () => {
+    const sessionId = await verifiedSession();
+    applyLimitChange(db, { ...poll, sessionId });
+    expect(accountLimit("acc_ben")).toBe(100_000);
+  });
+});
+
+describe("relayLimitChangeDcApiResponse", () => {
+  /** Captures the relayed body so the verification id can be asserted. */
+  function relayClient(
+    captures: Capture[],
+    status = 200,
+  ): FoundryClient {
+    const fetchImpl = (async (
+      relayInput: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      captures.push({
+        url: String(relayInput),
+        body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      });
+      return new Response(
+        JSON.stringify({ verified: true, checks: [], credentials: [] }),
+        { status, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    return new FoundryClient({
+      adminUrl: "http://f:9000",
+      adminKey: "k",
+      fetchImpl,
+    });
+  }
+
+  it("relays the wallet response to foundry", async () => {
+    const sessionId = await openSession();
+    const captures: Capture[] = [];
+    const result = await relayLimitChangeDcApiResponse(
+      db,
+      relayClient(captures),
+      { ...poll, sessionId, response: "jwe" },
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(captures).toHaveLength(1);
+    expect(captures[0]!.url).toBe(
+      "http://f:9000/admin/verification/requests/v_limit_1/dc-api-response",
+    );
+    expect(captures[0]!.body).toEqual({ response: "jwe" });
+  });
+
+  it("refuses to relay another user's session", async () => {
+    const sessionId = await openSession();
+    const captures: Capture[] = [];
+    const result = await relayLimitChangeDcApiResponse(
+      db,
+      relayClient(captures),
+      {
+        userId: "user_ben",
+        accountId: "acc_anna",
+        sessionId,
+        response: "jwe",
+      },
+    );
+
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+    expect(captures).toHaveLength(0);
+  });
+
+  it("refuses the right session under the wrong account", async () => {
+    const sessionId = await openSession();
+    const result = await relayLimitChangeDcApiResponse(db, relayClient([]), {
+      ...poll,
+      accountId: "acc_ben",
+      sessionId,
+      response: "jwe",
+    });
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("reports a session foundry never gave a verification id", async () => {
+    const sessionId = await openSession();
+    db.update(limitChangeSessions)
+      .set({ foundryVerificationId: null })
+      .where(eq(limitChangeSessions.id, sessionId))
+      .run();
+
+    const result = await relayLimitChangeDcApiResponse(db, relayClient([]), {
+      ...poll,
+      sessionId,
+      response: "jwe",
+    });
+    expect(result).toEqual({ ok: false, reason: "no_verification" });
+  });
+
+  it("reports foundry being unreachable", async () => {
+    const sessionId = await openSession();
+    const result = await relayLimitChangeDcApiResponse(
+      db,
+      relayClient([], 500),
+      { ...poll, sessionId, response: "jwe" },
+    );
+    expect(result).toEqual({ ok: false, reason: "foundry_unavailable" });
+  });
+
+  it("writes no state of its own — the poll is the single state path", async () => {
+    const sessionId = await openSession();
+    await relayLimitChangeDcApiResponse(db, relayClient([]), {
+      ...poll,
+      sessionId,
+      response: "jwe",
+    });
+    expect(rowOf(sessionId)?.state).toBe("pending");
   });
 });
