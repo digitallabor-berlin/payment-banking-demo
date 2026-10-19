@@ -187,3 +187,55 @@ export interface VerificationTransaction {
  created_at: number;
  result?: VerificationResult | null;
 }
+
+/**
+ * A PaSO Proof Metadata §5 ad-hoc transaction data metadata mint request.
+ *
+ * ADMIN-ONLY, and on the ADMIN LISTENER specifically. The public wallet-facing
+ * host answers 404 for *every* `/admin/*` path, including ones that certainly
+ * exist, so a 404 there reads as "endpoint missing" and is not: probe
+ * `foundry-admin.digitallabor.dev`, never `foundry.digitallabor.dev/admin/…`.
+ *
+ * What this buys: §5.4 says a transaction data type covered by a valid ad-hoc
+ * JWT is "considered supported … even if it is absent from the signed
+ * credential metadata", and foundry implements exactly that — with an override
+ * present it never consults the credential type's configured
+ * `transaction_data_types`. So a new transaction data type needs NO foundry
+ * config change. Without the override foundry 400s with "does not declare
+ * transaction data type … and no metadata override was supplied".
+ */
+export interface AdHocMetadataRequest {
+ /** The credential type the metadata describes, e.g. `sparkassen_auth`. */
+ credential_type_id: string;
+ /** Must equal the `type` of the `transaction_data` entry it will ride in. */
+ transaction_data_type: string;
+ /**
+  * The `claims` / `ui_labels` block, forwarded verbatim.
+  *
+  * Typed `unknown` for the reason `offer_display` is `unknown[]`: foundry
+  * validates a shape this package should not re-declare — claim paths, locale
+  * tags, a per-key grapheme limit on every `ui_labels` value — and a closed
+  * interface here would be a second, drifting copy of that contract. The
+  * caller owns the shape and its tests.
+  */
+ metadata?: unknown;
+ /**
+  * Lifetime in seconds. Omitted means foundry's configured default, which on
+  * the deployed instance is 300 — exactly the bank's own limit-change session
+  * TTL, so a holder approving near the end of a session would hand the wallet
+  * a JWT with seconds left. State it rather than inherit it.
+  */
+ ttl_secs?: number;
+}
+
+/** `{ jwt, exp }` — the compact `adhoc-transaction-metadata+jwt` and its expiry. */
+export interface AdHocMetadataResponse {
+ /**
+  * Goes verbatim into the `transaction_data` entry's `metadata` member.
+  * Never re-encoded: foundry performs the OpenID4VP §8.4 base64url encoding of
+  * the whole entry itself.
+  */
+ jwt: string;
+ /** Seconds since the epoch. Echoes the `exp` inside the signed JWT. */
+ exp: number;
+}
