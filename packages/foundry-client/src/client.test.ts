@@ -407,3 +407,68 @@ describe("FoundryClient verification methods", () => {
     );
   });
 });
+
+describe("FoundryClient.createAdHocMetadata", () => {
+  /**
+   * PaSO Proof Metadata §5. The body must round-trip VERBATIM: foundry
+   * validates the `metadata` block structurally (claim count, grapheme limits
+   * on every `ui_labels` value) and returns 400 on any deviation, so a client
+   * that reshaped or dropped a member would surface as an unexplained
+   * limit-change failure rather than as a consent screen missing a label.
+   */
+  const request = {
+    credential_type_id: "sparkassen_auth",
+    transaction_data_type: "urn:paso:sca:dev.digitallabor:limit-change:1",
+    metadata: {
+      claims: [
+        {
+          path: ["old_limit"],
+          mandatory: true,
+          value_type: "iso_currency_amount",
+          display: [{ locale: "en-US", name: "Current Account Limit" }],
+        },
+      ],
+      ui_labels: {
+        transaction_title: [
+          { locale: "en-US", value: "Change your account limit" },
+        ],
+      },
+    },
+    ttl_secs: 900,
+  };
+
+  it("POSTs the mint request to /admin/paso/ad-hoc-metadata", async () => {
+    let seenUrl = "";
+    let seenInit: RequestInit = {};
+    const client = makeClient(
+      stubFetch(200, { jwt: "a.b.c", exp: 1792427805 }, (url, init) => {
+        seenUrl = url;
+        seenInit = init;
+      }),
+    );
+
+    await client.createAdHocMetadata(request);
+
+    expect(seenUrl).toBe("http://foundry.test:9000/admin/paso/ad-hoc-metadata");
+    expect(seenInit.method).toBe("POST");
+    const headers = new Headers(seenInit.headers);
+    expect(headers.get("authorization")).toBe("Bearer k-123");
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(JSON.parse(String(seenInit.body))).toEqual(request);
+  });
+
+  it("returns the minted jwt and exp", async () => {
+    const client = makeClient(stubFetch(200, { jwt: "a.b.c", exp: 1792427805 }));
+    const result = await client.createAdHocMetadata(request);
+    expect(result).toEqual({ jwt: "a.b.c", exp: 1792427805 });
+  });
+
+  it("throws FoundryError on a non-2xx", async () => {
+    const client = makeClient(
+      stubFetch(400, { error: "ui label too long: transaction_title" }),
+    );
+    await expect(client.createAdHocMetadata(request)).rejects.toBeInstanceOf(
+      FoundryError,
+    );
+  });
+});

@@ -1,4 +1,6 @@
 import type {
+  AdHocMetadataRequest,
+  AdHocMetadataResponse,
   AdminIssuanceStatus,
   CreateOfferRequest,
   CreateOfferResponse,
@@ -77,6 +79,29 @@ export class FoundryClient {
   ): Promise<VerificationResult> {
     const path = `/admin/verification/requests/${encodeURIComponent(verificationId)}/dc-api-response`;
     return this.request<VerificationResult>("POST", path, { response });
+  }
+
+  /**
+   * Mints a PaSO §5 ad-hoc transaction data metadata JWT.
+   *
+   * The returned `jwt` is what turns a payload of opaque strings into a
+   * rendered consent screen in the wallet, so a caller that cannot mint one
+   * must NOT fall back to sending the entry without it: a type no credential's
+   * metadata declares, carrying no override, is PaSO Core §7.4.2
+   * "incompatible" — best case a refusal, worst case raw claim names shown to
+   * a human.
+   *
+   * Admin-only, and served on the admin listener. See `AdHocMetadataRequest`
+   * for why a 404 on the public host proves nothing.
+   */
+  async createAdHocMetadata(
+    req: AdHocMetadataRequest,
+  ): Promise<AdHocMetadataResponse> {
+    return this.request<AdHocMetadataResponse>(
+      "POST",
+      "/admin/paso/ad-hoc-metadata",
+      req,
+    );
   }
 
   private async request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {

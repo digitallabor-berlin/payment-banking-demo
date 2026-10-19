@@ -51,6 +51,10 @@ describe("listAccounts", () => {
   it("never leaks another user's account", () => {
     expect(listAccounts(db, "user_ben").map((a) => a.id)).toEqual(["acc_ben"]);
   });
+
+  it("returns the account's daily limit", () => {
+    expect(listAccounts(db, "user_anna")[0]?.dailyLimitCents).toBe(100_000);
+  });
 });
 
 describe("listCards", () => {

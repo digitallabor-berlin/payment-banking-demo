@@ -1,6 +1,8 @@
 export { FoundryClient, FoundryError } from "./client.js";
 export type { FoundryClientOptions } from "./client.js";
 export type {
+  AdHocMetadataRequest,
+  AdHocMetadataResponse,
   AdminDcApiResponseBody,
   AdminIssuanceStatus,
   CheckResult,

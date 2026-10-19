@@ -1,7 +1,16 @@
 import { sql } from "drizzle-orm";
 import { hashPassword } from "../lib/password.js";
 import { createDb, type Db } from "./index.js";
-import { accounts, cards, credentials, transactions, users } from "./schema.js";
+import {
+  accounts,
+  cards,
+  credentials,
+  limitChangeSessions,
+  loginSessions,
+  transactionProofs,
+  transactions,
+  users,
+} from "./schema.js";
 import { env } from "../env.js";
 
 const DAY_MS = 86_400_000;
@@ -116,8 +125,35 @@ const HISTORY: Array<{
 /**
  * Resets the database to the documented fixtures (spec 5.3). Idempotent:
  * deletes every row first, so `pnpm seed` returns the demo to a known state.
+ *
+ * ATOMIC, and that is not decoration. `createDb` sets `foreign_keys = ON`, so
+ * a table referencing `users` or `accounts` that is not cleared first makes the
+ * delete sequence THROW partway through — and without a transaction it throws
+ * having already destroyed every transaction, credential and card. A command
+ * documented as "reset the demo" would leave a dashboard with accounts and
+ * nothing else, and fail identically on every later attempt.
+ *
+ * That was not hypothetical: `limit_change_sessions` has NOT NULL FKs to both,
+ * and one abandoned limit-change attempt was enough to trigger it. Locally that
+ * is every attempt, because no local foundry declares `sparkassen_auth`.
+ *
+ * **A new table with an FK to `users` or `accounts` must be deleted here**, in
+ * an order that respects its references, or `pnpm seed` breaks the first time
+ * anything writes to it.
  */
 export function seed(db: Db, now = Date.now()): void {
+  db.transaction(() => {
+    seedWithin(db, now);
+  });
+}
+
+/** The body of `seed`, factored out only so the transaction wrapper is legible. */
+function seedWithin(db: Db, now: number): void {
+  // Children before parents. `limit_change_sessions` references BOTH `users`
+  // and `accounts`; `transaction_proofs` references `transactions`.
+  db.delete(limitChangeSessions).run();
+  db.delete(transactionProofs).run();
+  db.delete(loginSessions).run();
   db.delete(transactions).run();
   db.delete(credentials).run();
   db.delete(cards).run();
@@ -143,6 +179,11 @@ export function seed(db: Db, now = Date.now()): void {
         iban: fixture.iban,
         currency: "EUR",
         balanceCents: fixture.balanceCents,
+        // Stated explicitly rather than left to the column DEFAULT, so the
+        // demo's starting number is visible in the fixtures rather than only
+        // in the schema. 1.000,00 € — the preset the dialog then refuses to
+        // offer, because it is the one already in force.
+        dailyLimitCents: 100_000,
       })
       .run();
 

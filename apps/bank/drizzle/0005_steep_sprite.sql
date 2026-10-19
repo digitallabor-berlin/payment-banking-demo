@@ -1,0 +1,1 @@
+ALTER TABLE `accounts` ADD `daily_limit_cents` integer DEFAULT 100000 NOT NULL;

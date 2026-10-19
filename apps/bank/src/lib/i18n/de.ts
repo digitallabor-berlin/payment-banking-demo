@@ -67,6 +67,39 @@ export const de: Messages = {
     type: "Girokonto",
     available: "Verfügbarer Betrag",
   },
+  limits: {
+    dailyTransfer: "Tägliches Überweisungslimit",
+    change: "Ändern",
+    dialogTitle: "Tägliches Überweisungslimit ändern",
+    dialogLead:
+      "Wählen Sie ein neues Limit. Sie bestätigen die Änderung in Ihrer Wallet, bevor sie wirksam wird.",
+    currentLimit: "Aktuelles Limit",
+    newLimit: "Neues Limit",
+    continue: "Weiter",
+    cancel: "Abbrechen",
+    close: "Schließen",
+    approveTitle: "In Ihrer Wallet bestätigen",
+    confirmInApp: "Bestätigen Sie die Änderung in Ihrer Wallet-App.",
+    openInWallet: "In Wallet öffnen",
+    scanCode: "Scannen Sie diesen Code mit der Wallet-App auf Ihrem Telefon.",
+    qrAlt: "QR-Code für die Limitänderung",
+    waiting: "Warten auf Ihre Wallet…",
+    preparing: "Wird vorbereitet…",
+    walletUnavailable:
+      "Ihre Wallet hat nicht geantwortet. Sie können stattdessen einen Code mit der Wallet-App auf Ihrem Telefon scannen.",
+    showQrCode: "QR-Code anzeigen",
+    successTitle: "Limit geändert",
+    successBody: (limit) =>
+      `Ihr tägliches Überweisungslimit beträgt jetzt ${limit}.`,
+    failedTitle: "Limit nicht geändert",
+    expired: "Die Anfrage ist abgelaufen. Bitte versuchen Sie es erneut.",
+    unknownCredential:
+      "Dieser Nachweis ist gültig, kann aber keinem Kunden zugeordnet werden. Fügen Sie den Sparkassen Authenticator über Ihre Übersicht erneut zur Wallet hinzu und versuchen Sie es dann noch einmal.",
+    limitChanged:
+      "Ihr Limit hat sich geändert, während wir auf Ihre Wallet gewartet haben. Diese Bestätigung passt deshalb nicht mehr. Bitte beginnen Sie erneut.",
+    verificationFailed:
+      "Die Antwort Ihrer Wallet konnte nicht geprüft werden. Ihr Limit bleibt unverändert.",
+  },
   credential: {
     ageTitle: "Altersnachweis",
   },

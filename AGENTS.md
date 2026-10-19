@@ -53,8 +53,49 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**872 tests** (535 bank + 287 merchant + 13 foundry-client + 37 ui), measured
-2026-08-29.
+**1050 tests** (710 bank + 287 merchant + 16 foundry-client + 37 ui), measured
+2026-10-19.
+
+That was **872** before the account-limit-change work — and for once this file
+was right about every one of the four figures, which is the first time in this
+project's history. It added **165**: +162 in `apps/bank`, +3 in
+`packages/foundry-client`, nothing in the other two. The bank's split, measured
+per task and reconciled against the run's own total before being written down:
++3 (`db/schema.test.ts` 2, `lib/queries.test.ts` 1), +10 (`schema.test.ts`
+again, the new table), +19 in the new `lib/limit-presets.test.ts`, +28 in the
+new `lib/limit-transaction-data.test.ts`, +52 across three passes over the new
+`lib/limit-change-sessions.test.ts` (14 start, 20 poll, 18 apply/relay), +28 in
+the new `app/api/accounts/[id]/limit-change/route.test.ts`, +22 in the new
+`lib/limit-dialog-state.test.ts`. 3+10+19+28+52+28+22 = 162 = 535 → 697.
+
+Four things that number hides. `messages.test.ts` added **zero** against 23 new
+leaves in both catalogs — its invariants (identical key sets, no empty leaf, no
+German orthography in `en`, no leaf byte-identical across locales) cover new
+leaves without new cases, so `pnpm typecheck` is again the real gate for copy
+and the suite is silent on it. Six of the ten `limit_change_sessions` schema
+tests were **green on arrival** and meaningless at the time: a `toThrow()`
+assertion passes vacuously while the table is `undefined`, because inserting on
+`undefined` throws too — they only became real once the table existed, and were
+re-run against it. Nothing in `apps/bank/src/components` is covered at all
+(`environment: "node"`), so both new `.tsx` files rest entirely on the browser
+verification below. And one red run was a *fixture* bug rather than an
+implementation one: the test helper defaulted `now` to `1000` while the poll
+defaults to `Date.now()`, so eleven cases read `expired` instead of what they
+were about.
+
+The final **13** of those 165 came from the review's own fix pass, and they are
+the interesting ones: 2 proving `pnpm seed` survives a limit-change row, 4
+proving a 200 mint with no `jwt` still aborts, 4 proving a failed start says
+something, and 3 proving the QR recovery is offered. Two further tests in that
+pass added **zero** to the count and were the most valuable work in it — two
+existing assertions were *rewritten* because they were green for the wrong
+reason. `gates the binding before resolving the sub` used anna's own `sub`,
+which fails the binding check under **either** ordering, so it pinned nothing;
+it now uses a `sub` no credential carries, where the two orderings give
+different answers. `writes the limit exactly once` left the account at a value
+the stale-snapshot gate would refuse on its own, so it would have passed with
+the single-use guard deleted; it now replays with the account back at the
+snapshot. Both named a security property and tested neither.
 
 That was **861** before the `dcSubmitted` fix, which added 11, all in one
 `apps/merchant` file — a single new describe in `lib/sheet-state.test.ts`
@@ -369,6 +410,169 @@ yours, measure — do not trust a number written in a plan.
 
 Every item below was discovered by something breaking. Do not "clean up" any of
 them without reading the linked reasoning first.
+
+### The account limit change
+
+- **The ad-hoc metadata JWT is the whole feature, and a missing `metadata` is
+  the anti-goal rather than a degraded mode.** PaSO Proof Metadata §5 lets the
+  bank mint a short-lived issuer-signed JWT describing how to render *this*
+  transaction data type, and §5.4 says a type covered by one is "considered
+  supported … even if it is absent from the signed credential metadata". That
+  is what lets `urn:paso:sca:dev.digitallabor:limit-change:1` exist with **no
+  foundry config change at all** — `sparkassen_auth` is the only configuration
+  on the deployed foundry carrying a `credential_metadata_uri`, and that
+  document declares only the *login* type, so limit-change is a type absent
+  from a credential metadata document that exists, the literal §5.4 case.
+
+  `startLimitChange` therefore mints **before** creating the verification
+  request and aborts the whole thing if the mint fails, with its own
+  `metadata_unavailable` reason. An entry with no `metadata` for a type nothing
+  declares is PaSO Core §7.4.2 "incompatible": best case a refusal, worst case a
+  wallet showing `old_limit: EUR 1000.00` to a human, which *looks like the
+  feature working*.
+
+  **Nothing server-side enforces this.** Measured 2026-10-19 against the
+  deployed foundry: an entry with `metadata` deliberately omitted is accepted,
+  HTTP 200. So the bank's own ordering is the only thing standing between this
+  demo and its anti-goal, which makes `creates NO verification request when the
+  mint fails` load-bearing rather than belt-and-braces — and it is written to
+  script the verification reply as a perfectly good 200, so the only thing that
+  can stop the call is the code.
+
+- **The ownership gate lives in the POLL, not in apply.** This is the one thing
+  the flow adds over wallet login, and it is easy to get subtly wrong. Login
+  resolves a `sub` to *whoever* owns that authenticator — nobody is signed in
+  yet, so that is the point. Here somebody is, and without the owner check any
+  valid Sparkassen Authenticator presentation could approve any logged-in
+  customer's limit change.
+
+  In apply it would need a second `getVerificationStatus` after the session had
+  already gone terminal and — worse — a *stranger's* valid presentation would
+  drive the session to `verified`, showing the holder a success-shaped dialog
+  that apply then rejects. `verified` must mean *the right person approved*, or
+  the state name is a lie. The binding gate sits between **reading** the `sub`
+  and **resolving** it, for the reason `login-sessions.ts` already documents.
+
+  `wrong_customer` is its own reason, distinct from `unknown_credential`, so an
+  operator can tell a credential issued to the wrong person from one the bank
+  cannot place at all. The holder sees the same generic copy for both:
+  spelling out `wrong_customer` would tell whoever holds the phone that their
+  presentation was valid but for somebody else's account.
+
+- **`old_limit_cents` is a snapshot, and the stale-snapshot gate must come
+  BEFORE the guarded write.** It is half of what the holder signed over. If the
+  account moved underneath — two dialogs open on one account — applying
+  `new_limit_cents` anyway would honour an approval of a transition that is no
+  longer the one happening. Refusing *before* the `verified → applied` UPDATE
+  leaves the session claimable, so a refused apply does not burn the holder's
+  approval for nothing; put the gate after it and one transient mismatch
+  destroys the session.
+
+  The transition itself is a **guarded UPDATE** whose `.changes` decides the
+  winner, exactly as `claimLoginSession`'s is. `writes the limit exactly once`
+  moves the account underneath between two applies, because asserting the final
+  value alone cannot distinguish a no-op from a re-write.
+
+- **The amount string is `toFixed`, never `Intl`, and the locale tags are
+  `en-US` / `de-DE`.** `limitAmountString` produces `"EUR 1000.00"` — PaSO's own
+  §A.4 shape — and it is hashed byte-for-byte into `transaction_data_hashes`, so
+  a German separator baked in here would make the signed artefact depend on the
+  browser's locale. The wallet localises it instead, via `iso_currency_amount`.
+
+  The JWT's locale tags are **not** this app's `Locale` (`en` / `de`) and must
+  never be derived from them: every tag the deployed foundry publishes is
+  region-tagged, and a wallet doing RFC4647 lookup degrades `de-DE` to `de` but
+  is not obliged to promote `de` to `de-DE`. Both locales are always sent,
+  regardless of the bank's current UI locale — the wallet picks by its own
+  priority list, which the bank cannot observe, and §5.4 lets it treat an entry
+  with no compatible locale as incompatible. A test asserts no bare tag appears
+  anywhere in the minted metadata.
+
+- **Two places hold limit-change copy and they answer to different
+  authorities.** `MESSAGES[locale].limits` is the bank's own dialog; the consent
+  screen's strings live in the ad-hoc metadata JWT. Do not unify them. The
+  `security_hint` in particular — *"Sparkasse will never ask you to raise your
+  limit."* — is there because raising a transfer limit is a standard step in an
+  authorised push payment scam, and PaSO §3.2 requires the wallet to display it
+  verbatim and forbids altering or removing it. That is exactly the property
+  wanted: the bank's warning cannot be dressed up by whatever is driving the
+  browser.
+
+- **`ttl_secs` is sent explicitly as `900`, and the reason is a race nobody
+  could diagnose.** foundry's default is 300 seconds — *exactly*
+  `LIMIT_CHANGE_SESSION_TTL_MS` — and the JWT is minted after the session row is
+  written, so a holder approving at T+295 would hand the wallet a metadata JWT
+  with seconds left. A §5.3 `exp` failure and a holder pressing Cancel are
+  indistinguishable from the bank's side. Measured: the deployed foundry honours
+  900 exactly (`exp - iat` is 900 in the served request object).
+
+- **The Change control is NOT suppressed when the customer holds no
+  authenticator**, and the reason is stronger than friendliness:
+  `getAuthenticatorCredentialState` cannot tell a usable credential from an
+  unusable one. A credential issued before the bank started persisting `sub`
+  reads as `active` and can **never** satisfy the ownership gate — there is no
+  backfill — so a suppression check would hide the control from people who could
+  use it and show it to people who cannot. The `unknownCredential` copy names
+  the exact remedy and the authenticator tile is on the same page.
+
+- **A new table with an FK to `users` or `accounts` MUST be deleted in
+  `seed()`, or `pnpm seed` breaks the first time anything writes to it.**
+  `createDb` sets `foreign_keys = ON`, and `seed()` deletes both parents — so
+  `limit_change_sessions`, which has NOT NULL FKs to each, made the delete
+  sequence throw partway through. One abandoned limit-change attempt was
+  enough, and locally that is *every* attempt, because no local foundry
+  declares `sparkassen_auth`.
+
+  The damage was not the throw. `seed()` was not atomic, so it died having
+  already destroyed every transaction, credential and card: the documented
+  reset command left a dashboard with accounts and nothing else, and failed
+  identically forever after. It is now wrapped in `db.transaction`, which is
+  the real fix — the missing `delete` was only the first table to expose it,
+  and `transaction_proofs` and `login_sessions` were latent behind it.
+
+  Found by the final review, measured before being fixed, and it is exactly the
+  class of defect a green suite cannot see: nothing tested `seed()` twice.
+
+- **A 2xx is not a successful mint.** `FoundryClient.request` does
+  `JSON.parse(text) as T` and throws only on a non-2xx or a non-JSON body, so a
+  200 carrying `{}`, a null, or a renamed field leaves `minted.jwt` undefined
+  with nothing raised — and `JSON.stringify` then silently DROPS `metadata`
+  from the entry. Since foundry accepts an entry with no `metadata` (measured),
+  that is the anti-goal shipping as a 200. `startLimitChange` checks
+  `typeof minted.jwt === "string"` explicitly. The `metadataJwt: string`
+  parameter is a compile-time claim an `as` cast makes on an untyped wire body,
+  which is the same trap this file already records about `as` over `.json()`.
+
+- **A DC API session has no URI, so a wallet failure needs a NEW session rather
+  than a different rendering.** `selectLoginAffordance` answers `"qr"` or
+  `"deep-link"` as soon as `dcError` is set, but both of the dialog's branches
+  for those need a `uri` — which a DC API session never has. The dialog
+  therefore lost its only button and showed no message at all, until the
+  session expired five minutes later and the holder read copy blaming time for
+  a dismissed wallet picker. `needsQrRecovery` is the predicate; the button
+  POSTs a fresh `transport: "request_uri"` session.
+
+  **`dcError` must NOT be cleared when that session arrives.** Clearing it is
+  the obvious-looking thing and it sends the affordance straight back to the
+  wallet button the holder just watched fail — verified in a browser, where the
+  QR count went 0 → 0 instead of 0 → 1. Leaving it set routes the new session
+  to the QR branch, and `needsQrRecovery` goes false on its own because the URI
+  now exists. Nothing in the suite can see any of this: `.tsx` is matched by no
+  vitest project here.
+
+  Note `WalletLoginDialog` still has the identical gap. It was not touched —
+  fixing it is a separate change to a separate flow — so a wallet failure
+  during *login* still strands that dialog.
+
+- **`daily_limit_cents` gates nothing.** There is no transfer feature in this
+  demo to enforce it against. The number is displayed and changed, and that is
+  the whole of its behaviour — the feature being demonstrated is a wallet
+  approving a *non-payment decision about an account*. Unlike this repo's
+  `credential_type_id` and `transport` widenings, which were TypeScript claims
+  about untyped text columns, this one is a real `ALTER TABLE … ADD COLUMN`;
+  drizzle-kit emitted a plain ADD rather than the unrunnable table rebuild it
+  has produced twice before here, and the `0006` CREATE TABLE came out clean
+  too. Both were applied to a real SQLite file before being committed.
 
 ### Credentials and credential types
 
@@ -1681,6 +1885,71 @@ foundry may own `127.0.0.1:9000` (IPv4) while `kubectl port-forward svc/foundry
 the *local* server and answers 401 with the deployed key, which reads as a bad
 secret. Forward to a distinct port (e.g. `9100:9000`) rather than trusting the
 address.
+
+**No wallet has answered a limit-change presentation either**, as of
+2026-10-19, and this flow adds PaSO §5.3 on top of every unknown wallet login
+already has. What IS verified, against the deployed foundry and in real headless
+Chrome, is everything up to the handover:
+
+- the request object foundry serves at `request_uri` decodes to a
+  `transaction_data` entry whose `type` is
+  `urn:paso:sca:dev.digitallabor:limit-change:1`, whose `payload` is byte-exact
+  the `{ old_limit: "EUR 1000.00", new_limit: "EUR 2000.00" }` that was sent,
+  whose `credential_ids` is `["sparkassen_auth"]` against a DCQL query whose
+  only credential id is `sparkassen_auth`, and — the member the whole feature
+  rests on — whose **`metadata` is present and is the minted JWT**: a 3-segment
+  compact JWS, `typ: adhoc-transaction-metadata+jwt`, `alg: ES256`, `iss`
+  `https://foundry.digitallabor.dev`, `sub`
+  `https://creds.digitallabor.dev/vct/sparkassen_auth`,
+  `transaction_data_type` equal to the entry's own `type`, `exp - iat` = 900,
+  and an echoed metadata block carrying both claims with
+  `iso_currency_amount`, all four `ui_labels` keys including
+  `denial_action_label` and `security_hint`, and both `en-US`/`de-DE` pairs
+  intact;
+- a deliberately bogus `credential_ids` is **HTTP 400** `transaction_data[0]
+  references credential id '<id>' which is not present in the DCQL query`, so
+  the 200 above is evidence rather than serde dropping a field;
+- `dc_api_signed` serves `protocol: openid4vp-v1-signed` with a 3-segment JWS,
+  `response_mode: dc_api.jwt`, `expected_origins` including
+  `https://sparkasse-musterstadt.digitallabor.dev`, and the entry — `metadata`
+  and all — *inside* the signature;
+- in real headless Chrome against a bank pointed at the deployed foundry: the
+  panel shows the limit, the dialog offers exactly three chips (the one equal to
+  the limit in force is withheld), Continue is disabled until one is picked,
+  and the default transport writes a `dc_api_signed` row carrying a 7168-byte
+  inline signed request object with **no QR canvas**, while `?dcapi=unsigned`
+  writes a `dc_api` row with a 4409-byte bare parameter object. **The wallet
+  button was clicked**, not merely rendered — this repo has mistaken the one
+  for the other before.
+
+What clicking it showed is itself worth recording: with no wallet installed,
+`navigator.credentials.get()` neither resolves nor rejects within 8 seconds, so
+the dialog stays on its waiting face and the QR fallback is never reached. That
+is the shared DC API path, not anything this flow added, and Cancel remains
+available throughout — but it means "the wallet button works" is still unproven
+even after the click.
+
+What cannot be verified here: whether a real wallet accepts the ad-hoc metadata
+JWT at all. Four of §5.3's steps are structurally settled above (`typ`, `iss`,
+`transaction_data_type`, and the credential binding — the ad-hoc JWT's `x5c` is
+byte-identical to the credential-metadata JWT's). Two are not: whether the
+signature verifies in the wallet's own crypto, and whether the wallet's **trust
+store** holds `CN=Foundry Root CA (foundry.digitallabor.dev)`. Either failure
+happens *inside the wallet with no server-side trace* — from the bank's side a
+rejected metadata JWT and a holder pressing Cancel are the same event. Also
+unknown: whether any wallet implements the `iso_currency_amount` value type or
+falls back to rendering the raw `"EUR 2000.00"` (survivable; the fallback is to
+drop `value_type` and send pre-formatted text, at the cost of baking a locale
+into a hashed payload), and whether the consent screen actually looks like the
+one the design opens with — which is the entire point of the feature and can
+only be confirmed by a human with a device.
+
+Nothing has ever driven `refreshLimitChangeState` past `pending` against a real
+verdict, so the ownership gate, `applyLimitChange` and the whole
+`verified → applied` path are unexercised outside the suite. `?dcapi=unsigned`
+is the diagnostic to hand the operator: it is the same flow over the previously
+exercised unsigned form, so a wallet that succeeds there and fails by default
+has localised the problem to the signature.
 
 Do not fake this. If a change depends on real wallet behaviour, say so.
 

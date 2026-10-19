@@ -9,6 +9,7 @@ import {
   accounts,
   cards,
   credentials,
+  limitChangeSessions,
   loginSessions,
   transactionProofs,
   transactions,
@@ -26,6 +27,56 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("accounts.daily_limit_cents", () => {
+  beforeEach(() => {
+    db.insert(users)
+      .values({
+        id: "user_x",
+        username: "x",
+        passwordHash: "h",
+        displayName: "X",
+      })
+      .run();
+  });
+
+  it("defaults daily_limit_cents to 100000", () => {
+    db.insert(accounts)
+      .values({
+        id: "acc_x",
+        userId: "user_x",
+        iban: "DE02120300000000202051",
+        balanceCents: 1_000,
+      })
+      .run();
+
+    const row = db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, "acc_x"))
+      .get();
+    expect(row?.dailyLimitCents).toBe(100_000);
+  });
+
+  it("stores an explicit daily_limit_cents", () => {
+    db.insert(accounts)
+      .values({
+        id: "acc_y",
+        userId: "user_x",
+        iban: "DE02120300000000202051",
+        balanceCents: 1_000,
+        dailyLimitCents: 200_000,
+      })
+      .run();
+
+    const row = db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.id, "acc_y"))
+      .get();
+    expect(row?.dailyLimitCents).toBe(200_000);
+  });
 });
 
 describe("seed", () => {
@@ -387,6 +438,143 @@ describe("login_sessions", () => {
       db
         .insert(loginSessions)
         .values({ id: "login_3", userId: "nobody", createdAt: 3000 })
+        .run(),
+    ).toThrow();
+  });
+});
+
+describe("limit_change_sessions", () => {
+  /** A complete row minus whatever the case under test is about. */
+  function values(over: Record<string, unknown> = {}) {
+    return {
+      id: "limit_1",
+      startedByUserId: "user_anna",
+      accountId: "acc_anna",
+      oldLimitCents: 100_000,
+      newLimitCents: 200_000,
+      createdAt: 1000,
+      ...over,
+    };
+  }
+
+  beforeEach(() => {
+    seed(db);
+  });
+
+  it("defaults a limit-change session to pending over request_uri", () => {
+    db.insert(limitChangeSessions).values(values()).run();
+
+    const row = db.select().from(limitChangeSessions).get();
+    expect(row?.state).toBe("pending");
+    expect(row?.transport).toBe("request_uri");
+    expect(row?.foundryVerificationId).toBeNull();
+    expect(row?.failureReason).toBeNull();
+    // NULL, not the empty string: a request_uri session performs no DC API
+    // invocation, so there is no protocol identifier to report.
+    expect(row?.dcApiProtocol).toBeNull();
+  });
+
+  // The same claim `login_sessions` makes about its own column: the `enum:` is
+  // a TypeScript claim about plain `text`, and this is what proves SQLite
+  // really accepts all three.
+  it("accepts the three transports", () => {
+    const transports = ["request_uri", "dc_api", "dc_api_signed"] as const;
+    for (const [index, transport] of transports.entries()) {
+      db.insert(limitChangeSessions)
+        .values(values({ id: `limit_t${index}`, transport }))
+        .run();
+    }
+
+    expect(
+      db
+        .select()
+        .from(limitChangeSessions)
+        .all()
+        .map((row) => row.transport),
+    ).toEqual([...transports]);
+  });
+
+  it("leaves approved_by_user_id null until the gate resolves it", () => {
+    db.insert(limitChangeSessions).values(values()).run();
+
+    const row = db.select().from(limitChangeSessions).get();
+    // Two user columns, not one. `started_by_user_id` is the cookie's owner at
+    // request time; this one is whoever the wallet's `sub` resolved to, and it
+    // is the gate's whole output — it cannot be known yet.
+    expect(row?.approvedByUserId).toBeNull();
+    expect(row?.startedByUserId).toBe("user_anna");
+  });
+
+  it("stores a resolved approver", () => {
+    db.insert(limitChangeSessions)
+      .values(values({ state: "verified", approvedByUserId: "user_anna" }))
+      .run();
+
+    const row = db.select().from(limitChangeSessions).get();
+    expect(row?.state).toBe("verified");
+    expect(row?.approvedByUserId).toBe("user_anna");
+  });
+
+  it.each([
+    ["started_by_user_id", "startedByUserId"],
+    ["account_id", "accountId"],
+    ["old_limit_cents", "oldLimitCents"],
+    ["new_limit_cents", "newLimitCents"],
+  ])("requires %s", (_column, key) => {
+    const incomplete = values();
+    delete (incomplete as Record<string, unknown>)[key];
+    expect(() =>
+      db
+        .insert(limitChangeSessions)
+        .values(incomplete as never)
+        .run(),
+    ).toThrow();
+  });
+
+  it("refuses an account_id that names no account", () => {
+    expect(() =>
+      db
+        .insert(limitChangeSessions)
+        .values(values({ accountId: "acc_nobody" }))
+        .run(),
+    ).toThrow();
+  });
+
+  /**
+   * Found by the final review and measured before being fixed. `seed()` deletes
+   * users and accounts, this table has NOT NULL FKs to both, and `createDb`
+   * sets `foreign_keys = ON` — so one abandoned limit-change attempt used to
+   * make `pnpm seed` throw partway through, after it had already deleted every
+   * transaction, credential and card. Locally that is EVERY attempt, because no
+   * local foundry declares `sparkassen_auth`.
+   */
+  it("does not block a re-seed", () => {
+    db.insert(limitChangeSessions)
+      .values(values({ state: "failed", failureReason: "metadata_unavailable" }))
+      .run();
+
+    expect(() => seed(db)).not.toThrow();
+    expect(db.select().from(limitChangeSessions).all()).toHaveLength(0);
+  });
+
+  it("leaves the database whole when a re-seed is attempted", () => {
+    db.insert(limitChangeSessions).values(values()).run();
+    seed(db);
+
+    // The half-wiped state is what made the original defect destructive rather
+    // than merely noisy: seed() is not atomic, so a throw on `accounts` left
+    // cards and transactions already gone.
+    expect(db.select().from(users).all()).toHaveLength(2);
+    expect(db.select().from(accounts).all()).toHaveLength(2);
+    expect(db.select().from(cards).all()).toHaveLength(2);
+    expect(db.select().from(transactions).all()).toHaveLength(20);
+  });
+
+  it("refuses an approved_by_user_id that names no user", () => {
+    expect(() =>
+      db
+        .insert(limitChangeSessions)
+        .values(values({ approvedByUserId: "nobody" }))
         .run(),
     ).toThrow();
   });

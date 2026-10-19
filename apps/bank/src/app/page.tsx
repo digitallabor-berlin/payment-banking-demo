@@ -19,12 +19,30 @@ import {
   listTransactions,
 } from "@/lib/queries.js";
 import { getSession } from "@/lib/session.js";
+import { parseDcApiForm } from "@/lib/transport.js";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await getSession();
   if (!session) redirect("/login");
+
+  /**
+   * Read SERVER-SIDE, not with `useSearchParams`. A client read would need a
+   * Suspense boundary, and more importantly the limit dialog's wallet button
+   * must have the answer before the click — Chrome consumes a click's
+   * transient activation, so nothing may be fetched inside that handler.
+   *
+   * Only the exact value `unsigned` opts out; an absent param, an empty one
+   * and a typo all mean signed, because a debugging affordance must not
+   * silently downgrade the wire form.
+   */
+  const raw = (await searchParams).dcapi;
+  const dcApiForm = parseDcApiForm(Array.isArray(raw) ? raw[0] : raw);
 
   const locale = await getLocale();
   const t = MESSAGES[locale];
@@ -63,7 +81,12 @@ export default async function DashboardPage() {
 
         <section className="grid gap-4 sm:grid-cols-2">
           {accounts.map((account) => (
-            <AccountPanel key={account.id} account={account} locale={locale} />
+            <AccountPanel
+              key={account.id}
+              account={account}
+              locale={locale}
+              dcApiForm={dcApiForm}
+            />
           ))}
         </section>
 
