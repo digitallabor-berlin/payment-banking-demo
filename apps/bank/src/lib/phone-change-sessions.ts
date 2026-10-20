@@ -256,6 +256,15 @@ export async function startPhoneChange(
   }
 }
 
+/**
+ * Thrown inside `applyPhoneChange`'s transaction to roll it back when the
+ * customer's number moved between the snapshot read and the write.
+ *
+ * A throw rather than a returned value because that is how better-sqlite3
+ * rolls a transaction back; it is caught immediately below and never escapes.
+ */
+class StaleSnapshotError extends Error {}
+
 /** Terminal-with-a-reason. `expired` is a reason here, never a state. */
 function failPhoneChange(db: Db, sessionId: string, reason: string): void {
   db.update(phoneChangeSessions)
@@ -291,6 +300,194 @@ function loadSession(
       ),
     )
     .get();
+}
+
+export type ApplyPhoneChangeResult =
+  | { ok: true; phoneNumber: string }
+  | {
+      ok: false;
+      reason:
+        | "not_found"
+        | "not_verified"
+        | "already_applied"
+        | "expired"
+        | "phone_changed";
+    };
+
+/**
+ * Writes the approved number and moves `verified → applied`.
+ *
+ * A POST rather than part of the poll, for the reason the login flow mints its
+ * cookie on a POST: a GET with a side effect gets fired twice by a prefetch or
+ * a double-poll, and here the side effect writes to a customer's row.
+ *
+ * Synchronous, because better-sqlite3 is. That is not incidental — the guarded
+ * UPDATE below is the whole single-use mechanism and is only meaningful as one
+ * statement rather than a read followed by a write.
+ *
+ * Re-checks only what is LOCAL and could have moved since the poll ran: the
+ * caller still owns the session, the window is still open, and the stored
+ * number still equals the snapshot. Everything the wallet said is already
+ * settled — this function never talks to foundry.
+ */
+export function applyPhoneChange(
+  db: Db,
+  input: { userId: string; sessionId: string },
+  now: number = Date.now(),
+): ApplyPhoneChangeResult {
+  const row = loadSession(db, input.userId, input.sessionId);
+  if (!row) return { ok: false, reason: "not_found" };
+
+  // Distinguished from `not_verified` so the route can answer 410 rather than
+  // 409: an applied session is gone for good, a pending one might yet arrive.
+  if (row.state === "applied") return { ok: false, reason: "already_applied" };
+  if (row.state !== "verified") return { ok: false, reason: "not_verified" };
+
+  if (now - row.createdAt > PHONE_CHANGE_SESSION_TTL_MS) {
+    failPhoneChange(db, input.sessionId, "expired");
+    return { ok: false, reason: "expired" };
+  }
+
+  const user = db
+    .select()
+    .from(users)
+    .where(eq(users.id, row.startedByUserId))
+    .get();
+  if (!user) return { ok: false, reason: "not_found" };
+
+  // THE STALE-SNAPSHOT GATE, and it comes before the guarded write on purpose.
+  //
+  // `old_phone` is half of what the holder signed over. If the number moved
+  // underneath — two dialogs open — writing `new_phone` anyway would honour an
+  // approval of a transition that is no longer the one happening. Refusing
+  // BEFORE the write leaves the session claimable, so the holder's approval is
+  // not burned for nothing: if whatever moved the number is undone, this same
+  // session still applies.
+  //
+  // Exact string equality, NOT `isSamePhoneNumber`: the snapshot and the
+  // column are the same stored string, and a digits-only comparison here would
+  // let a reformat of the same number pass as "unmoved" while the holder had
+  // approved a transition from the old formatting.
+  if (user.phoneNumber !== row.oldPhone) {
+    return { ok: false, reason: "phone_changed" };
+  }
+
+  // ONE TRANSACTION over both writes, as `processPayment` already does for the
+  // debit and its proof package. Without it, a throw between them (SQLITE_BUSY,
+  // a full disk) leaves the session `applied` with the number UNWRITTEN — and
+  // the retry then answers 410, which the dialog shows as a generic failure.
+  // The holder would be told their change did not happen, correctly, and have
+  // no way to make it happen.
+  try {
+    return applyWithin(db, input.sessionId, row);
+  } catch (error) {
+    // The CAS below rolled the transaction back: another connection moved the
+    // number between the read above and the write. Same answer as the
+    // pre-check, and the session is still claimable because the rollback
+    // un-consumed it.
+    if (error instanceof StaleSnapshotError) {
+      return { ok: false, reason: "phone_changed" };
+    }
+    throw error;
+  }
+}
+
+/**
+ * `applyPhoneChange`'s two writes, in one transaction.
+ *
+ * Separated only so the `StaleSnapshotError` catch above reads as a decision
+ * rather than as plumbing wrapped around twenty lines.
+ */
+function applyWithin(
+  db: Db,
+  sessionId: string,
+  row: PhoneChangeSession,
+): ApplyPhoneChangeResult {
+  return db.transaction((tx) => {
+    // A GUARDED WRITE, not a read-then-write. `.changes` is what decides
+    // whether THIS call won the race to consume the session; checking the
+    // state above and then updating unconditionally would let two concurrent
+    // applies both proceed, and the second would write against a snapshot the
+    // first had already invalidated.
+    const consumed = tx
+      .update(phoneChangeSessions)
+      .set({ state: "applied" })
+      .where(
+        and(
+          eq(phoneChangeSessions.id, sessionId),
+          eq(phoneChangeSessions.state, "verified"),
+        ),
+      )
+      .run();
+    if (consumed.changes !== 1) {
+      return { ok: false, reason: "already_applied" } as ApplyPhoneChangeResult;
+    }
+
+    // Compare-and-swap on the snapshot as well, so the stale-snapshot refusal
+    // above holds even if another connection moved the number between that
+    // read and this write. `.changes` of 0 rolls the whole transaction back by
+    // throwing, leaving the session claimable rather than
+    // consumed-and-unapplied.
+    //
+    // UNTESTED, and honestly so: within one process better-sqlite3 is
+    // synchronous and nothing can interleave between the read above and this
+    // write, so this branch is unreachable from any test in this suite. It is
+    // defence for the deployment shape nobody checks before introducing, not
+    // for the one that exists. What IS tested is the property it serves — that
+    // a failure of this second write takes the first one with it.
+    const written = tx
+      .update(users)
+      .set({ phoneNumber: row.newPhone })
+      .where(
+        and(
+          eq(users.id, row.startedByUserId),
+          eq(users.phoneNumber, row.oldPhone),
+        ),
+      )
+      .run();
+    if (written.changes !== 1) throw new StaleSnapshotError();
+
+    return { ok: true, phoneNumber: row.newPhone } as ApplyPhoneChangeResult;
+  });
+}
+
+export type RelayPhoneChangeResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: "not_found" | "no_verification" | "foundry_unavailable";
+    };
+
+/**
+ * Relays a browser Digital Credentials API response to foundry.
+ *
+ * Exists because foundry's `dc-api-response` endpoint is ADMIN authenticated:
+ * the browser cannot call it without the admin key, and the admin key must
+ * never leave the server.
+ *
+ * foundry verifies synchronously and returns a verdict, which is deliberately
+ * DISCARDED. The transaction state it also writes is what the poll already
+ * running in the dialog reads — one state path, not two. Writing the number
+ * here instead would give same-device and cross-device changes two different
+ * routes to a write, and they would drift.
+ */
+export async function relayPhoneChangeDcApiResponse(
+  db: Db,
+  client: FoundryClient,
+  input: { userId: string; sessionId: string; response: string },
+): Promise<RelayPhoneChangeResult> {
+  const row = loadSession(db, input.userId, input.sessionId);
+  if (!row) return { ok: false, reason: "not_found" };
+  if (!row.foundryVerificationId) {
+    return { ok: false, reason: "no_verification" };
+  }
+
+  try {
+    await client.submitDcApiResponse(row.foundryVerificationId, input.response);
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: "foundry_unavailable" };
+  }
 }
 
 export interface PhoneChangeStatusDto {

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FoundryClient } from "@demo/foundry-client";
 import { createDb, type Db } from "../db/index.js";
@@ -10,8 +10,10 @@ import { seed } from "../db/seed.js";
 import { SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID } from "./credential-types.js";
 import {
   PHONE_CHANGE_SESSION_TTL_MS,
+  applyPhoneChange,
   getPhoneChangeStatus,
   refreshPhoneChangeState,
+  relayPhoneChangeDcApiResponse,
   startPhoneChange,
 } from "./phone-change-sessions.js";
 
@@ -842,5 +844,254 @@ describe("startPhoneChange", () => {
 
     expect(verifyCalls(captures)[0]?.body.transport).toBe("request_uri");
     expect(onlyRow()?.transport).toBe("request_uri");
+  });
+});
+/** A session driven all the way to `verified` by a good presentation. */
+async function verifiedSession(now = Date.now()): Promise<string> {
+  const sessionId = await openSession(now);
+  giveAuthenticator("user_anna", "sub_anna");
+  const result = await refreshPhoneChangeState(
+    db,
+    verdictClient(authVerdict("sub_anna")),
+    { ...poll, sessionId },
+    now,
+  );
+  if (!result.ok || result.status.state !== "verified") {
+    throw new Error("expected a verified session");
+  }
+  return sessionId;
+}
+
+function setPhone(userId: string, phoneNumber: string): void {
+  db.update(users).set({ phoneNumber }).where(eq(users.id, userId)).run();
+}
+
+describe("applyPhoneChange", () => {
+  it("writes the approved number and moves verified -> applied", () => {
+    return verifiedSession().then((sessionId) => {
+      const result = applyPhoneChange(db, { ...poll, sessionId });
+
+      expect(result).toEqual({ ok: true, phoneNumber: "+49 172 66666666" });
+      expect(phoneOf("user_anna")).toBe("+49 172 66666666");
+      expect(onlyRow()?.state).toBe("applied");
+      // The other customer is untouched — the flow names a user, not a row
+      // index.
+      expect(phoneOf("user_ben")).toBe("+49 160 2345678");
+    });
+  });
+
+  it("answers not_found for another customer's session", async () => {
+    const sessionId = await verifiedSession();
+    expect(applyPhoneChange(db, { userId: "user_ben", sessionId })).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+    expect(phoneOf("user_anna")).toBe("+49 171 5555555");
+  });
+
+  it("answers not_verified for a pending session", async () => {
+    const sessionId = await openSession();
+    expect(applyPhoneChange(db, { ...poll, sessionId })).toEqual({
+      ok: false,
+      reason: "not_verified",
+    });
+    expect(phoneOf("user_anna")).toBe("+49 171 5555555");
+  });
+
+  it("answers already_applied on a second call", async () => {
+    const sessionId = await verifiedSession();
+    expect(applyPhoneChange(db, { ...poll, sessionId }).ok).toBe(true);
+    // Distinguished from not_verified so the route can answer 410 rather than
+    // 409: an applied session is gone for good.
+    expect(applyPhoneChange(db, { ...poll, sessionId })).toEqual({
+      ok: false,
+      reason: "already_applied",
+    });
+  });
+
+  it("answers expired past the TTL and fails the row", async () => {
+    const sessionId = await verifiedSession(1000);
+    const result = applyPhoneChange(
+      db,
+      { ...poll, sessionId },
+      1000 + PHONE_CHANGE_SESSION_TTL_MS + 1,
+    );
+
+    expect(result).toEqual({ ok: false, reason: "expired" });
+    expect(onlyRow()?.state).toBe("failed");
+    expect(onlyRow()?.failureReason).toBe("expired");
+    expect(phoneOf("user_anna")).toBe("+49 171 5555555");
+  });
+
+  /**
+   * `old_phone` is half of what the holder signed. If the number moved
+   * underneath — two dialogs open — writing `new_phone` anyway would honour an
+   * approval of a transition that is no longer the one happening.
+   */
+  it("refuses phone_changed when the user's number moved underneath", async () => {
+    const sessionId = await verifiedSession();
+    setPhone("user_anna", "+49 160 9999999");
+
+    expect(applyPhoneChange(db, { ...poll, sessionId })).toEqual({
+      ok: false,
+      reason: "phone_changed",
+    });
+    expect(phoneOf("user_anna")).toBe("+49 160 9999999");
+  });
+
+  it("leaves the session CLAIMABLE after a phone_changed refusal", async () => {
+    const sessionId = await verifiedSession();
+    setPhone("user_anna", "+49 160 9999999");
+    expect(applyPhoneChange(db, { ...poll, sessionId }).ok).toBe(false);
+
+    // Refusing BEFORE the guarded write is what makes this possible: a
+    // transient mismatch must not burn the holder's approval for nothing.
+    expect(onlyRow()?.state).toBe("verified");
+    setPhone("user_anna", "+49 171 5555555");
+    expect(applyPhoneChange(db, { ...poll, sessionId })).toEqual({
+      ok: true,
+      phoneNumber: "+49 172 66666666",
+    });
+  });
+
+  /**
+   * The restore between the two applies is what gives this test its teeth:
+   * leave the number changed and the stale-snapshot gate refuses the replay on
+   * its own, and the test would pass with the guarded UPDATE deleted.
+   */
+  it("writes the number exactly ONCE across two applies", async () => {
+    const sessionId = await verifiedSession();
+    expect(applyPhoneChange(db, { ...poll, sessionId }).ok).toBe(true);
+
+    setPhone("user_anna", "+49 171 5555555");
+    expect(applyPhoneChange(db, { ...poll, sessionId })).toEqual({
+      ok: false,
+      reason: "already_applied",
+    });
+    expect(phoneOf("user_anna")).toBe("+49 171 5555555");
+  });
+
+  /**
+   * Both writes are in ONE transaction. Without it a throw between them leaves
+   * the session `applied` with the number unwritten, the retry answers 410,
+   * and the holder is told their change did not happen with no way to make it
+   * happen.
+   *
+   * Forced with a SQLite trigger rather than by racing the compare-and-swap:
+   * within one process better-sqlite3 is synchronous and nothing can
+   * interleave between the snapshot read and the write, so the CAS's own
+   * zero-change branch is unreachable from any test in this suite. A trigger
+   * that aborts the second write exercises the property that actually matters
+   * — the first write must not survive it — for ANY failure of the second.
+   */
+  it("rolls both writes back together", async () => {
+    const sessionId = await verifiedSession();
+    db.run(
+      sql`CREATE TRIGGER no_phone_write BEFORE UPDATE OF phone_number ON users BEGIN SELECT RAISE(ABORT, 'nope'); END`,
+    );
+
+    expect(() => applyPhoneChange(db, { ...poll, sessionId })).toThrow(/nope/);
+
+    db.run(sql`DROP TRIGGER no_phone_write`);
+    expect(onlyRow()?.state).toBe("verified");
+    expect(phoneOf("user_anna")).toBe("+49 171 5555555");
+  });
+});
+
+describe("relayPhoneChangeDcApiResponse", () => {
+  /** Captures the relay POST and replies with a verdict it should discard. */
+  function relayClient(calls: Capture[], status = 200): FoundryClient {
+    const fetchImpl = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      calls.push({
+        url,
+        body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      });
+      return new Response(
+        JSON.stringify({ verified: true, checks: [], credentials: [] }),
+        { status, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    return new FoundryClient({
+      adminUrl: "http://f:9000",
+      adminKey: "k",
+      fetchImpl,
+    });
+  }
+
+  it("submits the response for the session's verification", async () => {
+    const sessionId = await openSession();
+    const calls: Capture[] = [];
+    const result = await relayPhoneChangeDcApiResponse(db, relayClient(calls), {
+      ...poll,
+      sessionId,
+      response: "wallet-response",
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toContain("/v_phone_1/dc-api-response");
+    expect(calls[0]?.body.response).toBe("wallet-response");
+  });
+
+  it("answers not_found for another customer's session", async () => {
+    const sessionId = await openSession();
+    const calls: Capture[] = [];
+    const result = await relayPhoneChangeDcApiResponse(db, relayClient(calls), {
+      userId: "user_ben",
+      sessionId,
+      response: "wallet-response",
+    });
+
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("answers no_verification when the row has no foundry id", async () => {
+    const sessionId = await openSession();
+    db.update(phoneChangeSessions)
+      .set({ foundryVerificationId: null })
+      .where(eq(phoneChangeSessions.id, sessionId))
+      .run();
+
+    const calls: Capture[] = [];
+    const result = await relayPhoneChangeDcApiResponse(db, relayClient(calls), {
+      ...poll,
+      sessionId,
+      response: "wallet-response",
+    });
+
+    expect(result).toEqual({ ok: false, reason: "no_verification" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("answers foundry_unavailable when submit throws", async () => {
+    const sessionId = await openSession();
+    const result = await relayPhoneChangeDcApiResponse(
+      db,
+      relayClient([], 503),
+      { ...poll, sessionId, response: "wallet-response" },
+    );
+
+    expect(result).toEqual({ ok: false, reason: "foundry_unavailable" });
+  });
+
+  it("discards foundry's verdict", async () => {
+    // The verdict foundry returns here is deliberately ignored: the poll
+    // already running in the dialog reads the transaction state foundry also
+    // wrote. One state path, not two.
+    const sessionId = await openSession();
+    await relayPhoneChangeDcApiResponse(db, relayClient([]), {
+      ...poll,
+      sessionId,
+      response: "wallet-response",
+    });
+
+    expect(onlyRow()?.state).toBe("pending");
+    expect(onlyRow()?.approvedByUserId).toBeNull();
   });
 });
