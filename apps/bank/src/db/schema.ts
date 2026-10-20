@@ -389,6 +389,84 @@ export const limitChangeSessions = sqliteTable("limit_change_sessions", {
  * REASON computed from `created_at` at read time, because nothing in this
  * project runs a background sweep.
  */
+/**
+ * One attempt to change a customer's mobile number, approved in the wallet by
+ * a Sparkassen Authenticator presentation.
+ *
+ * Modelled directly on `limit_change_sessions` and deliberately NOT generalised
+ * into a shared "approval session" abstraction with it, `transfer_sessions` and
+ * `login_sessions`. Four instances is where generalisation starts to look
+ * tempting, and these four still differ in exactly the places that matter:
+ * what is snapshotted, what the terminal write is, and who may approve. The
+ * repeated columns are cheap; a wrong abstraction over the gates is not.
+ *
+ * **THERE IS NO ACCOUNT ID**, unlike `limit_change_sessions` and
+ * `transfer_sessions`: the mobile number is a property of the customer, not of
+ * an account. That makes `loadSession` scope two ways rather than three.
+ *
+ * **This table MUST be deleted in `seedWithin`.** It has a NOT NULL FK to
+ * `users`, `createDb` sets `foreign_keys = ON`, and `seed()` deletes `users` —
+ * so one abandoned attempt would otherwise make `pnpm seed` throw partway
+ * through. Locally that is EVERY attempt, because no local foundry declares
+ * `sparkassen_auth`.
+ */
+export const phoneChangeSessions = sqliteTable("phone_change_sessions", {
+ /** `phone_<uuid>`. */
+ id: text("id").primaryKey(),
+ /** Who opened the dialog. From the session cookie, at request time. */
+ startedByUserId: text("started_by_user_id")
+  .notNull()
+  .references(() => users.id),
+ /**
+  * Who the wallet's `sub` resolved to. NULL until the poll's ownership gate
+  * runs, and only ever written equal to `started_by_user_id` — the gate
+  * refuses anything else with `wrong_customer`. Recorded rather than merely
+  * checked so the row says who approved rather than only that someone did.
+  */
+ approvedByUserId: text("approved_by_user_id").references(() => users.id),
+ /**
+  * The customer's number at request time — a SNAPSHOT, not a re-read.
+  *
+  * It is half of what the holder signed over. If `users.phone_number` moved
+  * underneath (two dialogs open), writing `new_phone` anyway would honour an
+  * approval of a transition that is no longer the one happening, so
+  * `applyPhoneChange` refuses when the user row no longer agrees with it.
+  */
+ oldPhone: text("old_phone").notNull(),
+ /** The other half of what the holder signed over. */
+ newPhone: text("new_phone").notNull(),
+ foundryVerificationId: text("foundry_verification_id"),
+ state: text("state", {
+  enum: ["pending", "verified", "applied", "failed"],
+ })
+  .notNull()
+  .default("pending"),
+ /** Expiry is a reason, never a fifth state. */
+ failureReason: text("failure_reason"),
+ openid4vpUri: text("openid4vp_uri"),
+ requestUri: text("request_uri"),
+ /**
+  * The transport foundry ACTUALLY served, not the one asked for — see
+  * `startPhoneChange`'s soft fallback. On a `failed` row it holds what was
+  * attempted, so the row names the transport that failed.
+  */
+ transport: text("transport", {
+  enum: ["request_uri", "dc_api", "dc_api_signed"],
+ })
+  .notNull()
+  .default("request_uri"),
+ /** foundry's inline request object, verbatim. NULL under `request_uri`. */
+ dcApiRequestJson: text("dc_api_request_json"),
+ /**
+  * foundry's DC API exchange protocol identifier, stored verbatim and replayed
+  * verbatim. Never derived: a signed request object sent under the unsigned
+  * identifier fails inside the wallet with no server-side trace.
+  */
+ dcApiProtocol: text("dc_api_protocol"),
+ /** The TTL is computed from this at read time. */
+ createdAt: integer("created_at").notNull(),
+});
+
 export const transferSessions = sqliteTable("transfer_sessions", {
  /** `transfer_<uuid>`. */
  id: text("id").primaryKey(),
@@ -470,6 +548,8 @@ export type CredentialState = Credential["state"];
 export type LoginSession = typeof loginSessions.$inferSelect;
 export type LoginSessionState = LoginSession["state"];
 export type LimitChangeSession = typeof limitChangeSessions.$inferSelect;
+export type PhoneChangeSession = typeof phoneChangeSessions.$inferSelect;
+export type PhoneChangeSessionState = PhoneChangeSession["state"];
 export type TransferSession = typeof transferSessions.$inferSelect;
 export type TransferSessionState = TransferSession["state"];
 export type LimitChangeSessionState = LimitChangeSession["state"];

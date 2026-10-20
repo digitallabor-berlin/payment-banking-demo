@@ -7,6 +7,7 @@ import {
   credentials,
   limitChangeSessions,
   loginSessions,
+  phoneChangeSessions,
   transactionProofs,
   transactions,
   transferSessions,
@@ -164,6 +165,11 @@ function seedWithin(db: Db, now: number): void {
   // `transaction_proofs` references `transactions`.
   db.delete(transferSessions).run();
   db.delete(limitChangeSessions).run();
+  // References only `users`, so it may go anywhere before that delete — but it
+  // MUST be here: `createDb` sets `foreign_keys = ON` and `seed()` deletes
+  // `users`, so one abandoned phone-change attempt would otherwise make
+  // `pnpm seed` throw partway through.
+  db.delete(phoneChangeSessions).run();
   db.delete(transactionProofs).run();
   db.delete(loginSessions).run();
   db.delete(transactions).run();
