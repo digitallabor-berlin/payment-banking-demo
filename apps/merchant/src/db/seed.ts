@@ -194,12 +194,43 @@ const FIXTURES: Fixture[] = [
  * Resets the database to the documented fixtures (spec §5.3). Idempotent, and
  * deliberately leaves orders/payment_sessions alone — those are runtime data,
  * not fixtures, and re-seeding mid-demo should not erase an in-progress order.
+ *
+ * **UPSERTS rather than delete-then-insert, and it must stay that way.** This
+ * was `DELETE FROM products` followed by N inserts, and it threw
+ * `FOREIGN KEY constraint failed` the moment any order had ever been placed:
+ * `order_items.product_id` references `products.id` with ON DELETE NO ACTION
+ * and `createDb` sets `foreign_keys = ON`. That is every database a human has
+ * ever shopped against, and the failure was PERMANENT — the documented reset
+ * command could never run again on that file.
+ *
+ * The obvious fix is wrong. Deleting `order_items` first, the way the BANK's
+ * `seed()` deletes children before parents, would contradict the paragraph
+ * above: orders survive a reset here by design. The bank's seed is allowed to
+ * destroy everything because "reset the demo" is its whole contract; this one
+ * is not. So the fix is to stop *removing* rows it is not permitted to remove,
+ * not to widen what it removes.
+ *
+ * Wrapped in `db.transaction` for the reason the bank's is: a throw partway
+ * through would otherwise leave some products at fixture values and others
+ * stale, with no indication which.
+ *
+ * One consequence, stated rather than coded around: a product that is no
+ * longer in `FIXTURES` survives. Nothing can produce one today — `seed()` is
+ * the only writer of this table — so handling it would be a branch no caller
+ * can reach. If `FIXTURES` ever shrinks, a stale product that no order
+ * references can be deleted; one that an order references cannot be, and that
+ * is the same constraint all over again.
  */
 export function seed(db: Db): void {
-  db.delete(products).run();
-  for (const fixture of FIXTURES) {
-    db.insert(products).values(fixture).run();
-  }
+  db.transaction(() => {
+    for (const fixture of FIXTURES) {
+      const { id: _id, ...columns } = fixture;
+      db.insert(products)
+        .values(fixture)
+        .onConflictDoUpdate({ target: products.id, set: columns })
+        .run();
+    }
+  });
 }
 
 /**

@@ -53,8 +53,19 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**1178 tests** (838 bank + 287 merchant + 16 foundry-client + 37 ui), measured
+**1182 tests** (838 bank + 291 merchant + 16 foundry-client + 37 ui), measured
 2026-10-20.
+
+That was **1178** before the merchant-`seed()` fix, which added 4, all in
+`apps/merchant/src/db/seed.test.ts` — a `seed` describe beside the existing
+`seedIfEmpty` one, which had never tested `seed()` at all. **Only 2 of the 4
+were red**, and which 2 were already green is the whole shape of the fix: the
+green pair (`resets a modified fixture back to its documented values`, `seeds
+every fixture exactly once across repeated runs`) pins the CONTRACT the fix had
+to preserve, not the bug. Without them, "simplifying" the upsert back to
+delete-then-insert would pass them and fail only the other two — with them, the
+reason the upsert exists is visible from the test file. Tests that are green on
+arrival are not necessarily tests that were unnecessary.
 
 That was **1051** before the send-money work, not the **1050** this file
 asserted — and the correction is *provable* rather than argued, which is worth
@@ -604,6 +615,34 @@ them without reading the linked reasoning first.
 
   Found by the final review, measured before being fixed, and it is exactly the
   class of defect a green suite cannot see: nothing tested `seed()` twice.
+
+- **The MERCHANT's `seed()` had the mirror-image defect, and the obvious fix
+  was wrong.** `order_items.product_id` references `products.id` with ON DELETE
+  NO ACTION, so its `DELETE FROM products` threw `FOREIGN KEY constraint
+  failed` the moment any order had ever been placed — which is every database a
+  human has ever shopped against. Permanently: the documented reset command
+  could never run again on that file.
+
+  **Do not fix it the way the bank's was fixed.** Deleting `order_items` first,
+  children-before-parents, contradicts that function's own contract — the
+  merchant's `seed()` deliberately *preserves* orders and payment sessions
+  ("runtime data, not fixtures"), while the bank's is allowed to destroy
+  everything because "reset the demo" is the whole of its contract. The fix was
+  to stop **removing** rows it is not permitted to remove: it now UPSERTS each
+  fixture (`onConflictDoUpdate` on the primary key), so no row is ever deleted,
+  no FK is ever violated, and an in-progress order survives. Verified on the
+  real broken database: `pnpm seed` twice in a row, with 16 orders, 22
+  order_items and 2 payment_sessions all intact afterwards.
+
+  It is also now wrapped in `db.transaction`, for the reason the bank's is.
+  Two of the four new tests were **green before the fix** and are the ones that
+  matter most — they pin the contract the fix had to not break (a modified
+  fixture is reset; repeated runs do not duplicate), so a future "simplification"
+  back to delete-then-insert fails on the other two rather than passing quietly.
+
+  One consequence, stated rather than coded around: a product no longer in
+  `FIXTURES` now survives a reset. Nothing can produce one — `seed()` is the
+  only writer of that table — so handling it would be an unreachable branch.
 
 - **A 2xx is not a successful mint.** `FoundryClient.request` does
   `JSON.parse(text) as T` and throws only on a non-2xx or a non-JSON body, so a
