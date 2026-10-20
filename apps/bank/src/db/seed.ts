@@ -9,6 +9,7 @@ import {
   loginSessions,
   transactionProofs,
   transactions,
+  transferSessions,
   users,
 } from "./schema.js";
 import { env } from "../env.js";
@@ -149,8 +150,11 @@ export function seed(db: Db, now = Date.now()): void {
 
 /** The body of `seed`, factored out only so the transaction wrapper is legible. */
 function seedWithin(db: Db, now: number): void {
-  // Children before parents. `limit_change_sessions` references BOTH `users`
-  // and `accounts`; `transaction_proofs` references `transactions`.
+  // Children before parents. `transfer_sessions` references `users`,
+  // `accounts` AND `transactions`, so it goes first of all;
+  // `limit_change_sessions` references both `users` and `accounts`;
+  // `transaction_proofs` references `transactions`.
+  db.delete(transferSessions).run();
   db.delete(limitChangeSessions).run();
   db.delete(transactionProofs).run();
   db.delete(loginSessions).run();

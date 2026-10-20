@@ -326,6 +326,103 @@ export const limitChangeSessions = sqliteTable("limit_change_sessions", {
  createdAt: integer("created_at").notNull(),
 });
 
+/**
+ * One row per attempt to send money to an external IBAN.
+ *
+ * Modelled directly on `limit_change_sessions` and deliberately NOT
+ * generalised into a shared "approval session" abstraction with it and
+ * `login_sessions`. Three instances of a pattern is where generalisation
+ * starts to pay, and these three differ in exactly the places that matter:
+ * what is snapshotted, what the terminal write is, and who may approve.
+ *
+ * THE TWO USER COLUMNS ARE DELIBERATELY TWO, for the reason
+ * `limit_change_sessions` states: `started_by_user_id` is the session
+ * cookie's owner at request time, `approved_by_user_id` is whoever the
+ * wallet's disclosed `sub` resolved to, and the gate that makes this flow
+ * safe is precisely that they must be equal.
+ *
+ * **THERE IS NO AMOUNT SNAPSHOT COLUMN, and the absence is deliberate.**
+ * `limit_change_sessions` carries `old_limit_cents` because it is half of what
+ * the holder signed over. Here everything the holder signed is already a
+ * column — the amount, the name, the IBAN and the purpose. The daily limit
+ * and the balance are NOT signed; they are preconditions, re-checked against
+ * the live account at apply time rather than compared against a snapshot.
+ *
+ * There is no `expired` state, for the same reason: expiry is a FAILURE
+ * REASON computed from `created_at` at read time, because nothing in this
+ * project runs a background sweep.
+ */
+export const transferSessions = sqliteTable("transfer_sessions", {
+ /** `transfer_<uuid>`. */
+ id: text("id").primaryKey(),
+ /** Who opened the dialog. From the session cookie, at request time. */
+ startedByUserId: text("started_by_user_id")
+  .notNull()
+  .references(() => users.id),
+ /**
+  * Who the wallet's `sub` resolved to. NULL until the poll's gate runs, and
+  * only ever written equal to `started_by_user_id` — the gate refuses
+  * anything else with `wrong_customer`. Recorded rather than merely checked so
+  * the row says who approved rather than only that someone did.
+  */
+ approvedByUserId: text("approved_by_user_id").references(() => users.id),
+ accountId: text("account_id")
+  .notNull()
+  .references(() => accounts.id),
+ /** Trimmed. One of the four values the holder signed over. */
+ payeeName: text("payee_name").notNull(),
+ /**
+  * NORMALISED: whitespace stripped, upper-cased.
+  *
+  * The grouped-in-fours form the holder reads on the consent screen is
+  * derived from this at payload-build time via `formatIban`, so there is one
+  * stored source and one deterministic derivation — never two columns that
+  * could disagree about one IBAN.
+  */
+ payeeIban: text("payee_iban").notNull(),
+ /** Integer cents, always positive here. The DEBIT is negative; see below. */
+ amountCents: integer("amount_cents").notNull(),
+ /** Trimmed, non-empty. A blank row on the consent screen is a defect. */
+ purpose: text("purpose").notNull(),
+ foundryVerificationId: text("foundry_verification_id"),
+ state: text("state", {
+  enum: ["pending", "verified", "applied", "failed"],
+ })
+  .notNull()
+  .default("pending"),
+ failureReason: text("failure_reason"),
+ openid4vpUri: text("openid4vp_uri"),
+ requestUri: text("request_uri"),
+ /**
+  * The transport foundry ACTUALLY served, not the one asked for — see
+  * `startTransfer`'s soft fallback. On a `failed` row it holds what was
+  * attempted, so the row names the transport that failed.
+  */
+ transport: text("transport", {
+  enum: ["request_uri", "dc_api", "dc_api_signed"],
+ })
+  .notNull()
+  .default("request_uri"),
+ /** foundry's inline request object, verbatim. NULL under `request_uri`. */
+ dcApiRequestJson: text("dc_api_request_json"),
+ /**
+  * foundry's DC API exchange protocol identifier, stored verbatim and replayed
+  * verbatim. Persisted rather than derived from `transport` for the reason
+  * `login_sessions` documents: a signed request object sent under the unsigned
+  * identifier fails inside the wallet with no server-side trace.
+  */
+ dcApiProtocol: text("dc_api_protocol"),
+ /**
+  * The debit this session produced. NULL until applied, and written in the
+  * SAME database transaction as the `verified → applied` UPDATE and the
+  * balance decrement — so a session and its debit can never disagree about
+  * whether the money moved.
+  */
+ transactionId: text("transaction_id").references(() => transactions.id),
+ /** The TTL is computed from this at read time. */
+ createdAt: integer("created_at").notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type Card = typeof cards.$inferSelect;
@@ -336,4 +433,6 @@ export type CredentialState = Credential["state"];
 export type LoginSession = typeof loginSessions.$inferSelect;
 export type LoginSessionState = LoginSession["state"];
 export type LimitChangeSession = typeof limitChangeSessions.$inferSelect;
+export type TransferSession = typeof transferSessions.$inferSelect;
+export type TransferSessionState = TransferSession["state"];
 export type LimitChangeSessionState = LimitChangeSession["state"];

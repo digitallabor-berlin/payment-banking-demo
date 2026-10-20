@@ -12,6 +12,7 @@ import {
   limitChangeSessions,
   loginSessions,
   transactionProofs,
+  transferSessions,
   transactions,
   users,
 } from "./schema.js";
@@ -577,6 +578,130 @@ describe("limit_change_sessions", () => {
         .values(values({ approvedByUserId: "nobody" }))
         .run(),
     ).toThrow();
+  });
+});
+
+describe("transfer_sessions", () => {
+  /** A complete row minus whatever the case under test is about. */
+  function values(over: Record<string, unknown> = {}) {
+    return {
+      id: "transfer_1",
+      startedByUserId: "user_anna",
+      accountId: "acc_anna",
+      payeeName: "Max Mustermann",
+      payeeIban: "DE89370400440532013000",
+      amountCents: 25_000,
+      purpose: "Rent October",
+      createdAt: 1000,
+      ...over,
+    };
+  }
+
+  beforeEach(() => {
+    seed(db);
+  });
+
+  it("rejects a transfer session with no started_by_user_id", () => {
+    const incomplete = values();
+    delete (incomplete as Record<string, unknown>).startedByUserId;
+    expect(() =>
+      db
+        .insert(transferSessions)
+        .values(incomplete as never)
+        .run(),
+    ).toThrow();
+  });
+
+  it("rejects a transfer session with no account_id", () => {
+    const incomplete = values();
+    delete (incomplete as Record<string, unknown>).accountId;
+    expect(() =>
+      db
+        .insert(transferSessions)
+        .values(incomplete as never)
+        .run(),
+    ).toThrow();
+  });
+
+  it("rejects a transfer session whose account_id is not an account", () => {
+    expect(() =>
+      db
+        .insert(transferSessions)
+        .values(values({ accountId: "acc_nobody" }))
+        .run(),
+    ).toThrow();
+  });
+
+  it("defaults state to pending and transport to request_uri", () => {
+    db.insert(transferSessions).values(values()).run();
+
+    const row = db.select().from(transferSessions).get();
+    expect(row?.state).toBe("pending");
+    expect(row?.transport).toBe("request_uri");
+    expect(row?.foundryVerificationId).toBeNull();
+    expect(row?.failureReason).toBeNull();
+    // NULL, not the empty string: a request_uri session performs no DC API
+    // invocation, so there is no protocol identifier to report.
+    expect(row?.dcApiProtocol).toBeNull();
+  });
+
+  it("accepts a null approved_by_user_id and a null transaction_id", () => {
+    db.insert(transferSessions).values(values()).run();
+
+    const row = db.select().from(transferSessions).get();
+    // Two user columns, not one, for the reason `limit_change_sessions`
+    // documents: "who asked" and "who approved" are distinct facts, and the
+    // ownership gate is precisely that they must be equal. The gate has not
+    // run yet, so its output cannot be known.
+    expect(row?.approvedByUserId).toBeNull();
+    expect(row?.startedByUserId).toBe("user_anna");
+    // NULL until applied. It is written in the SAME transaction as the debit,
+    // so a session and its transaction can never disagree about whether the
+    // money moved.
+    expect(row?.transactionId).toBeNull();
+  });
+
+  it("stores amount_cents as an integer and the three text fields verbatim", () => {
+    db.insert(transferSessions).values(values()).run();
+
+    const row = db.select().from(transferSessions).get();
+    expect(row?.amountCents).toBe(25_000);
+    expect(row?.payeeName).toBe("Max Mustermann");
+    // The NORMALISED form is what is stored. The grouped-in-fours rendering
+    // the holder reads on the consent screen is derived from this at build
+    // time, so there is one source and one derivation.
+    expect(row?.payeeIban).toBe("DE89370400440532013000");
+    expect(row?.purpose).toBe("Rent October");
+  });
+
+  /**
+   * The same regression `limit_change_sessions` records above, reached by the
+   * same route: NOT NULL FKs to both `users` and `accounts`, and `createDb`
+   * sets `foreign_keys = ON`. One abandoned transfer attempt is enough — and
+   * locally that is EVERY attempt, because no local foundry declares
+   * `sparkassen_auth`.
+   */
+  it("does not block a re-seed", () => {
+    db.insert(transferSessions)
+      .values(values({ state: "failed", failureReason: "metadata_unavailable" }))
+      .run();
+
+    expect(() => seed(db)).not.toThrow();
+    expect(db.select().from(transferSessions).all()).toHaveLength(0);
+  });
+
+  it("leaves the database whole when a re-seed is attempted", () => {
+    db.insert(transferSessions).values(values()).run();
+    seed(db);
+
+    // The half-wiped state is the damage, not the throw: without the atomic
+    // wrapper a throw on `accounts` leaves cards and transactions already gone,
+    // and the documented reset command produces a dashboard holding accounts
+    // and nothing else.
+    expect(db.select().from(users).all()).toHaveLength(2);
+    expect(db.select().from(accounts).all()).toHaveLength(2);
+    expect(db.select().from(cards).all()).toHaveLength(2);
+    expect(db.select().from(transactions).all()).toHaveLength(20);
   });
 });
 
