@@ -51,8 +51,13 @@ export const de: Messages = {
     greeting: (name) => `Guten Tag, ${name}`,
     payments: "Zahlungsmittel",
     credentials: "Nachweise",
+    profile: "Ihre Daten",
     recentTransactions: "Letzte Umsätze",
     showAll: "Alle anzeigen",
+  },
+  profile: {
+    username: "Benutzername",
+    mobileNumber: "Mobilnummer",
   },
   transactions: {
     title: "Umsätze",
@@ -138,6 +143,41 @@ export const de: Messages = {
       "Das Konto weist für diese Überweisung keine ausreichende Deckung auf. Es wurde nichts gesendet.",
     verificationFailed:
       "Die Antwort Ihrer Wallet konnte nicht geprüft werden. Es wurde kein Geld gesendet.",
+  },
+  phones: {
+    change: "Ändern",
+    dialogTitle: "Mobilnummer ändern",
+    dialogLead:
+      "Geben Sie Ihre neue Mobilnummer ein. Sie bestätigen die Änderung in Ihrer Wallet, bevor sie wirksam wird.",
+    mobileNumber: "Neue Mobilnummer",
+    hint: "Im internationalen Format, zum Beispiel +49 171 5555555.",
+    continue: "Weiter",
+    cancel: "Abbrechen",
+    close: "Schließen",
+    approveTitle: "In Ihrer Wallet bestätigen",
+    confirmInApp: "Bestätigen Sie die neue Nummer in Ihrer Wallet-App.",
+    openInWallet: "In Wallet öffnen",
+    scanCode: "Scannen Sie diesen Code mit der Wallet-App auf Ihrem Smartphone.",
+    qrAlt: "QR-Code für die Änderung der Mobilnummer",
+    waiting: "Warten auf Ihre Wallet…",
+    preparing: "Wird vorbereitet…",
+    walletUnavailable:
+      "Ihre Wallet hat nicht geantwortet. Sie können stattdessen einen Code mit der Wallet-App auf Ihrem Smartphone scannen.",
+    showQrCode: "QR-Code anzeigen",
+    successTitle: "Mobilnummer geändert",
+    successBody: (phoneNumber) =>
+      `Wir erreichen Sie ab sofort unter ${phoneNumber}.`,
+    failedTitle: "Mobilnummer nicht geändert",
+    expired: "Die Anfrage ist abgelaufen. Bitte versuchen Sie es erneut.",
+    unknownCredential:
+      "Dieser Nachweis ist gültig, kann aber keinem Kunden zugeordnet werden. Fügen Sie den Sparkassen Authenticator über Ihre Übersicht erneut zur Wallet hinzu und versuchen Sie es dann noch einmal.",
+    phoneChanged:
+      "Ihre Mobilnummer hat sich geändert, während wir auf Ihre Wallet gewartet haben. Diese Bestätigung passt nicht mehr. Bitte starten Sie erneut.",
+    invalidPhone:
+      "Das sieht nicht nach einer Mobilnummer aus. Bitte verwenden Sie das internationale Format, zum Beispiel +49 171 5555555.",
+    phoneUnchanged: "Das ist bereits Ihre Mobilnummer.",
+    verificationFailed:
+      "Die Antwort Ihrer Wallet konnte nicht geprüft werden. Ihre Mobilnummer bleibt unverändert.",
   },
   credential: {
     ageTitle: "Altersnachweis",
