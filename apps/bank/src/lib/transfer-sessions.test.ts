@@ -5,13 +5,20 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FoundryClient } from "@demo/foundry-client";
 import { createDb, type Db } from "../db/index.js";
-import { accounts, credentials, transferSessions } from "../db/schema.js";
+import {
+  accounts,
+  credentials,
+  transactions,
+  transferSessions,
+} from "../db/schema.js";
 import { seed } from "../db/seed.js";
 import { SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID } from "./credential-types.js";
 import {
   TRANSFER_SESSION_TTL_MS,
+  applyTransfer,
   getTransferStatus,
   refreshTransferState,
+  relayTransferDcApiResponse,
   startTransfer,
 } from "./transfer-sessions.js";
 
@@ -796,5 +803,306 @@ describe("getTransferStatus", () => {
       amountCents: 25_000,
       payeeName: "Max Mustermann",
     });
+  });
+});
+
+/** Drives a real session all the way to `verified` through the poll's gates. */
+async function verifiedSession(
+  sub = "sub_anna",
+  now = Date.now(),
+): Promise<string> {
+  const sessionId = await openSession(now);
+  giveAuthenticator("user_anna", sub);
+  const polled = await refreshTransferState(
+    db,
+    verdictClient(authVerdict(sub)),
+    { ...POLL, sessionId },
+    now,
+  );
+  if (!polled.ok || polled.status.state !== "verified") {
+    throw new Error("expected a verified session");
+  }
+  return sessionId;
+}
+
+function accountOf(id = "acc_anna") {
+  return db.select().from(accounts).where(eq(accounts.id, id)).get()!;
+}
+
+function setMoney(limitCents: number, balanceCents: number, id = "acc_anna") {
+  db.update(accounts)
+    .set({ dailyLimitCents: limitCents, balanceCents })
+    .where(eq(accounts.id, id))
+    .run();
+}
+
+function transferRows() {
+  return db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.counterparty, "Max Mustermann"))
+    .all();
+}
+
+describe("applyTransfer", () => {
+  it("refuses another customer's session with not_found", async () => {
+    const sessionId = await verifiedSession();
+    expect(
+      applyTransfer(db, { ...POLL, userId: "user_ben", sessionId }),
+    ).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("refuses a pending session with not_verified", async () => {
+    const sessionId = await openSession();
+    expect(applyTransfer(db, { ...POLL, sessionId })).toEqual({
+      ok: false,
+      reason: "not_verified",
+    });
+  });
+
+  it("refuses an applied session with already_applied", async () => {
+    // Distinguished from `not_verified` so the route can answer 410 rather
+    // than 409: an applied session is gone for good.
+    const sessionId = await verifiedSession();
+    expect(applyTransfer(db, { ...POLL, sessionId }).ok).toBe(true);
+
+    expect(applyTransfer(db, { ...POLL, sessionId })).toEqual({
+      ok: false,
+      reason: "already_applied",
+    });
+  });
+
+  it("refuses past the TTL with expired", async () => {
+    const started = 1_000_000;
+    const sessionId = await verifiedSession("sub_anna", started);
+
+    expect(
+      applyTransfer(
+        db,
+        { ...POLL, sessionId },
+        started + TRANSFER_SESSION_TTL_MS + 1,
+      ),
+    ).toEqual({ ok: false, reason: "expired" });
+    expect(transferRows()).toHaveLength(0);
+  });
+
+  it("refuses with limit_exceeded when the limit dropped under it", async () => {
+    // A limit change running in another tab can lower the limit underneath a
+    // transfer that is already in the wallet. The limit is NOT signed — it is
+    // a precondition, re-checked against the live account.
+    const sessionId = await verifiedSession();
+    setMoney(24_999, accountOf().balanceCents);
+
+    expect(applyTransfer(db, { ...POLL, sessionId })).toEqual({
+      ok: false,
+      reason: "limit_exceeded",
+    });
+    expect(transferRows()).toHaveLength(0);
+  });
+
+  it("leaves the session VERIFIED after a limit_exceeded refusal", async () => {
+    // Refusing BEFORE the guarded write leaves the session claimable, so a
+    // transient refusal does not burn the holder's approval: undo whatever
+    // moved the limit and this same session still applies.
+    const sessionId = await verifiedSession();
+    setMoney(24_999, accountOf().balanceCents);
+    applyTransfer(db, { ...POLL, sessionId });
+
+    expect(rowOf(sessionId)?.state).toBe("verified");
+
+    setMoney(100_000, accountOf().balanceCents);
+    expect(applyTransfer(db, { ...POLL, sessionId }).ok).toBe(true);
+  });
+
+  it("refuses with insufficient_funds when the balance dropped under it", async () => {
+    const sessionId = await verifiedSession();
+    setMoney(100_000, 24_999);
+
+    expect(applyTransfer(db, { ...POLL, sessionId })).toEqual({
+      ok: false,
+      reason: "insufficient_funds",
+    });
+    expect(transferRows()).toHaveLength(0);
+  });
+
+  it("leaves the session VERIFIED after an insufficient_funds refusal", async () => {
+    const sessionId = await verifiedSession();
+    setMoney(100_000, 24_999);
+    applyTransfer(db, { ...POLL, sessionId });
+
+    expect(rowOf(sessionId)?.state).toBe("verified");
+  });
+
+  it("ALLOWS an amount exactly equal to the current limit and balance", async () => {
+    // Both gates are `>`, so equality passes and a customer can send their
+    // whole balance.
+    const sessionId = await verifiedSession();
+    setMoney(25_000, 25_000);
+
+    const result = applyTransfer(db, { ...POLL, sessionId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.newBalanceCents).toBe(0);
+  });
+
+  it("debits the account by the amount", async () => {
+    const sessionId = await verifiedSession();
+    const before = accountOf().balanceCents;
+
+    const result = applyTransfer(db, { ...POLL, sessionId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.newBalanceCents).toBe(before - 25_000);
+    expect(accountOf().balanceCents).toBe(before - 25_000);
+  });
+
+  it("books a NEGATIVE transaction carrying the name and the purpose", async () => {
+    const sessionId = await verifiedSession();
+    applyTransfer(db, { ...POLL, sessionId });
+
+    const rows = transferRows();
+    expect(rows).toHaveLength(1);
+    const tx = rows[0]!;
+    // Negative: it is a debit, and that is the ledger's convention.
+    expect(tx.amountCents).toBe(-25_000);
+    expect(tx.counterparty).toBe("Max Mustermann");
+    expect(tx.reference).toBe("Rent October");
+    expect(tx.idempotencyKey).toBe(sessionId);
+    expect(tx.accountId).toBe("acc_anna");
+  });
+
+  it("records the approving authenticator as the transaction's credential_id", async () => {
+    // The way a card payment records the credential that authorised it.
+    const sessionId = await verifiedSession("sub_anna");
+    applyTransfer(db, { ...POLL, sessionId });
+
+    expect(transferRows()[0]!.credentialId).toBe("sub_anna");
+  });
+
+  it("writes transaction_id onto the session in the same transaction", async () => {
+    const sessionId = await verifiedSession();
+    const result = applyTransfer(db, { ...POLL, sessionId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const row = rowOf(sessionId)!;
+    expect(row.state).toBe("applied");
+    // A session and its debit can never disagree about whether it happened.
+    expect(row.transactionId).toBe(result.transactionId);
+    expect(transferRows()[0]!.id).toBe(result.transactionId);
+  });
+
+  it("debits exactly ONCE across two applies", async () => {
+    const sessionId = await verifiedSession();
+    const before = accountOf().balanceCents;
+
+    expect(applyTransfer(db, { ...POLL, sessionId }).ok).toBe(true);
+
+    // RESTORE the balance before the replay. Leaving the account short means
+    // the money gate refuses the second call, and this test would then pass
+    // with the guarded UPDATE deleted.
+    setMoney(100_000, before);
+
+    expect(applyTransfer(db, { ...POLL, sessionId })).toEqual({
+      ok: false,
+      reason: "already_applied",
+    });
+    expect(transferRows()).toHaveLength(1);
+    expect(accountOf().balanceCents).toBe(before);
+  });
+
+  it("writes NOTHING when the transaction insert throws", async () => {
+    // Belt and braces: `idempotency_key` carries a unique index, so the
+    // database enforces single-debit independently of the state machine. A
+    // collision must roll the whole thing back rather than leave the session
+    // `applied` with no debit behind it.
+    const sessionId = await verifiedSession();
+    const before = accountOf().balanceCents;
+    db.insert(transactions)
+      .values({
+        id: "tx_squatter",
+        accountId: "acc_anna",
+        amountCents: -1,
+        counterparty: "Squatter",
+        reference: "holds the key",
+        bookedAt: 1,
+        idempotencyKey: sessionId,
+      })
+      .run();
+
+    // Asserted on the MESSAGE, not merely that something threw: this test
+    // passed vacuously while `applyTransfer` was undefined, because calling
+    // undefined throws too.
+    expect(() => applyTransfer(db, { ...POLL, sessionId })).toThrow(
+      /UNIQUE constraint/i,
+    );
+
+    expect(accountOf().balanceCents).toBe(before);
+    expect(rowOf(sessionId)?.state).toBe("verified");
+    expect(rowOf(sessionId)?.transactionId).toBeNull();
+    expect(transferRows()).toHaveLength(0);
+  });
+});
+
+describe("relayTransferDcApiResponse", () => {
+  it("refuses another customer's session with not_found", async () => {
+    const sessionId = await openSession();
+    const calls: string[] = [];
+
+    const result = await relayTransferDcApiResponse(
+      db,
+      verdictClient(authVerdict("s"), calls),
+      { ...POLL, userId: "user_ben", sessionId, response: "vp" },
+    );
+
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("answers no_verification before foundry exists", async () => {
+    const sessionId = await openSession();
+    db.update(transferSessions)
+      .set({ foundryVerificationId: null })
+      .where(eq(transferSessions.id, sessionId))
+      .run();
+
+    const result = await relayTransferDcApiResponse(
+      db,
+      verdictClient(authVerdict("s")),
+      { ...POLL, sessionId, response: "vp" },
+    );
+
+    expect(result).toEqual({ ok: false, reason: "no_verification" });
+  });
+
+  it("forwards the response to foundry and discards the verdict", async () => {
+    // foundry's verdict is deliberately discarded: the transaction state it
+    // also writes is what the poll already running in the dialog reads. One
+    // state path, not two.
+    const sessionId = await openSession();
+    const calls: string[] = [];
+
+    const result = await relayTransferDcApiResponse(
+      db,
+      verdictClient(authVerdict("s"), calls),
+      { ...POLL, sessionId, response: "vp-token-here" },
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(calls.some((url) => url.includes("dc-api-response"))).toBe(true);
+    // The relay never moves the session itself.
+    expect(rowOf(sessionId)?.state).toBe("pending");
+  });
+
+  it("answers foundry_unavailable when the submit throws", async () => {
+    const sessionId = await openSession();
+
+    const result = await relayTransferDcApiResponse(
+      db,
+      verdictClient(authVerdict("s"), [], 503),
+      { ...POLL, sessionId, response: "vp" },
+    );
+
+    expect(result).toEqual({ ok: false, reason: "foundry_unavailable" });
   });
 });

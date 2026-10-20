@@ -5,6 +5,7 @@ import type { Db } from "../db/index.js";
 import {
   accounts,
   credentials,
+  transactions,
   transferSessions,
   type TransferSession,
   type TransferSessionState,
@@ -512,4 +513,222 @@ export async function refreshTransferState(
     .run();
 
   return done();
+}
+
+export type ApplyTransferResult =
+  | { ok: true; transactionId: string; newBalanceCents: number }
+  | {
+      ok: false;
+      reason:
+        | "not_found"
+        | "not_verified"
+        | "already_applied"
+        | "expired"
+        | "limit_exceeded"
+        | "insufficient_funds";
+    };
+
+/**
+ * The `sub` of an authenticator credential belonging to the approver.
+ *
+ * Recorded on the debit the way a card payment records the credential that
+ * authorised it. The session row stores WHO approved (`approved_by_user_id`)
+ * rather than WHICH credential, because §7.1's columns are exactly what the
+ * holder signed over plus the session's own machinery — so the credential is
+ * re-resolved here from the customer the poll already settled.
+ *
+ * The gate in `refreshTransferState` guarantees that customer is the one who
+ * started the session, so this can never name a stranger's credential. What it
+ * does not guarantee is WHICH of that customer's authenticators, if they hold
+ * more than one: the newest is taken. In this demo a customer holds one, and
+ * the weaker claim — "an authenticator this customer holds stands behind this
+ * debit" — is the one the ledger row is making.
+ */
+function approvingAuthenticatorSub(db: Db, userId: string | null): string | null {
+  if (!userId) return null;
+  const rows = db
+    .select()
+    .from(credentials)
+    .where(
+      and(
+        eq(credentials.userId, userId),
+        eq(credentials.credentialTypeId, SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID),
+      ),
+    )
+    .all();
+  const newest = rows
+    .filter((row) => row.credentialId !== null)
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+  return newest?.credentialId ?? null;
+}
+
+/**
+ * Debits the account and moves `verified → applied`.
+ *
+ * A POST rather than part of the poll, for the reason the login flow mints its
+ * cookie on a POST: a GET with a side effect gets fired twice by a prefetch or
+ * a double-poll, and here the side effect MOVES MONEY.
+ *
+ * Synchronous, because better-sqlite3 is. That is not incidental — the guarded
+ * UPDATE below is the whole single-use mechanism and is only meaningful as one
+ * statement rather than a read followed by a write. It never talks to foundry:
+ * everything the wallet said is already settled.
+ *
+ * Re-checks only what is LOCAL and could have moved during the wallet round
+ * trip: the caller still owns the session, the window is still open, and the
+ * live account still affords the transfer. Note one of those can move BECAUSE
+ * OF THIS APP — a limit change running in another tab can lower the limit
+ * underneath a transfer already in the wallet.
+ *
+ * **A money-gate refusal returns BEFORE the transaction, leaving the session
+ * `verified` and therefore claimable.** A transient refusal must not burn the
+ * holder's approval: undo whatever moved the limit and this same session still
+ * applies. Both gates are `>`, so equality passes.
+ *
+ * Ownership is checked in `loadSession` and not in the route, for the same
+ * reason `getTransactionProof` checks it rather than its route: a route is one
+ * caller of many, and the check belongs with the read.
+ */
+export function applyTransfer(
+  db: Db,
+  input: { userId: string; accountId: string; sessionId: string },
+  now: number = Date.now(),
+): ApplyTransferResult {
+  const row = loadSession(db, input.userId, input.accountId, input.sessionId);
+  if (!row) return { ok: false, reason: "not_found" };
+
+  // Distinguished from `not_verified` so the route can answer 410 rather than
+  // 409: an applied session is gone for good, a pending one might yet arrive.
+  if (row.state === "applied") return { ok: false, reason: "already_applied" };
+  if (row.state !== "verified") return { ok: false, reason: "not_verified" };
+
+  if (now - row.createdAt > TRANSFER_SESSION_TTL_MS) {
+    failTransfer(db, input.sessionId, "expired");
+    return { ok: false, reason: "expired" };
+  }
+
+  const account = db
+    .select()
+    .from(accounts)
+    .where(eq(accounts.id, row.accountId))
+    .get();
+  if (!account) return { ok: false, reason: "not_found" };
+
+  // THE RE-CHECKS, and they come before the guarded write on purpose — see the
+  // doc comment. The limit and the balance are NOT part of what the holder
+  // signed; they are preconditions.
+  if (row.amountCents > account.dailyLimitCents) {
+    return { ok: false, reason: "limit_exceeded" };
+  }
+  if (row.amountCents > account.balanceCents) {
+    return { ok: false, reason: "insufficient_funds" };
+  }
+
+  const credentialId = approvingAuthenticatorSub(db, row.approvedByUserId);
+  const transactionId = `tx_${randomUUID()}`;
+  const newBalanceCents = account.balanceCents - row.amountCents;
+
+  // ONE TRANSACTION over all three writes, as `processPayment` already does
+  // for the debit and its proof package. Without it, a throw partway leaves
+  // the session `applied` with no debit behind it — and the retry then answers
+  // 410, so the holder is told their transfer did not happen, correctly, with
+  // no way to make it happen.
+  return db.transaction((tx) => {
+    // A GUARDED WRITE, not a read-then-write. `.changes` is what decides
+    // whether THIS call won the race to consume the session; checking the
+    // state above and then updating unconditionally would let two concurrent
+    // applies both debit.
+    //
+    // Belt and braces with the unique index on `idempotency_key` below: the
+    // database enforces single-debit as well as the state machine does, and
+    // the two mechanisms fail independently.
+    const consumed = tx
+      .update(transferSessions)
+      .set({ state: "applied" })
+      .where(
+        and(
+          eq(transferSessions.id, row.id),
+          eq(transferSessions.state, "verified"),
+        ),
+      )
+      .run();
+    if (consumed.changes !== 1) {
+      return { ok: false, reason: "already_applied" } as ApplyTransferResult;
+    }
+
+    tx.update(accounts)
+      .set({ balanceCents: newBalanceCents })
+      .where(eq(accounts.id, account.id))
+      .run();
+
+    tx.insert(transactions)
+      .values({
+        id: transactionId,
+        accountId: account.id,
+        // NEGATIVE. It is a debit, and that is the ledger's convention.
+        amountCents: -row.amountCents,
+        counterparty: row.payeeName,
+        reference: row.purpose,
+        bookedAt: now,
+        credentialId,
+        idempotencyKey: row.id,
+      })
+      .run();
+
+    // Written in the SAME transaction, so a session and its debit can never
+    // disagree about whether the money moved.
+    tx.update(transferSessions)
+      .set({ transactionId })
+      .where(eq(transferSessions.id, row.id))
+      .run();
+
+    return { ok: true, transactionId, newBalanceCents } as ApplyTransferResult;
+  });
+}
+
+export type RelayTransferResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: "not_found" | "no_verification" | "foundry_unavailable";
+    };
+
+/**
+ * Relays a browser Digital Credentials API response to foundry.
+ *
+ * Exists because foundry's `dc-api-response` endpoint is ADMIN authenticated:
+ * the browser cannot call it without the admin key, and the admin key must
+ * never leave the server.
+ *
+ * foundry verifies synchronously and returns a verdict, which is deliberately
+ * DISCARDED. The transaction state it also writes is what the poll already
+ * running in the dialog reads — one state path, not two. Debiting here instead
+ * would give same-device and cross-device transfers two different routes to
+ * moving money, and they would drift.
+ *
+ * `dc-api-relay.ts`'s shape with the ownership check added, DUPLICATED rather
+ * than generalised — exactly as the limit change's own relay is.
+ */
+export async function relayTransferDcApiResponse(
+  db: Db,
+  client: FoundryClient,
+  input: {
+    userId: string;
+    accountId: string;
+    sessionId: string;
+    response: string;
+  },
+): Promise<RelayTransferResult> {
+  const row = loadSession(db, input.userId, input.accountId, input.sessionId);
+  if (!row) return { ok: false, reason: "not_found" };
+  if (!row.foundryVerificationId) {
+    return { ok: false, reason: "no_verification" };
+  }
+
+  try {
+    await client.submitDcApiResponse(row.foundryVerificationId, input.response);
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: "foundry_unavailable" };
+  }
 }
