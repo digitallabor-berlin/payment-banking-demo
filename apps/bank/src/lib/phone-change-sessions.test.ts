@@ -5,9 +5,15 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FoundryClient } from "@demo/foundry-client";
 import { createDb, type Db } from "../db/index.js";
-import { phoneChangeSessions, users } from "../db/schema.js";
+import { credentials, phoneChangeSessions, users } from "../db/schema.js";
 import { seed } from "../db/seed.js";
-import { startPhoneChange } from "./phone-change-sessions.js";
+import { SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID } from "./credential-types.js";
+import {
+  PHONE_CHANGE_SESSION_TTL_MS,
+  getPhoneChangeStatus,
+  refreshPhoneChangeState,
+  startPhoneChange,
+} from "./phone-change-sessions.js";
 
 let dir: string;
 let db: Db;
@@ -123,6 +129,382 @@ const input = {
   userId: "user_anna",
   phoneNumber: "+49 172 66666666",
 };
+
+/**
+ * A foundry verdict naming one Sparkassen Authenticator credential.
+ *
+ * `bound` is a parameter rather than always true because the binding gate is
+ * one of the four, and every `verified` case has to be able to carry a passing
+ * one — leave it out and adding the gate reads as six regressions rather than
+ * one stale fixture.
+ */
+function authVerdict(sub: unknown, verified = true, bound = true) {
+  return {
+    id: "v_phone_1",
+    state: verified ? "verified" : "failed",
+    created_at: 0,
+    result: {
+      verified,
+      checks: [],
+      credentials: [
+        {
+          query_id: "sparkassen_auth",
+          format: "dc+sd-jwt",
+          claims: { sub },
+          checks: bound
+            ? [{ check: "transaction_data_binding", passed: true }]
+            : [],
+        },
+      ],
+    },
+  };
+}
+
+/** A verdict in which NO credential answered the authenticator query. */
+function emptyVerdict() {
+  return {
+    id: "v_phone_1",
+    state: "verified",
+    created_at: 0,
+    result: { verified: true, checks: [], credentials: [] },
+  };
+}
+
+function verdictClient(
+  verdict: unknown,
+  calls: string[] = [],
+  status = 200,
+): FoundryClient {
+  const fetchImpl = (async (input: string | URL | Request) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes("/admin/verification/requests/")) {
+      return new Response(JSON.stringify(verdict), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const body = url.includes("/admin/paso/ad-hoc-metadata")
+      ? MINT_OK.body
+      : REQUEST_URI_OK.body;
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+
+  return new FoundryClient({
+    adminUrl: "http://f:9000",
+    adminKey: "k",
+    fetchImpl,
+  });
+}
+
+async function openSession(now = Date.now()): Promise<string> {
+  const result = await startPhoneChange(
+    db,
+    stubClient([], { mint: MINT_OK, verify: REQUEST_URI_OK }),
+    input,
+    now,
+  );
+  if (!result.ok) throw new Error(`expected ok, got ${result.reason}`);
+  return result.session.sessionId;
+}
+
+function giveAuthenticator(userId: string, sub: string, state = "active"): void {
+  db.insert(credentials)
+    .values({
+      id: `cred_${sub}`,
+      userId,
+      cardId: null,
+      credentialTypeId: SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID,
+      credentialId: sub,
+      state: state as "active" | "offered" | "failed",
+      createdAt: 1,
+    })
+    .run();
+}
+
+const poll = { userId: "user_anna" };
+
+describe("refreshPhoneChangeState scoping", () => {
+  it("answers not_found for another customer's session", async () => {
+    const sessionId = await openSession();
+    const calls: string[] = [];
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(authVerdict("s"), calls),
+      { userId: "user_ben", sessionId },
+    );
+
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+    // The id is guessable and this flow writes to a customer's row, so "not
+    // yours" and "does not exist" must be the same answer — and neither may
+    // cost foundry traffic.
+    expect(calls).toHaveLength(0);
+  });
+
+  it("answers not_found for a session that does not exist", async () => {
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(authVerdict("s")),
+      { ...poll, sessionId: "phone_nope" },
+    );
+
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("getPhoneChangeStatus is scoped the same two ways", async () => {
+    const sessionId = await openSession();
+
+    expect(getPhoneChangeStatus(db, "user_anna", sessionId)).toEqual({
+      state: "pending",
+      newPhone: "+49 172 66666666",
+    });
+    expect(getPhoneChangeStatus(db, "user_ben", sessionId)).toBeNull();
+    expect(getPhoneChangeStatus(db, "user_anna", "phone_nope")).toBeNull();
+  });
+});
+
+describe("refreshPhoneChangeState", () => {
+  it("makes no foundry call for an applied or failed session", async () => {
+    for (const state of ["applied", "failed"] as const) {
+      const sessionId = await openSession();
+      db.update(phoneChangeSessions)
+        .set({ state })
+        .where(eq(phoneChangeSessions.id, sessionId))
+        .run();
+
+      const calls: string[] = [];
+      const result = await refreshPhoneChangeState(
+        db,
+        verdictClient(authVerdict("s"), calls),
+        { ...poll, sessionId },
+      );
+
+      expect(result).toMatchObject({ ok: true, status: { state } });
+      expect(calls).toHaveLength(0);
+    }
+  });
+
+  it("fails with expired past the TTL, without calling foundry", async () => {
+    const sessionId = await openSession(1000);
+    const calls: string[] = [];
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(authVerdict("s"), calls),
+      { ...poll, sessionId },
+      1000 + PHONE_CHANGE_SESSION_TTL_MS + 1,
+    );
+
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.state).toBe("failed");
+    expect(result.status.failureReason).toBe("expired");
+    // An abandoned tab must stop costing admin-API traffic the moment its
+    // window closes.
+    expect(calls).toHaveLength(0);
+  });
+
+  it("makes no foundry call for a session already verified", async () => {
+    const sessionId = await openSession();
+    db.update(phoneChangeSessions)
+      .set({ state: "verified" })
+      .where(eq(phoneChangeSessions.id, sessionId))
+      .run();
+
+    const calls: string[] = [];
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(authVerdict("s"), calls),
+      { ...poll, sessionId },
+    );
+
+    expect(result).toMatchObject({ ok: true, status: { state: "verified" } });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("stays pending when getVerificationStatus throws", async () => {
+    const sessionId = await openSession();
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(authVerdict("s"), [], 503),
+      { ...poll, sessionId },
+    );
+
+    // Transient. One 503 inside a five-minute window must not destroy an
+    // approval; the client's consecutive-failure counter gives up, not this.
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.state).toBe("pending");
+    expect(result.status.failureReason).toBeUndefined();
+  });
+
+  it("stays pending while foundry reports pending", async () => {
+    const sessionId = await openSession();
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient({ id: "v_phone_1", state: "pending", created_at: 0 }),
+      { ...poll, sessionId },
+    );
+
+    expect(result).toMatchObject({ ok: true, status: { state: "pending" } });
+  });
+
+  it("fails with verification_failed when foundry reports failed", async () => {
+    const sessionId = await openSession();
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(authVerdict("s", false)),
+      { ...poll, sessionId },
+    );
+
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.state).toBe("failed");
+    expect(result.status.failureReason).toBe("verification_failed");
+  });
+
+  it("fails with verification_failed when verified is not true", async () => {
+    const sessionId = await openSession();
+    const verdict = authVerdict("s");
+    verdict.result.verified = false as unknown as true;
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient({ ...verdict, state: "verified" }),
+      { ...poll, sessionId },
+    );
+
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.failureReason).toBe("verification_failed");
+  });
+
+  it("fails with verification_failed when no credential answered", async () => {
+    const sessionId = await openSession();
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(emptyVerdict()),
+      { ...poll, sessionId },
+    );
+
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.failureReason).toBe("verification_failed");
+  });
+
+  it("fails with transaction_data_binding_failed when the binding did not pass", async () => {
+    const sessionId = await openSession();
+    giveAuthenticator("user_anna", "sub_anna");
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(authVerdict("sub_anna", true, false)),
+      { ...poll, sessionId },
+    );
+
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.state).toBe("failed");
+    expect(result.status.failureReason).toBe(
+      "transaction_data_binding_failed",
+    );
+  });
+
+  /**
+   * The ONLY input where the two orderings give different answers: a `sub` no
+   * credential carries, plus a failing binding. Reading a claim out of a JSON
+   * blob is inert; turning it into a customer is the act, so the binding gate
+   * sits between the read and the resolve.
+   */
+  it("gates the binding BEFORE resolving the sub", async () => {
+    const sessionId = await openSession();
+    giveAuthenticator("user_anna", "sub_anna");
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(authVerdict("sub_nobody_carries", true, false)),
+      { ...poll, sessionId },
+    );
+
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.failureReason).toBe(
+      "transaction_data_binding_failed",
+    );
+  });
+
+  it("fails with unknown_credential for a sub this bank cannot place", async () => {
+    const sessionId = await openSession();
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(authVerdict("sub_nobody_carries")),
+      { ...poll, sessionId },
+    );
+
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.failureReason).toBe("unknown_credential");
+  });
+
+  /**
+   * THE gate this flow adds over wallet login. Without it any valid Sparkassen
+   * Authenticator presentation could change any signed-in customer's number.
+   */
+  it("fails with wrong_customer for another customer's authenticator", async () => {
+    const sessionId = await openSession();
+    giveAuthenticator("user_ben", "sub_ben");
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(authVerdict("sub_ben")),
+      { ...poll, sessionId },
+    );
+
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.state).toBe("failed");
+    // Its OWN reason, distinct from unknown_credential, so an operator can
+    // tell a credential issued to the wrong person from one the bank cannot
+    // place at all. The holder sees the same generic copy for both.
+    expect(result.status.failureReason).toBe("wrong_customer");
+  });
+
+  it("verifies and records approvedByUserId on a good presentation", async () => {
+    const sessionId = await openSession();
+    giveAuthenticator("user_anna", "sub_anna");
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(authVerdict("sub_anna")),
+      { ...poll, sessionId },
+    );
+
+    expect(result).toMatchObject({ ok: true, status: { state: "verified" } });
+    const row = onlyRow();
+    expect(row?.state).toBe("verified");
+    expect(row?.approvedByUserId).toBe("user_anna");
+    // And nothing is written yet: apply does that.
+    expect(phoneOf("user_anna")).toBe("+49 171 5555555");
+  });
+
+  it("does not require the credential row to be active", async () => {
+    // foundry's verdict is the authority that the credential is real and
+    // holder-bound; the row only answers WHOSE. Nothing here clears an
+    // `offered` row, so gating on state would refuse a working credential.
+    const sessionId = await openSession();
+    giveAuthenticator("user_anna", "sub_anna", "offered");
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(authVerdict("sub_anna")),
+      { ...poll, sessionId },
+    );
+
+    expect(result).toMatchObject({ ok: true, status: { state: "verified" } });
+  });
+
+  it("carries newPhone on the status so the dialog can name it", async () => {
+    const sessionId = await openSession();
+    giveAuthenticator("user_anna", "sub_anna");
+    const result = await refreshPhoneChangeState(
+      db,
+      verdictClient(authVerdict("sub_anna")),
+      { ...poll, sessionId },
+    );
+
+    // By the time the dialog renders success the only thing it still holds is
+    // a session id, and the success line names the number.
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.status.newPhone).toBe("+49 172 66666666");
+  });
+});
 
 describe("startPhoneChange ownership and validation", () => {
   it("refuses an unknown user with not_found and writes nothing", async () => {
