@@ -95,6 +95,45 @@ export const en: Messages = {
     verificationFailed:
       "Your wallet's response could not be verified. Your limit is unchanged.",
   },
+  transfers: {
+    sendMoney: "Send money",
+    dialogTitle: "Send money",
+    dialogLead:
+      "Enter the recipient and the amount. You will approve the transfer in your wallet before any money leaves your account.",
+    recipientName: "Recipient name",
+    recipientIban: "Recipient IBAN",
+    amount: "Amount",
+    purpose: "Purpose",
+    send: "Send",
+    cancel: "Cancel",
+    close: "Close",
+    invalidName: "Enter the recipient's name.",
+    invalidIban: "Check the IBAN — it does not look right.",
+    invalidAmount: "Enter an amount, for example 250.00.",
+    invalidPurpose: "Enter what this transfer is for.",
+    approveTitle: "Approve in your wallet",
+    confirmInApp: "Approve the transfer in your wallet app.",
+    openInWallet: "Open in wallet",
+    scanCode: "Scan this code with the wallet app on your phone.",
+    qrAlt: "QR code for the transfer request",
+    waiting: "Waiting for your wallet…",
+    preparing: "Preparing…",
+    walletUnavailable:
+      "Your wallet did not respond. You can scan a code with the wallet app on your phone instead.",
+    showQrCode: "Show QR code",
+    successTitle: "Money sent",
+    successBody: (amount, payee) => `${amount} is on its way to ${payee}.`,
+    failedTitle: "Money not sent",
+    expired: "The request expired. Please try again.",
+    unknownCredential:
+      "This credential is valid, but we cannot match it to a customer. Add the Sparkassen Authenticator to your wallet again from your overview, then try once more.",
+    limitExceeded:
+      "This transfer is above your daily transfer limit. Send a smaller amount, or raise your limit first.",
+    insufficientFunds:
+      "There is not enough money in the account for this transfer. Nothing has been sent.",
+    verificationFailed:
+      "Your wallet's response could not be verified. No money has been sent.",
+  },
   credential: {
     ageTitle: "Age verification",
   },

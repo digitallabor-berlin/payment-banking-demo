@@ -183,6 +183,76 @@ export interface Messages {
    */
   verificationFailed: string;
  };
+ /**
+  * The bank's own send-money dialog.
+  *
+  * **This is NOT the wallet's consent screen.** Those strings live in the
+  * ad-hoc metadata JWT built by `transfer-transaction-data.ts` and answer to
+  * PaSO rather than to this catalog — the `security_hint` in particular, which
+  * §3.2 requires the wallet to display verbatim and forbids altering. Do not
+  * unify the two.
+  */
+ transfers: {
+  /** The control in the account panel. */
+  sendMoney: string;
+  dialogTitle: string;
+  /** Sets the expectation before the wallet opens. */
+  dialogLead: string;
+  /** The four field labels, in ENTRY order — not the consent order. */
+  recipientName: string;
+  recipientIban: string;
+  amount: string;
+  purpose: string;
+  send: string;
+  cancel: string;
+  close: string;
+  /** Client-side field messages. The server re-checks all four regardless. */
+  invalidName: string;
+  invalidIban: string;
+  invalidAmount: string;
+  invalidPurpose: string;
+  approveTitle: string;
+  confirmInApp: string;
+  openInWallet: string;
+  scanCode: string;
+  qrAlt: string;
+  waiting: string;
+  /** While DC API detection is unresolved. NOT the QR fallback. */
+  preparing: string;
+  /**
+   * Shown when the browser's wallet call failed or was dismissed. A DC API
+   * session carries no URI, so there is nothing to fall back to in place —
+   * `showQrCode` creates a NEW cross-device session instead.
+   */
+  walletUnavailable: string;
+  showQrCode: string;
+  successTitle: string;
+  /** Both already formatted by the caller. */
+  successBody: (amount: string, payee: string) => string;
+  failedTitle: string;
+  /** failure_reason `expired` */
+  expired: string;
+  /**
+   * failure_reason `unknown_credential` — a real, correctly-signed
+   * credential this bank cannot match to a customer. Commonest cause is one
+   * issued before the subject was persisted, so this names the remedy.
+   */
+  unknownCredential: string;
+  /**
+   * Reached through a non-2xx START or APPLY response's `error`, never
+   * through the session's `failure_reason` — the poll structurally cannot
+   * write either of these two.
+   */
+  limitExceeded: string;
+  insufficientFunds: string;
+  /**
+   * Everything else, including `wrong_customer` and `metadata_unavailable`.
+   * Deliberately generic: `wrong_customer` spelled out would tell whoever
+   * holds the phone that their presentation was valid but for somebody
+   * else's account.
+   */
+  verificationFailed: string;
+ };
  credential: {
   ageTitle: string;
  };
