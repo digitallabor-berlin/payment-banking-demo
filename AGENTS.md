@@ -53,8 +53,38 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**1050 tests** (710 bank + 287 merchant + 16 foundry-client + 37 ui), measured
-2026-10-19.
+**1178 tests** (838 bank + 287 merchant + 16 foundry-client + 37 ui), measured
+2026-10-20.
+
+That was **1051** before the send-money work, not the **1050** this file
+asserted — and the correction is *provable* rather than argued, which is worth
+more than the delta. The very first task of that work added a file with exactly
+three `it()` blocks and left `limit-transaction-data.test.ts` byte-unedited at
+29; the run then measured 714. 714 − 3 = **711**, so the bank's figure at HEAD
+was 711 and not the 710 recorded here. The other three projects were exact. That
+is the **third** time the bank's figure alone has drifted. When a count
+disagrees, measure both ends.
+
+The work itself added **127**, all in `apps/bank`, measured per task and
+reconciled against the run's own totals before being written down: +3
+(`lib/iso-currency-amount.test.ts`), +8 (`db/schema.test.ts`, the new table),
++22 (`lib/transfer-validation.test.ts`), +21
+(`lib/transfer-transaction-data.test.ts`), +52 across three passes over
+`lib/transfer-sessions.test.ts` (16 start, 17 poll, 19 apply/relay), +10 in the
+new `app/api/accounts/[id]/transfer/route.test.ts`, +11
+(`lib/transfer-dialog-state.test.ts`). 3+8+22+21+52+10+11 = 127 = 711 → 838.
+
+Four things that number hides. `messages.test.ts` added **zero** against 31 new
+leaves in both catalogs — its invariants cover new leaves without new cases, so
+`pnpm typecheck` is once again the real gate for copy. Both new `.tsx` files
+(`SendMoneyDialog`, `SendMoneyRow`) are covered by **nothing**
+(`environment: "node"` matches no `.tsx`), so they rest entirely on the browser
+verification. Three of the eight new schema tests were **green on arrival** and
+meaningless at the time, for the reason the limit-change entry below already
+records: a `toThrow()` assertion passes vacuously while the table is
+`undefined`. And one apply test passed before `applyTransfer` existed at all,
+for exactly the same reason — calling `undefined` throws too; it was re-asserted
+on `/UNIQUE constraint/i` so it cannot pass vacuously again.
 
 That was **872** before the account-limit-change work — and for once this file
 was right about every one of the four figures, which is the first time in this
@@ -606,15 +636,185 @@ them without reading the linked reasoning first.
   fixing it is a separate change to a separate flow — so a wallet failure
   during *login* still strands that dialog.
 
-- **`daily_limit_cents` gates nothing.** There is no transfer feature in this
-  demo to enforce it against. The number is displayed and changed, and that is
-  the whole of its behaviour — the feature being demonstrated is a wallet
-  approving a *non-payment decision about an account*. Unlike this repo's
+- **`daily_limit_cents` GATED NOTHING, and now it does.** This bullet said "there
+  is no transfer feature in this demo to enforce it against", and the send-money
+  transfer is that feature — `startTransfer` refuses an over-limit amount before
+  the wallet opens and `applyTransfer` re-checks it before the debit. The limit
+  change stopped being a demo of a number and became a demo of a control.
+  `schema.ts`'s own doc comment has been corrected too. Unlike this repo's
   `credential_type_id` and `transport` widenings, which were TypeScript claims
   about untyped text columns, this one is a real `ALTER TABLE … ADD COLUMN`;
   drizzle-kit emitted a plain ADD rather than the unrunnable table rebuild it
   has produced twice before here, and the `0006` CREATE TABLE came out clean
   too. Both were applied to a real SQLite file before being committed.
+
+### The send money transfer
+
+- **The two money gates are checked TWICE, and the second check must not
+  consume the session.** `startTransfer` refuses an over-limit or unaffordable
+  amount *before* the row is written and before any foundry traffic: there is no
+  reason to ask a human to approve something the bank has already decided to
+  reject, and no reason to spend an ad-hoc mint on it. `applyTransfer` re-checks
+  both against the **live** account, because either can move during the wallet
+  round trip — and one of them can move *because of this app*, since a limit
+  change in another tab can lower the limit underneath a transfer already in the
+  wallet.
+
+  A re-check refusal returns **before** the guarded UPDATE, leaving the session
+  `verified` and therefore claimable. Put it after and one transient refusal
+  destroys the holder's approval for nothing. Two tests pin the still-claimable
+  half specifically, and one of them re-applies successfully after restoring the
+  limit — asserting the refusal alone would pass with the session consumed.
+
+  **Both gates are `>`, so equality passes.** A customer can send their whole
+  balance, and an amount exactly equal to the daily limit is allowed. Four tests
+  pin the boundary (two in start, two in apply) because `>=` is the natural
+  typo and it silently forbids the last cent.
+
+- **The limit and the balance are NOT part of what the holder signed, and that
+  is why `transfer_sessions` has no amount snapshot.** `limit_change_sessions`
+  carries `old_limit_cents` because it is half of the signed transition. Here
+  everything signed — amount, name, IBAN, purpose — is already a column, so
+  there is nothing to snapshot; the limit and the balance are *preconditions*,
+  re-read rather than compared against a remembered value. Do not add an
+  `old_balance_cents` by analogy with the limit change: it would turn a
+  precondition into a signed term and refuse transfers that are perfectly fine.
+
+- **Single-debit is enforced TWICE, independently.** The guarded
+  `verified → applied` UPDATE's `.changes` decides the winner, and the
+  `transactions` row is inserted with `idempotency_key = <session id>` against
+  the unique index that column already carries. The two mechanisms fail
+  independently, which is the point. `debits exactly ONCE across two applies`
+  **restores the balance between the two calls** — leave the account short and
+  the money gate refuses the replay, and the test then passes with the guarded
+  UPDATE deleted.
+
+  All three writes — the UPDATE, the balance decrement and the insert — plus the
+  `transaction_id` write-back are in **one** `db.transaction`. Without it a
+  throw partway leaves the session `applied` with no debit behind it, the retry
+  answers 410, and the holder is told their transfer did not happen with no way
+  to make it happen. Verified by squatting on the idempotency key and asserting
+  the rollback left the balance, the state and the `transaction_id` untouched.
+
+- **`value_type` goes on `amount` and on NOTHING else, and an invented one for
+  the IBAN would refuse the whole presentation.** PaSO Proof Metadata §3.1 makes
+  `value_type` optional and says an omitted one means plain text; PaSO View §3
+  says a wallet **shall exclude** an entry whose declared `value_type` it does
+  not support. Exclusion is of the *entry*, not the label — so a plausible-looking
+  `iban` type is a hard refusal of the transfer, not a row that degrades to
+  text. Three `not.toHaveProperty("value_type")` assertions are the load-bearing
+  tests in `transfer-transaction-data.test.ts`.
+
+  This is also why `TransferAdHocMetadata` is declared locally rather than
+  reusing `LimitChangeAdHocMetadata`: that interface makes `value_type`
+  **required** on every claim (both of its claims are amounts), which would make
+  the required absence untypeable. `LocalisedName` and `LocalisedValue` *are*
+  imported from there — those two genuinely are the same shape.
+
+- **The IBAN is stored normalised and sent grouped in fours.** The column holds
+  `DE89370400440532013000`; the payload carries `DE89 3704 0044 0532 0130 00`,
+  derived at build time through the existing `formatIban`. The payload is what
+  the holder *reads*, and the entire point of the consent screen is that they
+  can compare it against what they typed — but there is still one stored source
+  and one deterministic derivation, so the hash is stable. Do not add a second
+  column for the formatted form: two columns for one IBAN can disagree.
+
+- **`isValidIban`'s checksum is the whole reason the field is worth a consent
+  screen.** Shape plus ISO 13616 mod-97, and *nothing* else — no country length
+  table, no bank directory, no name/IBAN match, all explicit non-goals. A single
+  transposed digit passes the shape regex and fails the checksum, which is
+  exactly the typo a human is being asked to notice. The mod-97 is taken
+  chunk-wise, **seven digits at a time**: a remainder is at most two digits, so
+  each step evaluates at most nine digits and no `BigInt` is needed.
+
+- **`parseAmountCents` is ONE regex over the trimmed string, and nothing is
+  pre-stripped.** `^\d+([.,]\d{1,2})?$` rejects grouping separators, three
+  decimal places and every sign character at once. Then integer arithmetic on
+  the two halves, **never `parseFloat`** — a float round-trip is how `1.005`
+  becomes 100 cents instead of being refused, and how a grouped `1.250,00`
+  becomes €1.25, a silent hundredfold error in the one number a defrauded person
+  is meant to check. A comma is accepted because the bank's UI is bilingual and
+  a German speaker types `250,00`.
+
+- **The ownership gate lives in the POLL, exactly as the limit change's does,
+  and for the same reason.** Without it any valid Sparkassen Authenticator
+  presentation could approve any signed-in customer's transfer. In apply it
+  would need a second `getVerificationStatus` after the session had gone
+  terminal and — worse — a stranger's valid presentation would drive the session
+  to `verified`, showing the holder a success-shaped dialog that apply then
+  rejects. `verified` must mean *the right person approved*. The binding gate
+  sits between **reading** the `sub` and **resolving** it, and one test pins
+  that order with a `sub` **no credential carries** plus a failing binding —
+  the only input where the two orderings give different answers.
+
+- **A thrown `getVerificationStatus` leaves the session PENDING, not failed.**
+  One transient 503 inside a five-minute window must not destroy a holder's
+  approval; the client's consecutive-failure counter is what gives up.
+  `refreshLimitChangeState` behaves identically. `foundry_unavailable` is still
+  a real `failure_reason` — `startTransfer` writes it when the verification
+  *request* throws, which is a different event.
+
+- **`applyTransfer` resolves the authenticator `sub` from `approved_by_user_id`
+  rather than from a column, and the limitation is real.** §7.1's columns are
+  what the holder signed plus session machinery, so the approving credential is
+  not among them; `approvingAuthenticatorSub` re-resolves it from the customer
+  the poll already settled, newest first. The gate guarantees that customer is
+  the one who started the session, so this can never name a *stranger's*
+  credential — what it does not guarantee is **which** of that customer's
+  authenticators, if they hold more than one. In this demo they hold one, and
+  the weaker claim the ledger row makes is "an authenticator this customer holds
+  stands behind this debit".
+
+- **The debit is a NEGATIVE `amount_cents`, with the recipient in
+  `counterparty` and the purpose in `reference`** — the same shape
+  `processPayment` writes, so the transfer appears in the existing ledger with
+  no new rendering. There is **no credit side**: the recipient is external and
+  nothing is credited anywhere.
+
+- **The dialog opens on a FORM, and `startFailed` outranks `state === null`.**
+  The limit change shipped this bug once: checking `state === null` first made a
+  failed start render the chooser again — the holder pressed the button, it
+  greyed out for a moment and came back, with no message anywhere. That is
+  *every* local attempt, since no local foundry declares `sparkassen_auth`.
+  `selectTransferPhase` therefore consults `startFailed` before the null check,
+  and a test pins it by name.
+
+- **`verified` is still `waiting`, not `success`.** No money moves until the
+  client's POST to `…/apply` returns 2xx, and apply can still refuse with
+  `limit_exceeded` or `insufficient_funds`. Showing success on `verified` would
+  tell a holder their money had gone before the debit was written. A successful
+  apply outranks everything after it, so a late poll failure cannot un-debit
+  money that is already gone.
+
+- **`limit_exceeded` and `insufficient_funds` reach the dialog ONLY through a
+  non-2xx response body**, never through the session's `failure_reason` — the
+  poll structurally cannot write either. A dialog fed only the session's reason
+  would leave both strings dead and show the generic "could not be verified" for
+  the two failures a holder can actually act on. `transferFailureKey` takes a
+  plain string for exactly that reason, and the dialog feeds it
+  `startError ?? applyError ?? value?.failureReason`.
+
+- **The QR recovery works here, and it was verified by clicking.** The dialog
+  imports `needsQrRecovery` from `limit-dialog-state.ts` and
+  `selectLoginAffordance` from `login-dialog-state.ts` rather than copying
+  either. **`dcError` must NOT be cleared** when the recovery session arrives —
+  measured in a real browser: with the flag left set the QR count goes 0 → 1 and
+  the recovery button withdraws itself (because `needsQrRecovery` goes false once
+  the URI exists); clearing it would route the affordance straight back to the
+  wallet button the holder just watched fail.
+
+- **`SendMoneyRow`'s `dailyLimitCents` and `balanceCents` are for DISPLAY
+  ONLY.** They render a line under the amount field so the holder knows the
+  ceiling before typing. They deliberately gate nothing in `.tsx`: both refusals
+  belong to the server, which re-reads the live account, and a money comparison
+  in a file no vitest project matches is a decision with no test.
+
+- **`transfer_sessions` is deleted FIRST in `seedWithin`** — before
+  `limit_change_sessions` — because it references `users`, `accounts` **and**
+  `transactions`, so it is the deepest child in that sequence. The migration
+  (`0007`) came out as a clean plain `CREATE TABLE` with all four FKs and no
+  CHECK on `state`/`transport`, was hand-read before committing, and was applied
+  to a real SQLite file with `pnpm seed` run twice.
 
 ### Credentials and credential types
 
@@ -2015,6 +2215,66 @@ verdict, so the ownership gate, `applyLimitChange` and the whole
 is the diagnostic to hand the operator: it is the same flow over the previously
 exercised unsigned form, so a wallet that succeeds there and fails by default
 has localised the problem to the signature.
+
+**No wallet has answered a SEND-MONEY presentation**, as of 2026-10-20. This
+flow sits on exactly the same unverified leg as the limit change, with one more
+thing riding on it: the limit change asks a wallet to approve a *number*, and
+this asks it to approve a *payment*, so a consent screen that renders wrongly
+here costs money rather than a setting.
+
+What IS verified, 20 assertions out of 20 against the **deployed** foundry
+(port-forward 9100), asserting on the request object foundry SERVES rather than
+on a 200:
+
+- the `transaction_data` entry served at `request_uri` decodes **byte-exact** to
+  what was sent — `{ amount: "250.00 EUR", payee_name: "Max Mustermann",
+  payee_iban: "DE89 3704 0044 0532 0130 00", purpose: "Rent October" }` — with
+  `metadata` present and equal to the minted JWT;
+- the minted JWT is a 3-segment compact JWS, `typ:
+  adhoc-transaction-metadata+jwt`, `alg: ES256`, `transaction_data_type` equal
+  to the entry's own `type` (`urn:paso:sca:dev.digitallabor:transfer:1`), and
+  `exp - iat` = 900;
+- its echoed metadata carries the four claims in consent order (amount,
+  payee_name, payee_iban, purpose), `value_type: iso_currency_amount` on
+  `amount` **and on nothing else**, bare `en`/`de` on every claim display and on
+  all four `ui_labels`, and the `security_hint` verbatim in both locales;
+- `credential_ids` is `["sparkassen_auth"]` against a DCQL query whose only
+  credential id is `sparkassen_auth`, and a deliberately bogus one is **HTTP
+  400** — so the 200s are evidence rather than serde dropping a field;
+- an entry with `metadata` **deliberately omitted is accepted at HTTP 200**,
+  which is the measurement that makes `startTransfer`'s mint-before-request
+  ordering load-bearing rather than belt-and-braces: nothing server-side
+  prevents the anti-goal.
+
+And in real headless Chrome against a bank pointed at the deployed foundry: the
+default transport writes a `dc_api_signed` row carrying a **7676-byte** inline
+signed request object with **no QR canvas**, `?dcapi=unsigned` writes a `dc_api`
+row with a **4790-byte** bare parameter object, the stored IBAN is the
+normalised form of a spaced one typed into the field, and a German-typed
+`250,00` is stored as 25000 cents.
+
+**The wallet button was clicked, and here the click told us something new.**
+With no wallet installed, `navigator.credentials.get()` **rejected** within ~4
+seconds — the opposite of what the limit-change entry above records, where the
+same call neither resolved nor rejected within 8 and the QR fallback was never
+reached. So this flow's recovery path was exercised end to end: `dcError` was
+set, the dialog offered **Show QR code**, and clicking it took the QR count
+**0 → 1** while withdrawing the recovery button. Do not generalise either
+observation into a claim about how Chrome behaves; record which one you saw.
+
+What is STILL unobserved, and it is the whole feature: whether a real wallet
+renders this four-claim consent screen at all, whether it is readable on a
+phone, whether `iso_currency_amount` is implemented or falls back to the raw
+`"250.00 EUR"`, and whether `security_hint` is honoured verbatim. The strongest
+prior available is that El Paso accepted the limit change's ad-hoc JWT over the
+same `x5c` chain — that settles PaSO §5.3's signature and credential-binding
+steps *for that wallet*, and is not the same as having run this.
+
+Nothing has ever driven `refreshTransferState` past `pending` against a real
+verdict, so **the ownership gate, the binding gate, `applyTransfer` and the
+whole `verified → applied` path — including every debit this feature can
+write — are exercised only by the suite.** No money has moved outside a test.
+`?dcapi=unsigned` is the diagnostic to hand the operator.
 
 Do not fake this. If a change depends on real wallet behaviour, say so.
 

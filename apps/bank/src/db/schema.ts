@@ -23,11 +23,19 @@ export const accounts = sqliteTable("accounts", {
  /**
   * The daily transfer limit, in integer cents like every other money column.
   *
-  * This GATES NOTHING. There is no transfer feature in this demo to enforce it
-  * against; the number is displayed and changed, and that is the whole of its
-  * behaviour. The feature being demonstrated is the wallet approving a
-  * non-payment decision about an account — the limit is what that decision is
-  * *about*, not a control.
+  * THIS IS NOW A REAL CONTROL. It gated nothing until the send-money transfer
+  * existed; `startTransfer` refuses an amount above it before the wallet is
+  * opened, and `applyTransfer` re-checks it against the live account before
+  * the debit — because a limit change in another tab can lower it underneath a
+  * transfer already in the holder's wallet. Both gates are `>`, so an amount
+  * exactly equal to the limit is allowed.
+  *
+  * It is a cap on a SINGLE transfer, by explicit decision, not a cumulative
+  * daily total: three €400 transfers against a €1,000 limit all succeed.
+  * Nothing in this demo tracks a day's worth of spending.
+  *
+  * It is also still what the limit-change flow is *about* — the wallet
+  * approving a non-payment decision about an account.
   *
   * Per-account rather than per-customer, by requirement: a customer with two
   * accounts sees two rows and changes them independently.
