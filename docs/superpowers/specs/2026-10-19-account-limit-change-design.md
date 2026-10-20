@@ -89,7 +89,7 @@ Things that would make this a failure even if it worked:
   proves nothing. Every failure path leaves the limit untouched.
 - **A consent screen that falls back to raw claim names.** If the ad-hoc
   metadata cannot be minted, the request must not be sent at all. A wallet
-  showing `old_limit: EUR 1000.00` to a human is worse than an error message,
+  showing `old_limit: 1000.00 EUR` to a human is worse than an error message,
   because it looks like the feature working.
 - **Copy that claims the bank verified something it did not.** The bank checks
   foundry's verdict; it does not verify signatures itself. Same rule the proof
@@ -136,8 +136,8 @@ validator constrains only emptiness and the version segment).
   "credential_ids": ["sparkassen_auth"],
   "transaction_data_hashes_alg": ["sha-256"],
   "payload": {
-    "old_limit": "EUR 1000.00",
-    "new_limit": "EUR 2000.00"
+    "old_limit": "1000.00 EUR",
+    "new_limit": "2000.00 EUR"
   },
   "metadata": "<compact adhoc-transaction-metadata+jwt>"
 }
@@ -152,14 +152,35 @@ Notes, each of which is a decision:
   separate.
 - The payload is sent as **plain JSON**. foundry performs the OpenID4VP §8.4
   base64url encoding itself; a pre-encoded value here would be double-encoded.
-- Amount format is `"EUR 1000.00"` — ISO currency code, space, plain decimal
-  with two places. This mirrors PaSO's own example (§A.4 uses `"EUR 45.00"`) and
-  is **locale-neutral on purpose**: the string is hashed byte-for-byte into
-  `transaction_data_hashes`, so baking a German thousands separator into it
-  would make the signed artefact depend on the browser's locale. The wallet
-  localises it, via `value_type` below. *(My call. The alternative — plain
-  pre-formatted text with no `value_type` — is a fallback if a wallet turns out
-  not to understand the value type; see §Known-unverifiable.)*
+- **~~Amount format is `"EUR 1000.00"` — ISO currency code, space, plain
+  decimal with two places. This mirrors PaSO's own example (§A.4 uses
+  `"EUR 45.00"`).~~ SUPERSEDED 2026-10-20 — the order is BACKWARDS and the
+  citation is fabricated.**
+
+  There is no `"EUR 45.00"` anywhere in PaSO. paso-view §3 defines the type in
+  one sentence, quoted verbatim because a paraphrase is what went wrong here:
+
+  > The value is a string consisting of a decimal number (integer part, decimal
+  > point, fractional digits per [ISO4217]) followed by a space and an
+  > [ISO4217] Alpha-3 currency code (e.g., `"49.99 EUR"`).
+
+  paso-core §A.4's own rendering shows `49.99 EUR`. **Amount first, currency
+  code last.** The correct value is `"1000.00 EUR"`.
+
+  Measured: a real wallet refused every limit change outright with
+  `VALUE_TYPE_MISMATCH — claim 'old_limit' is not an '<amount> <ISO4217>'
+  string`. A consumer parses on the last space, so currency-first makes the
+  amount parse as `"EUR"` and throw — and because §7.4.2 step 2 settles
+  `value_type` conformance during entry *selection*, that is a hard refusal of
+  the whole presentation rather than one label degrading to plain text.
+
+  The rest of the original reasoning stands and is why the string is written by
+  hand at all: it is **locale-neutral on purpose**, because it is hashed
+  byte-for-byte into `transaction_data_hashes`, so baking a German thousands
+  separator into it would make the signed artefact depend on the browser's
+  locale. The wallet localises it, via `value_type` — confirmed against a real
+  wallet's formatter, which renders `2000.00 EUR` as `$2,000.00` under `en-US`
+  and `2.000,00 €` under `de-DE`.
 - `transaction_data_hashes_alg` is stated explicitly even though foundry would
   insert its configured value, for the same reason the login entry states it:
   the entry should be self-describing where it is constructed.
@@ -516,7 +537,7 @@ The dialog's rendering decision goes in a **`.ts` file**, not in JSX — a
 `sheet-state.ts` / `login-dialog-state.ts` equivalent. Every vitest project here
 is `environment: "node"` with `include: ["src/**/*.test.ts"]`, so a branch
 inside a `.tsx` file is never covered by anything. Likewise the preset list, the
-"is this chip selectable" rule, and the cents-to-`"EUR 0.00"` conversion are all
+"is this chip selectable" rule, and the cents-to-`"0.00 EUR"` conversion are all
 plain functions with their own tests.
 
 ### Copy
@@ -656,7 +677,7 @@ What cannot be verified here, and must be said as unverified in the commit:
   trace*: from the bank's side, a rejected metadata JWT and a holder pressing
   Cancel are the same event.
 - whether a real wallet understands the `iso_currency_amount` value type, or
-  falls back to rendering the raw `"EUR 2000.00"`. The latter is survivable; the
+  falls back to rendering the raw `"2000.00 EUR"`. The latter is survivable; the
   fallback is to drop `value_type` and send pre-formatted text, at the cost of
   baking a locale into a hashed payload.
 - whether the consent screen actually looks like the one at the top of this

@@ -238,8 +238,8 @@ describe("startLimitChange", () => {
     )[0]!;
     expect(entry.metadata).toBe("minted.jwt.value");
     expect(entry.payload).toEqual({
-      old_limit: "EUR 1000.00",
-      new_limit: "EUR 2000.00",
+      old_limit: "1000.00 EUR",
+      new_limit: "2000.00 EUR",
     });
   });
 

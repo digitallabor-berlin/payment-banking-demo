@@ -428,7 +428,7 @@ them without reading the linked reasoning first.
   request and aborts the whole thing if the mint fails, with its own
   `metadata_unavailable` reason. An entry with no `metadata` for a type nothing
   declares is PaSO Core §7.4.2 "incompatible": best case a refusal, worst case a
-  wallet showing `old_limit: EUR 1000.00` to a human, which *looks like the
+  wallet showing `old_limit: 1000.00 EUR` to a human, which *looks like the
   feature working*.
 
   **Nothing server-side enforces this.** Measured 2026-10-19 against the
@@ -473,11 +473,30 @@ them without reading the linked reasoning first.
   moves the account underneath between two applies, because asserting the final
   value alone cannot distinguish a no-op from a re-write.
 
-- **The amount string is `toFixed`, never `Intl`.** `limitAmountString`
-  produces `"EUR 1000.00"` — PaSO's own
-  §A.4 shape — and it is hashed byte-for-byte into `transaction_data_hashes`, so
-  a German separator baked in here would make the signed artefact depend on the
-  browser's locale. The wallet localises it instead, via `iso_currency_amount`.
+- **The amount string is `AMOUNT FIRST`, and `toFixed`, never `Intl`.**
+  `limitAmountString` produces `"1000.00 EUR"` — a decimal number, a space,
+  then the ISO 4217 Alpha-3 code, which is what paso-view §3 defines and what
+  the example in it (`"49.99 EUR"`) shows.
+
+  It produced `"EUR 1000.00"` until 2026-10-20 and that made a real wallet
+  refuse every limit change: `VALUE_TYPE_MISMATCH — claim 'old_limit' is not an
+  '<amount> <ISO4217>' string`. A consumer parses on the **last space**, so
+  currency-first makes the amount parse as `"EUR"` and throw. §7.4.2 step 2
+  settles `value_type` conformance during entry *selection*, so this is a hard
+  refusal of the whole presentation, not a label degrading to plain text.
+
+  The wrong order was justified in the design by a citation to "§A.4 uses
+  `EUR 45.00`". **No such example exists in PaSO.** That is the more useful
+  lesson than the constant: a fabricated citation reads exactly like a checked
+  one, and the specs are vendored at `../paso-specs/docs/specs/` — read them
+  rather than recalling them.
+
+  `toFixed` and never `Intl` for the original reason, which still holds: the
+  string is hashed byte-for-byte into `transaction_data_hashes`, so a localised
+  separator would make the signed artefact depend on the browser's locale. The
+  wallet localises it from `iso_currency_amount` — verified against the real
+  wallet's formatter, which renders `2000.00 EUR` as `$2,000.00` under `en-US`
+  and `2.000,00 €` under `de-DE`.
 
   **The locale tags must be the SHORTEST tag that names the language — bare
   `en` and `de`, never `en-US`/`de-DE`.** This file asserted the opposite until
@@ -1924,7 +1943,7 @@ unanswerable are answered, for this wallet.
 
 What is STILL unobserved: whether a wallet renders the consent screen the way
 the design's opening mockup draws it, and whether `iso_currency_amount` is
-implemented or falls back to the raw `"EUR 2000.00"`. Both need a human with
+implemented or falls back to the raw `"2000.00 EUR"`. Both need a human with
 the device to look at the screen — the fix above was verified against El Paso's
 `LocaleSelector` directly, not by watching it render. Nothing has driven
 `refreshLimitChangeState` past `pending` against a real verdict either, so the
@@ -1939,7 +1958,7 @@ Chrome, is everything up to the handover:
 - the request object foundry serves at `request_uri` decodes to a
   `transaction_data` entry whose `type` is
   `urn:paso:sca:dev.digitallabor:limit-change:1`, whose `payload` is byte-exact
-  the `{ old_limit: "EUR 1000.00", new_limit: "EUR 2000.00" }` that was sent,
+  the `{ old_limit: "1000.00 EUR", new_limit: "2000.00 EUR" }` that was sent,
   whose `credential_ids` is `["sparkassen_auth"]` against a DCQL query whose
   only credential id is `sparkassen_auth`, and — the member the whole feature
   rests on — whose **`metadata` is present and is the minted JWT**: a 3-segment
@@ -1984,7 +2003,7 @@ store** holds `CN=Foundry Root CA (foundry.digitallabor.dev)`. Either failure
 happens *inside the wallet with no server-side trace* — from the bank's side a
 rejected metadata JWT and a holder pressing Cancel are the same event. Also
 unknown: whether any wallet implements the `iso_currency_amount` value type or
-falls back to rendering the raw `"EUR 2000.00"` (survivable; the fallback is to
+falls back to rendering the raw `"2000.00 EUR"` (survivable; the fallback is to
 drop `value_type` and send pre-formatted text, at the cost of baking a locale
 into a hashed payload), and whether the consent screen actually looks like the
 one the design opens with — which is the entire point of the feature and can

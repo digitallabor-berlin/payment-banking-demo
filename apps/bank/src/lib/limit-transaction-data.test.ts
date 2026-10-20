@@ -58,29 +58,58 @@ describe("LIMIT_CHANGE_TRANSACTION_DATA_TYPE", () => {
 });
 
 describe("limitAmountString", () => {
+  /**
+   * REPORTED BUG, 2026-10-20: a real wallet refused every limit change with
+   * "Transaction can't be displayed", and logcat named the reason exactly —
+   * `VALUE_TYPE_MISMATCH — claim 'old_limit' is not an '<amount> <ISO4217>'
+   * string`.
+   *
+   * The order is AMOUNT FIRST. paso-view §3: "a decimal number (integer part,
+   * decimal point, fractional digits per [ISO4217]) followed by a space and an
+   * [ISO4217] Alpha-3 currency code (e.g., `\"49.99 EUR\"`)". paso-core §A.4's
+   * rendering shows `49.99 EUR` too.
+   *
+   * This was `EUR 1000.00` — currency first — justified in the design by a
+   * citation to "§A.4 uses `EUR 45.00`". No such example exists; the real one
+   * is the reverse. A fabricated citation is how a wrong constant survives
+   * review, so the spec sentence is quoted verbatim above rather than
+   * paraphrased.
+   */
   it.each([
-    [100_000, "EUR 1000.00"],
-    [200_000, "EUR 2000.00"],
-    [50_000, "EUR 500.00"],
-    [500_000, "EUR 5000.00"],
-    [99, "EUR 0.99"],
-    [0, "EUR 0.00"],
+    [100_000, "1000.00 EUR"],
+    [200_000, "2000.00 EUR"],
+    [50_000, "500.00 EUR"],
+    [500_000, "5000.00 EUR"],
+    [99, "0.99 EUR"],
+    [0, "0.00 EUR"],
   ])("formats %i cents as %s", (cents, expected) => {
     expect(limitAmountString(cents)).toBe(expected);
+  });
+
+  it("puts the amount before the currency code, never after", () => {
+    // The wallet parses on the LAST space: everything before it is the amount,
+    // everything after is the ISO 4217 code. Currency-first makes the amount
+    // parse as "EUR", which throws, and the entry is refused outright rather
+    // than degraded.
+    const formatted = limitAmountString(200_000);
+    const lastSpace = formatted.lastIndexOf(" ");
+    expect(formatted.slice(0, lastSpace)).toBe("2000.00");
+    expect(formatted.slice(lastSpace + 1)).toBe("EUR");
+    expect(Number.isNaN(Number(formatted.slice(0, lastSpace)))).toBe(false);
   });
 
   it("never localises the amount", () => {
     // No thousands separator, no comma decimal. The string is hashed
     // byte-for-byte into transaction_data_hashes, so an Intl-formatted value
     // would make the signed artefact depend on the browser's locale.
-    expect(limitAmountString(1_234_567)).toBe("EUR 12345.67");
+    expect(limitAmountString(1_234_567)).toBe("12345.67 EUR");
     expect(limitAmountString(1_234_567)).not.toContain(",");
     expect(limitAmountString(1_234_567)).not.toContain("\u00a0");
   });
 
   it("always carries exactly two decimal places", () => {
     for (const cents of [1, 10, 100, 1_000, 10_000]) {
-      expect(limitAmountString(cents)).toMatch(/^EUR \d+\.\d{2}$/);
+      expect(limitAmountString(cents)).toMatch(/^\d+\.\d{2} EUR$/);
     }
   });
 });
@@ -106,8 +135,8 @@ describe("buildLimitChangeTransactionData", () => {
 
   it("carries exactly old_limit and new_limit", () => {
     expect(entryOf().payload).toEqual({
-      old_limit: "EUR 1000.00",
-      new_limit: "EUR 2000.00",
+      old_limit: "1000.00 EUR",
+      new_limit: "2000.00 EUR",
     });
   });
 
