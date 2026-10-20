@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `phone_number` text DEFAULT '+49 171 5555555' NOT NULL;

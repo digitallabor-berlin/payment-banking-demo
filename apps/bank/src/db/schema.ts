@@ -10,6 +10,35 @@ export const users = sqliteTable("users", {
  username: text("username").notNull().unique(),
  passwordHash: text("password_hash").notNull(),
  displayName: text("display_name").notNull(),
+ /**
+  * The customer's mobile number, changed only through a wallet-approved
+  * presentation (`lib/phone-change-sessions.ts`).
+  *
+  * On `users` rather than `accounts`, by decision: a customer has ONE mobile
+  * number however many accounts they hold, which is the opposite of
+  * `daily_limit_cents`. That is also why the whole phone-change flow carries
+  * no account id anywhere.
+  *
+  * Stored EXACTLY as the customer typed it, trimmed, with runs of internal
+  * whitespace collapsed to one space — nothing else. No E.164 canonicalisation
+  * and no re-grouping, so this column, the signed `transaction_data` payload
+  * and the dashboard row are the same string with no derivation between them.
+  * (`isSamePhoneNumber` compares digits only, but it feeds a boolean and never
+  * a value that is stored or sent.)
+  *
+  * Unlike this repo's `credential_type_id` and `transport` widenings — which
+  * were TypeScript claims about untyped text columns — this is a REAL
+  * `ALTER TABLE … ADD COLUMN`. The DEFAULT backfills a developer's pre-existing
+  * rows and nothing else: `seed()` deletes and re-inserts every user, so no
+  * seeded row ever carries it. It is a real German mobile prefix rather than an
+  * empty string because a NOT NULL empty string would render a blank "Current
+  * mobile number" on the consent screen — the design's first anti-goal.
+  *
+  * Deliberately NOT added to the session cookie: `SessionPayload` stays
+  * `{ userId, displayName }`, because a 12-hour cookie would serve a stale
+  * number the moment this feature works.
+  */
+ phoneNumber: text("phone_number").notNull().default("+49 171 5555555"),
 });
 
 export const accounts = sqliteTable("accounts", {

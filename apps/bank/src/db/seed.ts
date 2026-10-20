@@ -29,6 +29,12 @@ interface Fixture {
    * the whole database.
    */
   iban: string;
+  /**
+   * The two fixtures MUST differ here. A test proving the right customer's row
+   * was written could otherwise pass by coincidence, and `seed.test.ts` asserts
+   * the distinctness rather than trusting these literals.
+   */
+  phoneNumber: string;
   balanceCents: number;
   cardId: string;
   panLast4: string;
@@ -43,6 +49,7 @@ const FIXTURES: Fixture[] = [
     displayName: "Anna Schmidt",
     accountId: "acc_anna",
     iban: "DE02120300000000202051",
+    phoneNumber: "+49 171 5555555",
     balanceCents: 348_712,
     cardId: "card_anna",
     panLast4: "4242",
@@ -55,6 +62,7 @@ const FIXTURES: Fixture[] = [
     displayName: "Ben Müller",
     accountId: "acc_ben",
     iban: "DE02500105170137075030",
+    phoneNumber: "+49 160 2345678",
     balanceCents: 129_540,
     cardId: "card_ben",
     panLast4: "8815",
@@ -173,6 +181,10 @@ function seedWithin(db: Db, now: number): void {
         username: fixture.username,
         passwordHash,
         displayName: fixture.displayName,
+        // Stated explicitly rather than left to the column DEFAULT, so the
+        // demo's starting numbers are visible in the fixtures rather than only
+        // in the schema — and so the two customers differ.
+        phoneNumber: fixture.phoneNumber,
       })
       .run();
 

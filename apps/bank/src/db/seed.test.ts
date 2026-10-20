@@ -76,3 +76,33 @@ describe("seed invariants the DPC display metadata depends on", () => {
     expect(rows.map((c) => c.network)).toEqual(["girocard", "girocard"]);
   });
 });
+
+/**
+ * The phone-change flow signs the stored number into `transaction_data` and
+ * shows it to the holder as the half of the sentence they check. A fixture
+ * with no number would render a blank consent-screen row; two fixtures sharing
+ * one number would let a test that means to prove the RIGHT customer's row was
+ * written pass by coincidence.
+ */
+describe("seed invariants the phone-change flow depends on", () => {
+  beforeEach(() => {
+    seed(db);
+  });
+
+  it("gives every fixture a phone number in international form", () => {
+    const rows = db.select().from(users).all();
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.phoneNumber).toMatch(/^\+[0-9 ]+$/);
+    }
+  });
+
+  it("gives the two fixtures different phone numbers", () => {
+    const numbers = db
+      .select()
+      .from(users)
+      .all()
+      .map((row) => row.phoneNumber);
+    expect(new Set(numbers).size).toBe(numbers.length);
+  });
+});

@@ -129,6 +129,42 @@ describe("seed", () => {
   });
 });
 
+describe("users.phone_number", () => {
+  it("stores a phone number on a user", () => {
+    db.insert(users)
+      .values({
+        id: "user_p",
+        username: "p",
+        passwordHash: "h",
+        displayName: "P",
+        phoneNumber: "+49 172 66666666",
+      })
+      .run();
+
+    const row = db.select().from(users).where(eq(users.id, "user_p")).get();
+    expect(row?.phoneNumber).toBe("+49 172 66666666");
+  });
+
+  // The DEFAULT exists only to backfill a developer's pre-existing rows —
+  // `seed()` re-inserts every user, so no seeded row ever carries it. It is a
+  // real number rather than an empty string because a NOT NULL empty string
+  // would render a blank "Current mobile number" on the consent screen, which
+  // is the design's first anti-goal.
+  it("backfills phone_number on a user inserted without one", () => {
+    db.insert(users)
+      .values({
+        id: "user_q",
+        username: "q",
+        passwordHash: "h",
+        displayName: "Q",
+      })
+      .run();
+
+    const row = db.select().from(users).where(eq(users.id, "user_q")).get();
+    expect(row?.phoneNumber).toMatch(/^\+[0-9 ]+$/);
+  });
+});
+
 describe("transactions.idempotency_key", () => {
   it("rejects a duplicate non-null key", () => {
     seed(db);
