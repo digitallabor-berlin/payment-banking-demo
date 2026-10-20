@@ -57,6 +57,20 @@
       "when": 1792481346701,
       "tag": "0007_chunky_human_torch",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792490730533,
+      "tag": "0008_whole_bug",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1792490859759,
+      "tag": "0009_empty_major_mapleleaf",
+      "breakpoints": true
     }
   ]
 }

@@ -92,8 +92,20 @@ export interface Messages {
    */
   payments: string;
   credentials: string;
+  /** The heading over the Your details panel. */
+  profile: string;
   recentTransactions: string;
   showAll: string;
+ };
+ /**
+  * The two facts the Your details panel shows.
+  *
+  * `username` is the LOGIN name (`anna`), not the internal row id — see
+  * `getProfile`. It is immutable here and has no control beside it.
+  */
+ profile: {
+  username: string;
+  mobileNumber: string;
  };
  transactions: {
   title: string;
@@ -117,9 +129,13 @@ export interface Messages {
   * ad-hoc metadata JWT (`limit-transaction-data.ts`), are sent in both locales
   * at once, and are chosen by the WALLET from its own locale priority list.
   * Two places hold user-facing strings about limit changes and they answer to
-  * different authorities: do not try to unify them. Their locale TAGS differ
-  * too — `en` / `de` here, `en-US` / `de-DE` there — and neither is derived
-  * from the other.
+  * different authorities: do not try to unify them.
+  *
+  * Their locale tags happen to COINCIDE — bare `en` / `de` in both — and that
+  * is a coincidence rather than a derivation. (This comment claimed the
+  * consent screen used `en-US` / `de-DE` until 2026-10-19; it never should
+  * have, and region tags broke every real presentation, because RFC4647
+  * Lookup only ever shortens a user's range.)
   *
   * The amounts are not here either. They are cents in `limit-presets.ts`,
   * formatted at render through `formatEuroCents`, so this catalog never holds
@@ -245,6 +261,83 @@ export interface Messages {
    */
   limitExceeded: string;
   insufficientFunds: string;
+  /**
+   * Everything else, including `wrong_customer` and `metadata_unavailable`.
+   * Deliberately generic: `wrong_customer` spelled out would tell whoever
+   * holds the phone that their presentation was valid but for somebody
+   * else's account.
+   */
+  verificationFailed: string;
+ };
+ /**
+  * The bank's own mobile-number change dialog.
+  *
+  * **This is NOT the wallet's consent screen.** Those strings — both claim
+  * names, the title, both action labels and the security hint — live in the
+  * ad-hoc metadata JWT built by `phone-transaction-data.ts`, are sent in both
+  * locales at once, and are chosen by the WALLET from its own locale priority
+  * list. The `security_hint` in particular is required by PaSO §3.2 to be
+  * displayed verbatim and may not be altered or removed, which is exactly the
+  * property wanted. Do not unify the two.
+  *
+  * The six failure strings are keyed by `phoneFailureKey`'s output, so a new
+  * key there is a compile error here rather than a dialog that renders
+  * nothing.
+  */
+ phones: {
+  /** The control beside the mobile number row. */
+  change: string;
+  dialogTitle: string;
+  /** Sets the expectation before the wallet opens. */
+  dialogLead: string;
+  /** The single field's label. */
+  mobileNumber: string;
+  /** The format hint under the field. */
+  hint: string;
+  continue: string;
+  cancel: string;
+  close: string;
+  approveTitle: string;
+  confirmInApp: string;
+  openInWallet: string;
+  scanCode: string;
+  qrAlt: string;
+  waiting: string;
+  /** While DC API detection is unresolved. NOT the QR fallback. */
+  preparing: string;
+  /**
+   * Shown when the browser's wallet call failed or was dismissed. A DC API
+   * session carries no URI, so there is nothing to fall back to in place —
+   * `showQrCode` creates a NEW cross-device session instead.
+   */
+  walletUnavailable: string;
+  showQrCode: string;
+  successTitle: string;
+  /** Names the new number, verbatim as stored. */
+  successBody: (phoneNumber: string) => string;
+  failedTitle: string;
+  /** failure_reason `expired` */
+  expired: string;
+  /**
+   * failure_reason `unknown_credential` — a real, correctly-signed
+   * credential this bank cannot match to a customer. Commonest cause is one
+   * issued before the subject was persisted, so this names the remedy.
+   */
+  unknownCredential: string;
+  /**
+   * apply reason `phone_changed` — the stored number moved while this
+   * approval was in flight, so what the holder signed over is no longer the
+   * transition that would happen. Reached through the apply response's
+   * `error`, never through the session's `failure_reason`.
+   */
+  phoneChanged: string;
+  /**
+   * start reasons `invalid_phone` and `phone_unchanged`. Both reach the
+   * dialog only through a non-2xx START response — the poll structurally
+   * cannot write either.
+   */
+  invalidPhone: string;
+  phoneUnchanged: string;
   /**
    * Everything else, including `wrong_customer` and `metadata_unavailable`.
    * Deliberately generic: `wrong_customer` spelled out would tell whoever

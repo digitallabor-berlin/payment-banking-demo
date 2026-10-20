@@ -6,6 +6,7 @@ import {
  credentials,
  transactionProofs,
  transactions,
+ users,
 } from "../db/schema.js";
 import {
  AGE_CREDENTIAL_TYPE_IDS,
@@ -120,6 +121,41 @@ export interface TransactionDto {
   * when it opens.
   */
  hasProof: boolean;
+}
+
+/**
+ * The two facts the dashboard's "Your details" panel shows.
+ *
+ * `username` is the LOGIN name (`anna`), not the internal row id
+ * (`user_anna`). It is shown because it is the other fact a customer looks for
+ * in a details panel; it is immutable here and never leaves the page.
+ */
+export interface ProfileDto {
+ username: string;
+ phoneNumber: string;
+}
+
+/**
+ * One customer's details, or `null` if no such user exists.
+ *
+ * Neither value is carried in the session cookie, deliberately.
+ * `SessionPayload` stays `{ userId, displayName }`: a cookie is minted for 12
+ * hours, so a number cached in it would be stale the moment the phone-change
+ * flow works. This is the same reason `login_sessions` does not store
+ * `displayName` either — the read re-resolves from `users`.
+ *
+ * The panel that renders this is a SERVER component for the same reason: the
+ * number must come off the server render, or the `router.refresh()` that
+ * follows a successful change cannot update it.
+ */
+export function getProfile(db: Db, userId: string): ProfileDto | null {
+ return (
+  db
+   .select({ username: users.username, phoneNumber: users.phoneNumber })
+   .from(users)
+   .where(eq(users.id, userId))
+   .get() ?? null
+ );
 }
 
 export function listAccounts(db: Db, userId: string): AccountDto[] {

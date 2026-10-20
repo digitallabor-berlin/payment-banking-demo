@@ -11,6 +11,7 @@ import {
   credentials,
   limitChangeSessions,
   loginSessions,
+  phoneChangeSessions,
   transactionProofs,
   transferSessions,
   transactions,
@@ -126,6 +127,42 @@ describe("seed", () => {
         .get();
       expect(account?.userId).toBe(card.userId);
     }
+  });
+});
+
+describe("users.phone_number", () => {
+  it("stores a phone number on a user", () => {
+    db.insert(users)
+      .values({
+        id: "user_p",
+        username: "p",
+        passwordHash: "h",
+        displayName: "P",
+        phoneNumber: "+49 172 66666666",
+      })
+      .run();
+
+    const row = db.select().from(users).where(eq(users.id, "user_p")).get();
+    expect(row?.phoneNumber).toBe("+49 172 66666666");
+  });
+
+  // The DEFAULT exists only to backfill a developer's pre-existing rows —
+  // `seed()` re-inserts every user, so no seeded row ever carries it. It is a
+  // real number rather than an empty string because a NOT NULL empty string
+  // would render a blank "Current mobile number" on the consent screen, which
+  // is the design's first anti-goal.
+  it("backfills phone_number on a user inserted without one", () => {
+    db.insert(users)
+      .values({
+        id: "user_q",
+        username: "q",
+        passwordHash: "h",
+        displayName: "Q",
+      })
+      .run();
+
+    const row = db.select().from(users).where(eq(users.id, "user_q")).get();
+    expect(row?.phoneNumber).toMatch(/^\+[0-9 ]+$/);
   });
 });
 
@@ -746,5 +783,73 @@ describe("transaction_proofs", () => {
         })
         .run(),
     ).toThrow();
+  });
+});
+
+describe("phone_change_sessions", () => {
+  /** A complete row minus whatever the case under test is about. */
+  function values(over: Record<string, unknown> = {}) {
+    return {
+      id: "phone_1",
+      startedByUserId: "user_anna",
+      oldPhone: "+49 171 5555555",
+      newPhone: "+49 172 66666666",
+      createdAt: 1000,
+      ...over,
+    };
+  }
+
+  beforeEach(() => {
+    seed(db);
+  });
+
+  it("inserts a pending phone-change session", () => {
+    db.insert(phoneChangeSessions).values(values()).run();
+
+    const row = db.select().from(phoneChangeSessions).get();
+    expect(row?.state).toBe("pending");
+    expect(row?.transport).toBe("request_uri");
+    expect(row?.approvedByUserId).toBeNull();
+    expect(row?.foundryVerificationId).toBeNull();
+    expect(row?.failureReason).toBeNull();
+    // NULL, not the empty string: a request_uri session performs no DC API
+    // invocation, so there is no protocol identifier to report.
+    expect(row?.dcApiProtocol).toBeNull();
+  });
+
+  it("refuses a phone-change session whose started_by_user_id is unknown", () => {
+    expect(() =>
+      db
+        .insert(phoneChangeSessions)
+        .values(values({ startedByUserId: "user_nobody" }))
+        .run(),
+    ).toThrow(/FOREIGN KEY/i);
+  });
+
+  it("refuses a phone-change session with no old_phone", () => {
+    const incomplete = values();
+    delete (incomplete as Record<string, unknown>).oldPhone;
+    expect(() =>
+      db
+        .insert(phoneChangeSessions)
+        .values(incomplete as never)
+        .run(),
+    ).toThrow(/NOT NULL/i);
+  });
+
+  /**
+   * The same claim `limit_change_sessions` makes, for the same reason: this
+   * table has a NOT NULL FK to `users`, `createDb` sets `foreign_keys = ON`
+   * and `seed()` deletes `users` — so one abandoned attempt would make
+   * `pnpm seed` throw partway through. Locally that is EVERY attempt, because
+   * no local foundry declares `sparkassen_auth`.
+   */
+  it("does not block a re-seed", () => {
+    db.insert(phoneChangeSessions)
+      .values(values({ state: "failed", failureReason: "metadata_unavailable" }))
+      .run();
+
+    expect(() => seed(db)).not.toThrow();
+    expect(db.select().from(phoneChangeSessions).all()).toHaveLength(0);
   });
 });

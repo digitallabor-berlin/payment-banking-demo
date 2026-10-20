@@ -53,8 +53,35 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**1182 tests** (838 bank + 291 merchant + 16 foundry-client + 37 ui), measured
+**1323 tests** (979 bank + 291 merchant + 16 foundry-client + 37 ui), measured
 2026-10-20.
+
+That was **1182** before the phone-change work — and for the second time
+running, every one of the four figures this file asserted was correct, so
+nothing had to be re-measured at the far end. It added **141**, all in
+`apps/bank`, measured per task and reconciled against the run's own total
+before being written down: +6 in `db/schema.test.ts` (2 for the column, 4 for
+the new table), +3 in `db/seed.test.ts`, 18 in the new
+`lib/phone-validation.test.ts`, 20 in the new
+`lib/phone-transaction-data.test.ts`, +4 in `lib/queries.test.ts`, 52 across
+three passes over the new `lib/phone-change-sessions.test.ts` (20 start, 18
+poll, 14 apply/relay), 16 in the new `lib/phone-dialog-state.test.ts`, and 22
+in the new `app/api/profile/phone-change/route.test.ts`.
+6+3+18+20+4+52+16+22 = 141 = 838 → 979.
+
+Four things that number hides. `messages.test.ts` added **zero** against 29 new
+leaves in both catalogs — the same result the limit change and the transfer
+produced, so `pnpm typecheck` is once again the real gate for copy. All three
+new `.tsx` files (`ProfilePanel`, `PhoneNumberRow`, `PhoneChangeDialog`) are
+covered by **nothing**, so they rest entirely on the browser verification. The
+two `toThrow()` schema tests were written to match on the MESSAGE
+(`/FOREIGN KEY/i`, `/NOT NULL/i`) rather than on a bare throw, which is why
+they were genuinely red before the table existed instead of vacuously green —
+the trap the limit-change and send-money entries below both record. And
+`rolls both writes back together` does not force the compare-and-swap to miss
+at all: that branch is unreachable in-process, so the test installs a SQLite
+trigger that aborts the second write and asserts the first did not survive it,
+which is a strictly broader claim.
 
 That was **1178** before the merchant-`seed()` fix, which added 4, all in
 `apps/merchant/src/db/seed.test.ts` — a `seed` describe beside the existing
@@ -854,6 +881,148 @@ them without reading the linked reasoning first.
   (`0007`) came out as a clean plain `CREATE TABLE` with all four FKs and no
   CHECK on `state`/`transport`, was hand-read before committing, and was applied
   to a real SQLite file with `pnpm seed` run twice.
+
+### The phone number change
+
+- **NO `value_type` ON EITHER CLAIM, and inventing one is the single most
+  likely way to break this feature.** PaSO Proof Metadata §3.1 makes
+  `value_type` optional and defines an omitted one as plain text; PaSO View §3
+  says a wallet **shall exclude** an entry whose declared `value_type` it does
+  not support — the **entry**, not the label. There is no registered value type
+  for a telephone number, so a plausible-looking `"phone_number"` or `"e164"`
+  is a hard refusal of the whole presentation: the holder reads *"Transaction
+  can't be displayed"* and the change cannot be approved at all.
+
+  This is why `PhoneChangeAdHocMetadata` is declared **locally** rather than
+  reusing `LimitChangeAdHocMetadata` or `TransferAdHocMetadata`: both of those
+  make `value_type` **required** on every claim, which would make the required
+  absence untypeable. `LocalisedName` and `LocalisedValue` *are* imported from
+  `limit-transaction-data.ts` — those two genuinely are the same shape. Two
+  `not.toHaveProperty("value_type")` assertions are the load-bearing tests, and
+  the deployed foundry's served request object was checked for the same thing.
+
+- **The number is stored VERBATIM — trimmed, internal whitespace collapsed to
+  one space, and nothing else.** No E.164 canonicalisation, no re-grouping. The
+  column, the signed `transaction_data` payload and the dashboard row are the
+  same string with **no derivation between them**, which is a deliberate
+  contrast with the transfer (one stored IBAN, one specified grouping rule).
+  There is no such rule for a telephone number: German mobile grouping is
+  conventional, varies by prefix length, and a wrong guess shows the holder a
+  number that does not look like the one they typed.
+
+  The accepted cost, stated rather than coded around: `+49 171 5555555` and
+  `+491715555555` are different strings here. Nothing compares two numbers for
+  equality except `phone_unchanged` and the stale-snapshot gate — and the
+  latter compares a stored string against *the same stored string*, so it uses
+  **exact equality deliberately**, not `isSamePhoneNumber`. A digits-only
+  comparison there would let a reformat pass as "unmoved" while the holder had
+  approved a transition from the old formatting.
+
+- **`phone_unchanged` compares DIGITS ONLY, and it is the one place a number is
+  normalised beyond whitespace.** Strip everything but `+` and the digits from
+  both sides. Without it, retyping the stored number without its spaces passes
+  the gate and the wallet then asks a human to approve a change from
+  `+49 171 5555555` to `+491715555555` — two renderings of one number, which is
+  exactly the screen this feature exists to make meaningful. It cannot leak
+  into the payload: it feeds a boolean and never a value that is stored or sent.
+
+- **`isValidPhoneNumber` is ONE regex over the collapsed string**,
+  `^\+[0-9](?:[0-9 ]*[0-9])?$`, then 7–15 digits once spaces are removed.
+  Nothing is pre-stripped before it, for the reason `parseAmountCents` records.
+  The leading `+` is **required by decision**: a demo whose point is a human
+  comparing two numbers on a screen should not also ask them to reconcile
+  `0171 …` against `+49 171 …`. Explicit non-goals: no country-prefix table, no
+  carrier lookup, no reachability check, no mobile-vs-landline check. It is a
+  type predicate (`value is string`) so `startPhoneChange` can narrow an
+  `unknown` straight off the wire without a cast.
+
+- **`users.phone_number`, not an `accounts` column** — a customer has one
+  mobile number however many accounts they hold, which is the opposite of
+  `daily_limit_cents`. That is why this flow has **no account id anywhere**:
+  `loadSession` scopes two ways rather than three, and the routes are
+  `/api/profile/…` rather than `/api/accounts/[id]/…`. Do not invent an account
+  to match the limit change's URL shape. It is a real `ALTER TABLE … ADD`
+  (`0008`, a clean plain ADD, read before committing); the DEFAULT only
+  backfills a developer's pre-existing rows, because `seed()` re-inserts every
+  user. It is a real German prefix rather than an empty string because a NOT
+  NULL empty string renders a blank "Current mobile number" on the consent
+  screen, which is the design's first anti-goal. Deliberately **not** in the
+  session cookie: a 12-hour cookie would serve a stale number the moment this
+  works.
+
+- **`phone_change_sessions` MUST be deleted in `seedWithin`**, like
+  `limit_change_sessions` and `transfer_sessions` before it. It has a NOT NULL
+  FK to `users`, `createDb` sets `foreign_keys = ON`, and `seed()` deletes
+  `users` — so one abandoned attempt would make `pnpm seed` throw partway
+  through, and locally that is *every* attempt because no local foundry
+  declares `sparkassen_auth`. It references only `users`, so it may go anywhere
+  before that delete. Two tests cover it, one in each file. The migration
+  (`0009`) came out as a clean plain `CREATE TABLE` with both FKs and no CHECK
+  on `state`/`transport`, was hand-read, and was applied to a real SQLite file
+  with `pnpm seed` run twice.
+
+- **The ownership gate lives in the POLL, exactly as the limit change's and the
+  transfer's do.** Without it any valid Sparkassen Authenticator presentation
+  could change any signed-in customer's number — which is the pivot of nearly
+  every account takeover. The binding gate sits between **reading** the `sub`
+  and **resolving** it, and one test pins that order with a `sub` **no
+  credential carries** plus a failing binding: the only input where the two
+  orderings give different answers.
+
+- **The stale-snapshot gate comes BEFORE the guarded UPDATE**, and the test
+  that proves the single write **restores the number between the two applies**.
+  Leave it changed and the stale-snapshot gate refuses the replay on its own,
+  and the test then passes with the guarded UPDATE deleted. A separate test
+  re-applies successfully after restoring the number, which is what proves a
+  refusal leaves the session claimable rather than consumed.
+
+  The compare-and-swap on `users.phone_number` is **unreachable from any test
+  in this suite** — within one process better-sqlite3 is synchronous and the
+  pre-check and the CAS test the identical condition — and says so in a
+  comment, exactly as `applyLimitChange`'s does. What IS tested is the property
+  it serves: a SQLite `BEFORE UPDATE` trigger aborts the second write and the
+  first does not survive it, which covers *any* failure of the second write
+  rather than only a CAS miss.
+
+- **`phone_changed`, `invalid_phone` and `phone_unchanged` reach the dialog
+  ONLY through a non-2xx response body**, never through the session's
+  `failure_reason` — the poll structurally cannot write any of the three. A
+  dialog fed only the session's reason would leave all three strings dead and
+  show the generic "could not be verified" for the failures a holder can act
+  on. `phoneFailureKey` takes a plain string for that reason, and the dialog
+  feeds it `startError ?? applyError ?? value?.failureReason`.
+
+- **The first phase is named `form`, not `choose`.** This dialog asks for a
+  value rather than offering a choice, and two modules in one codebase using
+  one name for two different first screens is how a reader starts assuming they
+  are interchangeable. `startFailed` outranks `state === null` as everywhere
+  else, and `verified` is still `waiting` — no number changes until apply
+  returns 2xx, and apply can still refuse with `phone_changed`.
+
+- **The field is ONE input, pre-filled with the number in force.** The
+  customer's own choice over a read-only "current" line plus an empty "new"
+  one. The consequence is accepted: the old value disappears as soon as they
+  type, and the only place both numbers appear together is the wallet — which
+  is where the comparison is supposed to happen. `ProfilePanel` renders the
+  number itself rather than delegating to `PhoneNumberRow`, so it comes off the
+  server render and `router.refresh()` updates it; `AccountPanel` and
+  `AccountLimitRow` split the same way for the same reason.
+
+- **The Change control is NOT suppressed when the customer holds no
+  authenticator**, for the reason `AccountLimitRow` documents at length:
+  `getAuthenticatorCredentialState` cannot tell a usable credential from an
+  unusable one, so a suppression check would hide the control from people who
+  could use it and show it to people who cannot.
+
+- **The QR recovery works here, and it was verified by clicking.** `dcError`
+  must **not** be cleared when the recovery session arrives. Measured in real
+  headless Chrome against the deployed foundry:
+  `navigator.credentials.get()` **rejected** within the window (as the
+  send-money flow saw, and unlike the limit change, where it neither resolved
+  nor rejected within 8 seconds), the dialog offered **Show QR code**, and
+  clicking it took the QR count **0 → 1** while the recovery button withdrew
+  itself. Do not generalise either observation into a claim about Chrome;
+  record which one you saw.
 
 ### Credentials and credential types
 
@@ -2313,6 +2482,70 @@ Nothing has ever driven `refreshTransferState` past `pending` against a real
 verdict, so **the ownership gate, the binding gate, `applyTransfer` and the
 whole `verified → applied` path — including every debit this feature can
 write — are exercised only by the suite.** No money has moved outside a test.
+`?dcapi=unsigned` is the diagnostic to hand the operator.
+
+**No wallet has answered a PHONE-CHANGE presentation**, as of 2026-10-20. This
+flow sits on exactly the same unverified leg as the limit change and the
+transfer, and it is the first in this repo whose `transaction_data` claims are
+**plain text** — two strings and nothing else — so it is also the cleanest test
+of whether a wallet renders a consent screen the bank did not have to describe
+with a value type.
+
+What IS verified, 26 assertions out of 26 against the **deployed** foundry
+(port-forward 9100), asserting on the request object foundry SERVES rather than
+on a 200:
+
+- the served `transaction_data` entry decodes **byte-exact** to what was sent —
+  `{ old_phone: "+49 171 5555555", new_phone: "+49 172 66666666" }` — with
+  `metadata` present and equal to the minted JWT;
+- the minted JWT is a 3-segment compact JWS, `typ:
+  adhoc-transaction-metadata+jwt`, `alg: ES256`, `transaction_data_type` equal
+  to the entry's own `type` (`urn:paso:sca:dev.digitallabor:phone-change:1`),
+  and `exp - iat` = 900;
+- its echoed metadata carries both claims in consent order (old then new),
+  **no `value_type` on either**, bare `en`/`de` on every claim display and on
+  all four `ui_labels`, `affirmative_action_label` reading *Confirm number* /
+  *Nummer bestätigen*, and the `security_hint` verbatim in both locales;
+- `credential_ids` is `["sparkassen_auth"]` against a DCQL query whose only
+  credential id is `sparkassen_auth`, and a deliberately bogus one is **HTTP
+  400** — so the 200s are evidence rather than serde dropping a field;
+- an entry with `metadata` **deliberately omitted is accepted at HTTP 200**,
+  re-confirming for a third feature that nothing server-side prevents the
+  anti-goal and that `startPhoneChange`'s mint-before-request ordering is the
+  only guard;
+- `dc_api_signed` serves `protocol: openid4vp-v1-signed`, `response_mode:
+  dc_api.jwt`, `expected_origins` including
+  `https://sparkasse-musterstadt.digitallabor.dev`, and the entry — `metadata`
+  and all — *inside* the signature.
+
+And in real headless Chrome against a bank pointed at the deployed foundry, 29
+assertions out of 29: the panel renders below Credentials and above Recent
+transactions with both rows; Change opens a dialog whose `input[type=tel]` is
+pre-filled with the number in force; Continue is disabled while the number is
+unchanged, **stays** disabled for the same number reformatted
+(`+491715555555`), stays disabled for one with no `+`, and enables for a
+different one; the default transport writes a `dc_api_signed` row carrying a
+**6971-byte** inline signed request object with **no QR canvas**;
+`?dcapi=unsigned` writes a `dc_api` row with a **4261-byte** bare parameter
+object; a number typed as `  +49 172  66666666 ` is stored collapsed; starting
+a session does **not** write the user's number; and over real HTTP a
+reformatted same number is 409 `phone_unchanged` while a non-string is 400.
+
+**The wallet button was clicked**, not merely rendered, and the QR recovery was
+exercised end to end — see the last bullet of **The phone number change**.
+
+What is STILL unobserved, and it is the whole feature: whether a real wallet
+renders this two-claim screen at all, whether `security_hint` is honoured
+verbatim, and whether `affirmative_action_label` actually reads *"Confirm
+number"* on the device. The strongest prior available is that El Paso accepted
+the limit change's ad-hoc JWT over the same `x5c` chain — that settles PaSO
+§5.3's signature and credential-binding steps *for that wallet*, and is not the
+same as having run this.
+
+Nothing has ever driven `refreshPhoneChangeState` past `pending` against a real
+verdict, so **the ownership gate, the binding gate and `applyPhoneChange` —
+including every write this feature can make to `users.phone_number` — are
+exercised only by the suite.** No number has changed outside a test.
 `?dcapi=unsigned` is the diagnostic to hand the operator.
 
 Do not fake this. If a change depends on real wallet behaviour, say so.

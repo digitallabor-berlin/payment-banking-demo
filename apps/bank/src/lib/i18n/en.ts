@@ -47,8 +47,13 @@ export const en: Messages = {
     greeting: (name) => `Good day, ${name}`,
     payments: "Payments",
     credentials: "Credentials",
+    profile: "Your details",
     recentTransactions: "Recent transactions",
     showAll: "Show all",
+  },
+  profile: {
+    username: "Username",
+    mobileNumber: "Mobile number",
   },
   transactions: {
     title: "Transactions",
@@ -133,6 +138,41 @@ export const en: Messages = {
       "There is not enough money in the account for this transfer. Nothing has been sent.",
     verificationFailed:
       "Your wallet's response could not be verified. No money has been sent.",
+  },
+  phones: {
+    change: "Change",
+    dialogTitle: "Change your mobile number",
+    dialogLead:
+      "Enter your new mobile number. You will confirm the change in your wallet before it takes effect.",
+    mobileNumber: "New mobile number",
+    hint: "In international format, for example +49 171 5555555.",
+    continue: "Continue",
+    cancel: "Cancel",
+    close: "Close",
+    approveTitle: "Confirm in your wallet",
+    confirmInApp: "Confirm the new number in your wallet app.",
+    openInWallet: "Open in wallet",
+    scanCode: "Scan this code with the wallet app on your phone.",
+    qrAlt: "QR code for the mobile number change request",
+    waiting: "Waiting for your wallet…",
+    preparing: "Preparing…",
+    walletUnavailable:
+      "Your wallet did not respond. You can scan a code with the wallet app on your phone instead.",
+    showQrCode: "Show QR code",
+    successTitle: "Mobile number changed",
+    successBody: (phoneNumber) =>
+      `We will reach you on ${phoneNumber} from now on.`,
+    failedTitle: "Mobile number not changed",
+    expired: "The request expired. Please try again.",
+    unknownCredential:
+      "This credential is valid, but we cannot match it to a customer. Add the Sparkassen Authenticator to your wallet again from your overview, then try once more.",
+    phoneChanged:
+      "Your mobile number changed while we were waiting for your wallet, so this approval no longer matches. Please start again.",
+    invalidPhone:
+      "That does not look like a mobile number. Use the international format, for example +49 171 5555555.",
+    phoneUnchanged: "That is already your mobile number.",
+    verificationFailed:
+      "Your wallet's response could not be verified. Your mobile number is unchanged.",
   },
   credential: {
     ageTitle: "Age verification",
