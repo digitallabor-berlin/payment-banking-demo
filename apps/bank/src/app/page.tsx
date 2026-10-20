@@ -4,6 +4,7 @@ import { AccountPanel } from "@/components/AccountPanel.js";
 import { AgeCredentialTile } from "@/components/AgeCredentialTile.js";
 import { AppHeader } from "@/components/AppHeader.js";
 import { CardTile } from "@/components/CardTile.js";
+import { ProfilePanel } from "@/components/ProfilePanel.js";
 import { SparkassenAuthTile } from "@/components/SparkassenAuthTile.js";
 import { TransactionLedger } from "@/components/TransactionLedger.js";
 import { WeroCredentialTile } from "@/components/WeroCredentialTile.js";
@@ -13,6 +14,7 @@ import { getLocale } from "@/lib/i18n/server.js";
 import {
   getAgeCredentialState,
   getAuthenticatorCredentialState,
+  getProfile,
   getWeroCredentialState,
   listAccounts,
   listCards,
@@ -53,6 +55,7 @@ export default async function DashboardPage({
   const ageCredential = getAgeCredentialState(db, session.userId);
   const authenticator = getAuthenticatorCredentialState(db, session.userId);
   const wero = getWeroCredentialState(db, session.userId);
+  const profile = getProfile(db, session.userId);
   // Wero is payable, and `processPayment` resolves an account through a card, so
   // a Wero credential cannot be issued without one to hang the row on. No card,
   // no tile — rather than a tile whose button can only ever fail.
@@ -135,6 +138,30 @@ export default async function DashboardPage({
             />
           </div>
         </section>
+
+        {/*
+            Below Credentials and above Recent transactions: these are facts
+            about the customer rather than instruments or history, and the
+            mobile number's Change control belongs beside the authenticator
+            that approves it rather than buried under the ledger.
+
+            `profile` is null only for a session cookie naming a user that no
+            longer exists, which `getSession` has already made unlikely — the
+            panel is skipped rather than rendered empty.
+        */}
+        {profile ? (
+          <section>
+            <h2 className="eyebrow">{t.dashboard.profile}</h2>
+            <div className="mt-3">
+              <ProfilePanel
+                username={profile.username}
+                phoneNumber={profile.phoneNumber}
+                locale={locale}
+                dcApiForm={dcApiForm}
+              />
+            </div>
+          </section>
+        ) : null}
 
         <section className="panel p-6">
           <div className="panel-divider flex items-baseline justify-between gap-4 border-t-0 pb-4">
