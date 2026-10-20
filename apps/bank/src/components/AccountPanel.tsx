@@ -4,6 +4,7 @@ import type { Locale } from "@/lib/i18n/locale.js";
 import { MESSAGES } from "@/lib/i18n/messages.js";
 import type { DcApiForm } from "@/lib/transport.js";
 import { AccountLimitRow } from "./AccountLimitRow.js";
+import { SendMoneyRow } from "./SendMoneyRow.js";
 
 export function AccountPanel({
   account,
@@ -17,6 +18,9 @@ export function AccountPanel({
    * `?dcapi=` server-side by the page and threaded through. NOT read with
    * `useSearchParams` in the dialog: a client read there would need a Suspense
    * boundary, and the wallet button must have the answer before the click.
+   *
+   * Shared by the limit change and the transfer — both open a wallet from this
+   * panel, and one `?dcapi=` answers for the page rather than per control.
    */
   dcApiForm: DcApiForm;
 }) {
@@ -53,11 +57,27 @@ export function AccountPanel({
       <p className="eyebrow mt-3">{MESSAGES[locale].account.available}</p>
 
       {/*
+        Send money sits ABOVE the limit row, not beside it: the limit is a
+        property of the account and the transfer is an action on it, and the
+        action a customer came for should not be below the setting that
+        constrains it. It is the panel's only primary button.
+      */}
+      <div className="mt-6">
+        <SendMoneyRow
+          accountId={account.id}
+          dailyLimitCents={account.dailyLimitCents}
+          balanceCents={account.balanceCents}
+          locale={locale}
+          dcApiForm={dcApiForm}
+        />
+      </div>
+
+      {/*
         The limit is a property of the account, so it belongs on the account's
         own panel — nothing new appears on the dashboard. Separated by a rule
         because it is a different fact from the balance, not more of it.
       */}
-      <div className="panel-divider mt-6 flex items-baseline justify-between gap-4 pt-4">
+      <div className="panel-divider mt-5 flex items-baseline justify-between gap-4 pt-4">
         <div className="min-w-0">
           <p className="eyebrow">{MESSAGES[locale].limits.dailyTransfer}</p>
           <p className="mt-1 text-base font-semibold">

@@ -100,6 +100,45 @@ export const de: Messages = {
     verificationFailed:
       "Die Antwort Ihrer Wallet konnte nicht geprüft werden. Ihr Limit bleibt unverändert.",
   },
+  transfers: {
+    sendMoney: "Geld senden",
+    dialogTitle: "Geld senden",
+    dialogLead:
+      "Geben Sie Empfänger und Betrag ein. Sie geben die Überweisung in Ihrer Wallet frei, bevor Geld Ihr Konto verlässt.",
+    recipientName: "Name des Empfängers",
+    recipientIban: "IBAN des Empfängers",
+    amount: "Betrag",
+    purpose: "Verwendungszweck",
+    send: "Senden",
+    cancel: "Abbrechen",
+    close: "Schließen",
+    invalidName: "Geben Sie den Namen des Empfängers ein.",
+    invalidIban: "Prüfen Sie die IBAN – sie scheint nicht zu stimmen.",
+    invalidAmount: "Geben Sie einen Betrag ein, zum Beispiel 250,00.",
+    invalidPurpose: "Geben Sie an, wofür diese Überweisung bestimmt ist.",
+    approveTitle: "In Ihrer Wallet freigeben",
+    confirmInApp: "Geben Sie die Überweisung in Ihrer Wallet-App frei.",
+    openInWallet: "In Wallet öffnen",
+    scanCode: "Scannen Sie diesen Code mit der Wallet-App auf Ihrem Telefon.",
+    qrAlt: "QR-Code für die Überweisung",
+    waiting: "Warten auf Ihre Wallet…",
+    preparing: "Wird vorbereitet…",
+    walletUnavailable:
+      "Ihre Wallet hat nicht geantwortet. Sie können stattdessen einen Code mit der Wallet-App auf Ihrem Telefon scannen.",
+    showQrCode: "QR-Code anzeigen",
+    successTitle: "Geld gesendet",
+    successBody: (amount, payee) => `${amount} ist unterwegs an ${payee}.`,
+    failedTitle: "Geld nicht gesendet",
+    expired: "Die Anfrage ist abgelaufen. Bitte versuchen Sie es erneut.",
+    unknownCredential:
+      "Dieser Nachweis ist gültig, kann aber keinem Kunden zugeordnet werden. Fügen Sie den Sparkassen Authenticator über Ihre Übersicht erneut zur Wallet hinzu und versuchen Sie es dann noch einmal.",
+    limitExceeded:
+      "Diese Überweisung liegt über Ihrem täglichen Überweisungslimit. Senden Sie einen kleineren Betrag oder erhöhen Sie zuerst Ihr Limit.",
+    insufficientFunds:
+      "Das Konto weist für diese Überweisung keine ausreichende Deckung auf. Es wurde nichts gesendet.",
+    verificationFailed:
+      "Die Antwort Ihrer Wallet konnte nicht geprüft werden. Es wurde kein Geld gesendet.",
+  },
   credential: {
     ageTitle: "Altersnachweis",
   },
