@@ -15,6 +15,7 @@ import {
 import {
   getAgeCredentialState,
   getAuthenticatorCredentialState,
+  getProfile,
   getTransactionProof,
   getWeroCredentialState,
   listAccounts,
@@ -54,6 +55,28 @@ describe("listAccounts", () => {
 
   it("returns the account's daily limit", () => {
     expect(listAccounts(db, "user_anna")[0]?.dailyLimitCents).toBe(100_000);
+  });
+});
+
+describe("getProfile", () => {
+  it("returns the login username and the phone number", () => {
+    expect(getProfile(db, "user_anna")).toEqual({
+      username: "anna",
+      phoneNumber: "+49 171 5555555",
+    });
+  });
+
+  it("returns the OTHER customer's own number, not the first row's", () => {
+    expect(getProfile(db, "user_ben")?.phoneNumber).toBe("+49 160 2345678");
+  });
+
+  it("returns null for an unknown user", () => {
+    expect(getProfile(db, "user_nobody")).toBeNull();
+  });
+
+  it("returns exactly two members", () => {
+    const profile = getProfile(db, "user_anna");
+    expect(Object.keys(profile!)).toEqual(["username", "phoneNumber"]);
   });
 });
 
