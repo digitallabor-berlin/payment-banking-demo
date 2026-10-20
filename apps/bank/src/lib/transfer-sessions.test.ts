@@ -5,9 +5,15 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FoundryClient } from "@demo/foundry-client";
 import { createDb, type Db } from "../db/index.js";
-import { accounts, transferSessions } from "../db/schema.js";
+import { accounts, credentials, transferSessions } from "../db/schema.js";
 import { seed } from "../db/seed.js";
-import { startTransfer } from "./transfer-sessions.js";
+import { SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID } from "./credential-types.js";
+import {
+  TRANSFER_SESSION_TTL_MS,
+  getTransferStatus,
+  refreshTransferState,
+  startTransfer,
+} from "./transfer-sessions.js";
 
 let dir: string;
 let db: Db;
@@ -393,5 +399,402 @@ describe("startTransfer", () => {
     expect(row.failureReason).toBe("foundry_unavailable");
     // The row names the transport that FAILED.
     expect(row.transport).toBe("request_uri");
+  });
+});
+/**
+ * A verdict shaped like the one foundry serves for the `sparkassen_auth` named
+ * query. `bound: false` models a wallet that ignored the `transaction_data`
+ * entry — the case the binding gate exists for.
+ */
+function authVerdict(sub: unknown, verified = true, bound = true) {
+  return {
+    id: "v_transfer_1",
+    state: verified ? "verified" : "failed",
+    created_at: 0,
+    result: {
+      verified,
+      checks: [],
+      credentials: [
+        {
+          query_id: "sparkassen_auth",
+          format: "dc+sd-jwt",
+          claims: { sub },
+          checks: bound
+            ? [{ check: "transaction_data_binding", passed: true }]
+            : [],
+        },
+      ],
+    },
+  };
+}
+
+/** Counts polls as well as answering them, so "no traffic" is provable. */
+function verdictClient(
+  verdict: unknown,
+  calls: string[] = [],
+  status = 200,
+): FoundryClient {
+  const fetchImpl = (async (input: string | URL | Request) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes("/admin/verification/requests/")) {
+      return new Response(JSON.stringify(verdict), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const body = url.includes("/admin/paso/ad-hoc-metadata")
+      ? MINT_OK.body
+      : REQUEST_URI_OK.body;
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+
+  return new FoundryClient({
+    adminUrl: "http://f:9000",
+    adminKey: "k",
+    fetchImpl,
+  });
+}
+
+/**
+ * Opens a real pending session for `user_anna` / `acc_anna`.
+ *
+ * `now` defaults to the real clock because `refreshTransferState`'s own `now`
+ * does: a fixed epoch here would put every session past
+ * `TRANSFER_SESSION_TTL_MS` before the first poll, and every case below would
+ * read `expired` instead of what it is about. The expiry case passes a matched
+ * pair explicitly.
+ */
+async function openSession(now = Date.now()): Promise<string> {
+  const result = await startTransfer(
+    db,
+    stubClient([], { mint: MINT_OK, verify: REQUEST_URI_OK }),
+    { ...ANNA, ...VALID },
+    now,
+  );
+  if (!result.ok) throw new Error(`expected ok, got ${result.reason}`);
+  return result.session.sessionId;
+}
+
+/** Issues an authenticator credential row carrying `sub`, owned by `userId`. */
+function giveAuthenticator(userId: string, sub: string): void {
+  db.insert(credentials)
+    .values({
+      id: `cred_${sub}`,
+      userId,
+      cardId: null,
+      credentialTypeId: SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID,
+      credentialId: sub,
+      state: "active",
+      createdAt: 1,
+    })
+    .run();
+}
+
+const POLL = { userId: "user_anna", accountId: "acc_anna" };
+
+function reasonOf(sessionId: string): string | null {
+  return rowOf(sessionId)?.failureReason ?? null;
+}
+
+describe("refreshTransferState", () => {
+  it("answers not_found for another customer's session", async () => {
+    const sessionId = await openSession();
+    const calls: string[] = [];
+
+    const result = await refreshTransferState(
+      db,
+      verdictClient(authVerdict("s"), calls),
+      { ...POLL, userId: "user_ben", sessionId },
+    );
+
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("makes no foundry call for an applied or failed session", async () => {
+    for (const state of ["applied", "failed"] as const) {
+      const sessionId = await openSession();
+      db.update(transferSessions)
+        .set({ state })
+        .where(eq(transferSessions.id, sessionId))
+        .run();
+      const calls: string[] = [];
+
+      const result = await refreshTransferState(
+        db,
+        verdictClient(authVerdict("s"), calls),
+        { ...POLL, sessionId },
+      );
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.status.state).toBe(state);
+      expect(calls).toHaveLength(0);
+    }
+  });
+
+  it("makes no foundry call once verified", async () => {
+    // Approved and waiting for the apply. Re-polling foundry would tell us
+    // nothing that is not already recorded.
+    const sessionId = await openSession();
+    db.update(transferSessions)
+      .set({ state: "verified" })
+      .where(eq(transferSessions.id, sessionId))
+      .run();
+    const calls: string[] = [];
+
+    const result = await refreshTransferState(
+      db,
+      verdictClient(authVerdict("s"), calls),
+      { ...POLL, sessionId },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.status.state).toBe("verified");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("fails with expired past the TTL, without calling foundry", async () => {
+    const started = 1_000_000;
+    const sessionId = await openSession(started);
+    const calls: string[] = [];
+
+    const result = await refreshTransferState(
+      db,
+      verdictClient(authVerdict("s"), calls),
+      { ...POLL, sessionId },
+      started + TRANSFER_SESSION_TTL_MS + 1,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.status.state).toBe("failed");
+    expect(result.status.failureReason).toBe("expired");
+    // An abandoned tab stops costing admin-API traffic the moment it expires.
+    expect(calls).toHaveLength(0);
+  });
+
+  it("stays pending while foundry says pending", async () => {
+    const sessionId = await openSession();
+
+    const result = await refreshTransferState(
+      db,
+      verdictClient({ id: "v_transfer_1", state: "pending", created_at: 0 }),
+      { ...POLL, sessionId },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.status.state).toBe("pending");
+  });
+
+  it("stays pending when the status call throws", async () => {
+    // Transient. A 503 on one poll of a five-minute window must not kill the
+    // session — only the client's consecutive-failure counter gives up.
+    // `refreshLimitChangeState` behaves identically; see the ledger ruling.
+    const sessionId = await openSession();
+
+    const result = await refreshTransferState(
+      db,
+      verdictClient(authVerdict("s"), [], 503),
+      { ...POLL, sessionId },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.status.state).toBe("pending");
+    expect(reasonOf(sessionId)).toBeNull();
+  });
+
+  it("fails with verification_failed when foundry says not verified", async () => {
+    const sessionId = await openSession();
+
+    const result = await refreshTransferState(
+      db,
+      verdictClient(authVerdict("s", false)),
+      { ...POLL, sessionId },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.status.state).toBe("failed");
+    expect(result.status.failureReason).toBe("verification_failed");
+  });
+
+  it("fails with verification_failed when no authenticator answered", async () => {
+    // Either nothing answered the authenticator query, or what did disclosed
+    // no usable `sub`. Both are the wallet's answer being wrong, not the
+    // customer being unknown.
+    const sessionId = await openSession();
+
+    const result = await refreshTransferState(
+      db,
+      verdictClient(authVerdict(undefined)),
+      { ...POLL, sessionId },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.status.failureReason).toBe("verification_failed");
+  });
+
+  it("fails with transaction_data_binding_failed when the binding did not pass", async () => {
+    // A wallet that ignored the entry yields a verdict that is
+    // `verified: true` and still worthless: nothing in it is tied to THESE
+    // four values, so it attests an approval of a transfer the holder may
+    // never have seen.
+    const sessionId = await openSession();
+    giveAuthenticator("user_anna", "sub_anna");
+
+    const result = await refreshTransferState(
+      db,
+      verdictClient(authVerdict("sub_anna", true, false)),
+      { ...POLL, sessionId },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.status.failureReason).toBe("transaction_data_binding_failed");
+  });
+
+  it("gates the binding BEFORE resolving the sub", async () => {
+    // A `sub` NO credential carries, with the binding ALSO failing. The two
+    // orderings give different answers, so this pins the order:
+    //   binding first  → transaction_data_binding_failed
+    //   resolve first  → unknown_credential
+    // Using the signed-in customer's own `sub` would fail the binding under
+    // either ordering and therefore pin nothing.
+    const sessionId = await openSession();
+    giveAuthenticator("user_anna", "sub_anna");
+
+    const result = await refreshTransferState(
+      db,
+      verdictClient(authVerdict("sub_nobody_holds", true, false)),
+      { ...POLL, sessionId },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.status.failureReason).toBe("transaction_data_binding_failed");
+  });
+
+  it("fails with unknown_credential for a sub this bank cannot place", async () => {
+    // A real, correctly-signed credential this bank cannot match to a
+    // customer. Expected for anything issued before the `sub` was persisted;
+    // there is no backfill, and the copy for this reason names the remedy.
+    const sessionId = await openSession();
+
+    const result = await refreshTransferState(
+      db,
+      verdictClient(authVerdict("sub_nobody_holds")),
+      { ...POLL, sessionId },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.status.failureReason).toBe("unknown_credential");
+  });
+
+  it("fails with wrong_customer for another customer's authenticator", async () => {
+    // THE GATE THIS FLOW ADDS. Without it any valid Sparkassen Authenticator
+    // presentation could approve any signed-in customer's transfer.
+    const sessionId = await openSession();
+    giveAuthenticator("user_ben", "sub_ben");
+
+    const result = await refreshTransferState(
+      db,
+      verdictClient(authVerdict("sub_ben")),
+      { ...POLL, sessionId },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.status.state).toBe("failed");
+    // Its OWN reason, distinct from `unknown_credential`, so an operator can
+    // tell a credential issued to the wrong person from one the bank cannot
+    // place at all. The holder sees the same generic copy for both.
+    expect(result.status.failureReason).toBe("wrong_customer");
+    expect(rowOf(sessionId)?.approvedByUserId).toBeNull();
+  });
+
+  it("verifies and records approvedByUserId when the owner approved", async () => {
+    const sessionId = await openSession();
+    giveAuthenticator("user_anna", "sub_anna");
+
+    const result = await refreshTransferState(
+      db,
+      verdictClient(authVerdict("sub_anna")),
+      { ...POLL, sessionId },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.status.state).toBe("verified");
+    expect(result.status.failureReason).toBeUndefined();
+    // The status carries these because the dialog's success copy names them
+    // and by then it holds only a session id.
+    expect(result.status.amountCents).toBe(25_000);
+    expect(result.status.payeeName).toBe("Max Mustermann");
+
+    const row = rowOf(sessionId)!;
+    expect(row.state).toBe("verified");
+    expect(row.approvedByUserId).toBe("user_anna");
+    // Only ever written EQUAL to `started_by_user_id` — that equality is the
+    // whole of what the gate enforces.
+    expect(row.approvedByUserId).toBe(row.startedByUserId);
+  });
+
+  it("verifies a credential that is not active, because foundry already said it is real", async () => {
+    // Deliberately NOT gated on `credential.state`: foundry's verdict is the
+    // authority that the credential is real and holder-bound; this row only
+    // answers WHOSE. Nothing in this project ever clears an `offered` row.
+    const sessionId = await openSession();
+    giveAuthenticator("user_anna", "sub_anna");
+    db.update(credentials)
+      .set({ state: "offered" })
+      .where(eq(credentials.credentialId, "sub_anna"))
+      .run();
+
+    const result = await refreshTransferState(
+      db,
+      verdictClient(authVerdict("sub_anna")),
+      { ...POLL, sessionId },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.status.state).toBe("verified");
+  });
+});
+
+describe("getTransferStatus", () => {
+  it("answers null for another customer's session", async () => {
+    const sessionId = await openSession();
+    expect(
+      getTransferStatus(db, "user_ben", "acc_anna", sessionId),
+    ).toBeNull();
+  });
+
+  it("answers null for a session on another account", async () => {
+    const sessionId = await openSession();
+    expect(
+      getTransferStatus(db, "user_anna", "acc_ben", sessionId),
+    ).toBeNull();
+  });
+
+  it("makes no foundry call", async () => {
+    const sessionId = await openSession();
+    const status = getTransferStatus(db, "user_anna", "acc_anna", sessionId);
+    expect(status).toEqual({
+      state: "pending",
+      failureReason: undefined,
+      amountCents: 25_000,
+      payeeName: "Max Mustermann",
+    });
   });
 });

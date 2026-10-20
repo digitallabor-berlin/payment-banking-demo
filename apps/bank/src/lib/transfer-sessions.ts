@@ -4,10 +4,16 @@ import type { FoundryClient } from "@demo/foundry-client";
 import type { Db } from "../db/index.js";
 import {
   accounts,
+  credentials,
   transferSessions,
+  type TransferSession,
   type TransferSessionState,
 } from "../db/schema.js";
-import { SPARKASSEN_AUTH_NAMED_QUERY } from "./credential-types.js";
+import {
+  SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID,
+  SPARKASSEN_AUTH_NAMED_QUERY,
+} from "./credential-types.js";
+import { extractAuthSubject, passedLoginBinding } from "./login-checks.js";
 import {
   buildTransferAdHocMetadataRequest,
   buildTransferTransactionData,
@@ -284,4 +290,226 @@ export async function startTransfer(
     failTransfer(db, sessionId, "foundry_unavailable");
     return { ok: false, reason: "foundry_unavailable" };
   }
+}
+export interface TransferStatusDto {
+  state: TransferSessionState;
+  failureReason?: string;
+  /**
+   * Carried on the status rather than fetched separately, because the dialog's
+   * success copy names the amount and the recipient and the only thing it
+   * still holds by then is a session id.
+   */
+  amountCents: number;
+  payeeName: string;
+}
+
+export type RefreshTransferResult =
+  | { ok: true; status: TransferStatusDto }
+  | { ok: false; reason: "not_found" };
+
+/**
+ * Reads one session, scoped THREE ways: by id, by the account it names, and by
+ * the customer who started it.
+ *
+ * All three absences answer the same `undefined`, and the route turns that
+ * into one 404. A session id is guessable and this flow ends in a debit, so
+ * "this is not yours" must not be distinguishable from "this does not exist" —
+ * the same rule `getTransactionProof` follows.
+ *
+ * Scoped HERE rather than in the route, for the same reason: a route is one
+ * caller of many, and the check belongs with the read.
+ */
+function loadSession(
+  db: Db,
+  userId: string,
+  accountId: string,
+  sessionId: string,
+): TransferSession | undefined {
+  return db
+    .select()
+    .from(transferSessions)
+    .where(
+      and(
+        eq(transferSessions.id, sessionId),
+        eq(transferSessions.startedByUserId, userId),
+        eq(transferSessions.accountId, accountId),
+      ),
+    )
+    .get();
+}
+
+/** A plain lookup. No foundry traffic — `refreshTransferState` does that. */
+export function getTransferStatus(
+  db: Db,
+  userId: string,
+  accountId: string,
+  sessionId: string,
+): TransferStatusDto | null {
+  const row = loadSession(db, userId, accountId, sessionId);
+  if (!row) return null;
+
+  return {
+    state: row.state,
+    failureReason: row.failureReason ?? undefined,
+    amountCents: row.amountCents,
+    payeeName: row.payeeName,
+  };
+}
+
+/**
+ * Polled by the browser roughly every 2s. Drives `pending → verified | failed`
+ * and NOTHING else — moving the money is `applyTransfer`'s job, on a POST,
+ * because a GET with a side effect gets fired twice by a prefetch or a
+ * double-poll and here the side effect debits an account.
+ *
+ * Order mirrors `refreshLimitChangeState` exactly: terminal (no traffic), then
+ * expiry (no traffic), then already-verified (no traffic), and only then
+ * foundry. An abandoned tab stops generating admin-API calls the moment its
+ * window closes.
+ *
+ * Then four gates, in this order:
+ *
+ *   1. foundry reports the presentation verified;
+ *   2. `extractAuthSubject` yields a `sub` — a pure READ, which settles
+ *      nothing;
+ *   3. `transaction_data_binding` passed on the credential that answered the
+ *      authenticator query;
+ *   4. that `sub` RESOLVES to an authenticator credential owned by
+ *      `started_by_user_id`.
+ *
+ * Note 2 and 3 in that order, which is not the order the design's prose lists
+ * them in and is the order `login-sessions.ts` documents as correct. Reading a
+ * claim out of a JSON blob is inert; the gate belongs before the claim is
+ * *used*, not before it is read. The distinction is only observable in the
+ * `failure_reason` a verdict gets when it is both unbound and carries a `sub`
+ * nothing matches — one test pins exactly that case, because a maintainer
+ * "correcting" the code to match a numbered list would silently collapse two
+ * distinct wallet failures into one.
+ *
+ * **(4) IS THE GATE THIS FLOW ADDS OVER WALLET LOGIN, AND IT LIVES HERE RATHER
+ * THAN IN APPLY.** Login resolves a `sub` to whoever owns that credential —
+ * that is the point, nobody is signed in yet. Here somebody is, and without
+ * this check any valid Sparkassen Authenticator presentation could approve any
+ * signed-in customer's transfer. Putting it in apply instead would need a
+ * second `getVerificationStatus` call after the session had gone terminal and,
+ * worse, would let a stranger's valid presentation drive the session to
+ * `verified` — showing the holder a success-shaped dialog that apply then
+ * rejects. `verified` must mean *the right person approved*, or the state name
+ * is a lie.
+ *
+ * A THROWN status call leaves the session `pending` rather than failing it.
+ * One transient 503 inside a five-minute window must not destroy a holder's
+ * approval; only the client's consecutive-failure counter decides when to give
+ * up. `refreshLimitChangeState` does the same.
+ */
+export async function refreshTransferState(
+  db: Db,
+  foundry: FoundryClient,
+  input: { userId: string; accountId: string; sessionId: string },
+  now: number = Date.now(),
+): Promise<RefreshTransferResult> {
+  const row = loadSession(db, input.userId, input.accountId, input.sessionId);
+  if (!row) return { ok: false, reason: "not_found" };
+
+  const done = (): RefreshTransferResult => ({
+    ok: true,
+    status: getTransferStatus(
+      db,
+      input.userId,
+      input.accountId,
+      input.sessionId,
+    )!,
+  });
+
+  // Terminal: nothing left to learn.
+  if (row.state === "applied" || row.state === "failed") return done();
+
+  // Expiry BEFORE the foundry call, so an abandoned tab stops costing traffic.
+  // `expired` is a failure reason, not a fifth state.
+  if (now - row.createdAt > TRANSFER_SESSION_TTL_MS) {
+    failTransfer(db, input.sessionId, "expired");
+    return done();
+  }
+
+  // Approved and waiting for the apply. Re-polling foundry would tell us
+  // nothing we have not already recorded.
+  if (row.state === "verified") return done();
+
+  if (!row.foundryVerificationId) {
+    failTransfer(db, input.sessionId, "verification_failed");
+    return done();
+  }
+
+  let verdict;
+  try {
+    verdict = await foundry.getVerificationStatus(row.foundryVerificationId);
+  } catch {
+    // Transient. Stay pending so a later poll can recover.
+    return done();
+  }
+
+  if (verdict.state === "pending") return done();
+
+  if (verdict.state === "failed" || verdict.result?.verified !== true) {
+    failTransfer(db, input.sessionId, "verification_failed");
+    return done();
+  }
+
+  const subject = extractAuthSubject(verdict.result.credentials);
+  if (!subject) {
+    // Either no credential answered the authenticator query, or the one that
+    // did disclosed no usable `sub`. Both are the wallet's answer being wrong,
+    // not the customer being unknown.
+    failTransfer(db, input.sessionId, "verification_failed");
+    return done();
+  }
+
+  if (!passedLoginBinding(verdict.result.credentials)) {
+    // A wallet that ignored the `transaction_data` entry yields a verdict that
+    // is `verified: true` and still worthless: nothing in it is tied to THESE
+    // four values, so it attests an approval of a transfer the holder may
+    // never have seen. Its own reason, so an operator can tell this apart from
+    // every other bad presentation; the holder sees the generic copy.
+    failTransfer(db, input.sessionId, "transaction_data_binding_failed");
+    return done();
+  }
+
+  const credential = db
+    .select()
+    .from(credentials)
+    .where(
+      and(
+        eq(credentials.credentialId, subject),
+        eq(credentials.credentialTypeId, SPARKASSEN_AUTH_CREDENTIAL_TYPE_ID),
+      ),
+    )
+    .get();
+
+  if (!credential) {
+    // A real, correctly-signed credential this bank cannot match to a customer.
+    // Expected for anything issued before the sub was persisted; there is no
+    // backfill, and the copy for this reason names the remedy.
+    failTransfer(db, input.sessionId, "unknown_credential");
+    return done();
+  }
+
+  if (credential.userId !== row.startedByUserId) {
+    // A stranger's valid authenticator. Its OWN reason, distinct from
+    // `unknown_credential`, so an operator can tell a credential issued to the
+    // wrong person from one this bank cannot place at all. The holder sees the
+    // same generic copy for both — neither is something they can act on.
+    failTransfer(db, input.sessionId, "wrong_customer");
+    return done();
+  }
+
+  // Deliberately NOT gated on `credential.state === "active"`, for the reason
+  // wallet login is not: foundry's verdict is the authority that the credential
+  // is real and holder-bound; this row only answers WHOSE. Nothing here ever
+  // clears an `offered` row.
+  db.update(transferSessions)
+    .set({ state: "verified", approvedByUserId: credential.userId })
+    .where(eq(transferSessions.id, input.sessionId))
+    .run();
+
+  return done();
 }
