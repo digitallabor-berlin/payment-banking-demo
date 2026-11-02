@@ -42,8 +42,12 @@ export function isLoginTerminal(state: string): boolean {
  *
  * `dcSupported === null` means detection has not resolved, which is NOT the
  * same as unsupported — rendering the QR there flashes it on Android before it
- * disappears. On touch the wallet lives on this same phone, so a deep link
- * beats a QR nobody can scan.
+ * disappears.
+ *
+ * `"deep-link"` means "ALSO offer the deep link", not "offer it instead of the
+ * QR" — see `showsWalletButton` / `showsQr` below, which is where that is
+ * decided. The name is kept because the touch case is still the only one that
+ * carries a link at all.
  */
 export function selectLoginAffordance(
   dcSupported: boolean | null,
@@ -53,6 +57,37 @@ export function selectLoginAffordance(
   if (dcSupported === null) return "preparing";
   if (dcSupported && dcError === null) return "dc-api";
   return isTouch ? "deep-link" : "qr";
+}
+
+/**
+ * Whether to draw the `openid4vp://` deep link. Touch only — on a pointer
+ * device there is no wallet to hand over to on this machine.
+ */
+export function showsWalletButton(affordance: LoginAffordance): boolean {
+  return affordance === "deep-link";
+}
+
+/**
+ * Whether to draw the QR. TRUE on touch as well as on a pointer device, and
+ * that is the whole of the iPad fix.
+ *
+ * These used to be one mutually-exclusive branch per affordance inside each
+ * dialog's JSX, so `"deep-link"` structurally excluded the QR. `pointer:
+ * coarse` was being read as "a wallet lives on this device", which it cannot
+ * answer — no browser API can. It is false for an iPad, for a touchscreen
+ * laptop, and for any phone without the wallet installed.
+ *
+ * Reported from a real iPad (Safari 18.7.5, which has no Digital Credentials
+ * API at all, so the session was correctly `request_uri`): the dialog drew a
+ * button that opened `openid4vp://`, which no iPad app claims, and offered no
+ * QR anywhere. Offering both costs a phone holder nothing — the link is still
+ * first — and gives a tablet holder something to scan with their phone.
+ *
+ * Still false for `dc-api`: that session inlines its request object and has no
+ * URI, so a QR there would encode an empty string.
+ */
+export function showsQr(affordance: LoginAffordance): boolean {
+  return affordance === "qr" || affordance === "deep-link";
 }
 
 /**

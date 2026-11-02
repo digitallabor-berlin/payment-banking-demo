@@ -32,7 +32,19 @@ export interface SheetInput {
   state: string;
   transport: PresentationTransport;
   ageRequested: boolean;
-  redirecting: boolean;
+  /**
+   * Coarse pointer. Adds the `openid4vp://` deep link BESIDE the QR; it never
+   * replaces it.
+   *
+   * This replaced a `redirecting` flag that the sheet set from an on-mount
+   * effect, which navigated any touch device straight at `openid4vp://` and
+   * suppressed the QR while it did. `pointer: coarse` cannot answer "is a
+   * wallet installed here" — no browser API can — and on a real iPad (Safari
+   * 18.7.5, no Digital Credentials API, so correctly a `request_uri` session)
+   * that meant being thrown at a scheme no app claims, with no QR to fall
+   * back to. Reported from the device.
+   */
+  isTouch: boolean;
   dcBusy: boolean;
   /**
    * The wallet answered and its response has been relayed; the server has not
@@ -65,6 +77,11 @@ export interface SheetView {
   body: string;
   showQr: boolean;
   showWalletButton: boolean;
+  /**
+   * The `openid4vp://` anchor, offered on touch alongside the QR. Distinct
+   * from `showWalletButton`, which is the DC API handover and has no URI.
+   */
+  showWalletLink: boolean;
   primaryAction: SheetAction;
   showCancel: boolean;
   showBackToShop: boolean;
@@ -107,6 +124,7 @@ function declined(
     body,
     showQr: false,
     showWalletButton: false,
+    showWalletLink: false,
     primaryAction: action,
     showCancel: false,
     showBackToShop: true,
@@ -152,6 +170,7 @@ export function selectSheetView(input: SheetInput): SheetView {
       body: "Taking you to your receipt…",
       showQr: false,
       showWalletButton: false,
+      showWalletLink: false,
       primaryAction: null,
       showCancel: false,
       showBackToShop: false,
@@ -182,27 +201,10 @@ export function selectSheetView(input: SheetInput): SheetView {
       body: "Your wallet approved the payment. Don't close this tab.",
       showQr: false,
       showWalletButton: false,
+      showWalletLink: false,
       primaryAction: null,
       // The money is in flight. There is nothing left to cancel.
       showCancel: false,
-      showBackToShop: false,
-    };
-  }
-
-  if (input.redirecting) {
-    return {
-      phase: "waiting",
-      eyebrow: AUTHORISE,
-      litStars: 6,
-      glyph: "card",
-      animate: true,
-      pill: "Opening your wallet…",
-      headline: null,
-      body: "Approve the payment in your EUDI Wallet, then come back to this tab.",
-      showQr: false,
-      showWalletButton: false,
-      primaryAction: null,
-      showCancel: true,
       showBackToShop: false,
     };
   }
@@ -239,6 +241,7 @@ export function selectSheetView(input: SheetInput): SheetView {
         body,
         showQr: false,
         showWalletButton: false,
+        showWalletLink: false,
         primaryAction: null,
         // Cancel stays: the money is not in flight yet. `settling` is where
         // that becomes true, and it is strictly after this.
@@ -259,11 +262,25 @@ export function selectSheetView(input: SheetInput): SheetView {
       body,
       showQr: false,
       showWalletButton: true,
+      showWalletLink: false,
       primaryAction: "approve",
       showCancel: true,
       showBackToShop: false,
     };
   }
+
+  /*
+   * A `request_uri` session, which is the only one with a URI to hand over.
+   *
+   * The QR is drawn unconditionally and the deep link is ADDED on touch — the
+   * two are not alternatives. See `isTouch` above for why reading coarse
+   * pointer as "the wallet is on this device" was wrong. The copy names
+   * whichever affordances are actually on screen.
+   */
+  const over18 = input.ageRequested ? " and confirm you're over 18" : "";
+  const waitingBody = input.isTouch
+    ? `Open your wallet to approve the payment${over18}, or scan the code with another device.`
+    : `Scan with your EUDI Wallet to approve the payment${over18}.`;
 
   return {
     phase: "waiting",
@@ -273,11 +290,10 @@ export function selectSheetView(input: SheetInput): SheetView {
     animate: true,
     pill: "Waiting for your wallet",
     headline: null,
-    body: input.ageRequested
-      ? "Scan with your EUDI Wallet to approve the payment and confirm you're over 18."
-      : "Scan with your EUDI Wallet to approve the payment.",
+    body: waitingBody,
     showQr: true,
     showWalletButton: false,
+    showWalletLink: input.isTouch,
     primaryAction: null,
     showCancel: true,
     showBackToShop: false,

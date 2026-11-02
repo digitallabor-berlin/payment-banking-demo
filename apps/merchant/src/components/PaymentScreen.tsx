@@ -12,10 +12,7 @@ import {
 } from "@demo/ui";
 import { formatEuroCents } from "@/lib/format.js";
 import { selectSheetView, type DcError } from "@/lib/sheet-state.js";
-import {
-  isDcApiTransport,
-  type PresentationTransport,
-} from "@/lib/transport.js";
+import { type PresentationTransport } from "@/lib/transport.js";
 import { useCart } from "@/lib/useCart.js";
 // NB: EudiPayLogo is deliberately NOT imported. The ring draws its own card
 // glyph at the centre, so importing the standalone mark here would both put two
@@ -92,7 +89,6 @@ export function PaymentScreen({
   const { clear } = useCart();
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusTo = useRef<HTMLElement | null>(null);
-  const [redirecting, setRedirecting] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [dcError, setDcError] = useState<DcError>(null);
   const [dcBusy, setDcBusy] = useState(false);
@@ -154,7 +150,7 @@ export function PaymentScreen({
     state,
     transport,
     ageRequested,
-    redirecting,
+    isTouch,
     dcBusy,
     dcSubmitted,
     dcError,
@@ -173,16 +169,21 @@ export function PaymentScreen({
     failureReason,
   });
 
-  // On a touch device the wallet lives on this same phone, so follow the deep
-  // link rather than rendering a QR nobody can scan (spec §9.5). Under dc_api
-  // there is no URI to navigate to, and the gesture requirement forbids an
-  // on-mount action anyway.
-  useEffect(() => {
-    if (isDcApiTransport(transport)) return;
-    if (!isTouch || terminalAtRender || redirecting) return;
-    setRedirecting(true);
-    window.location.href = openid4vpUri;
-  }, [transport, isTouch, terminalAtRender, redirecting, openid4vpUri]);
+  /*
+   * There is deliberately NO on-mount redirect here any more.
+   *
+   * This used to navigate `window.location.href = openid4vpUri` on any
+   * coarse-pointer device, on the reading that "touch" means the wallet is on
+   * this same phone (spec §9.5). It cannot mean that: `pointer: coarse` is
+   * also an iPad, a touchscreen laptop, and a phone with no wallet installed.
+   * On a real iPad it threw the shopper at a scheme no app claims and
+   * suppressed the QR while doing it, leaving nothing on screen to recover
+   * with. Reported from the device.
+   *
+   * The deep link is now an anchor the shopper presses (`view.showWalletLink`)
+   * and the QR is always drawn beside it, so the device decides rather than
+   * the media query.
+   */
 
   // The cart is cleared HERE, not when the form was submitted: the basket is
   // the content this sheet sits over, and a declined payment must leave it
@@ -408,6 +409,17 @@ export function PaymentScreen({
             <p className="eudipay-headline">{view.headline}</p>
           ) : null}
         </div>
+
+        {/* Offered on touch ABOVE the QR, never instead of it: a phone holder
+            presses it, a tablet holder ignores it and scans. */}
+        {view.showWalletLink ? (
+          <a
+            href={openid4vpUri}
+            className="eudipay-button eudipay-button-primary eudipay-wallet-link"
+          >
+            Open your wallet
+          </a>
+        ) : null}
 
         {view.showQr ? (
           <div className="eudipay-qr-frame">

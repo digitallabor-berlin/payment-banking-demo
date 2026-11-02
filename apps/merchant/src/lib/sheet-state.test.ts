@@ -5,7 +5,7 @@ const base: SheetInput = {
   state: "pending",
   transport: "request_uri",
   ageRequested: false,
-  redirecting: false,
+  isTouch: false,
   dcBusy: false,
   dcSubmitted: false,
   dcError: null,
@@ -26,13 +26,63 @@ describe("selectSheetView — waiting states", () => {
     expect(view.primaryAction).toBeNull();
   });
 
-  it("shows no QR while redirecting to a wallet deep link", () => {
-    const view = selectSheetView({ ...base, redirecting: true });
-    expect(view.showQr).toBe(false);
-    expect(view.pill).toBe("Opening your wallet…");
-    expect(view.body).toBe(
-      "Approve the payment in your EUDI Wallet, then come back to this tab.",
+  /*
+   * The sheet used to auto-navigate to `openid4vp://` on any coarse-pointer
+   * device and suppress the QR entirely while it did. An iPad is
+   * pointer:coarse and claims no handler for that scheme, so the shopper was
+   * thrown at a URL that went nowhere, with no QR to fall back to. Reported
+   * from a real iPad.
+   *
+   * `pointer: coarse` cannot answer "is a wallet installed here" — so the
+   * sheet stops betting on it and offers BOTH.
+   */
+  it("shows the QR for a request_uri session on touch as well as on a pointer device", () => {
+    expect(selectSheetView({ ...base, isTouch: true }).showQr).toBe(true);
+    expect(selectSheetView({ ...base, isTouch: false }).showQr).toBe(true);
+  });
+
+  it("offers the wallet deep link on touch only", () => {
+    expect(selectSheetView({ ...base, isTouch: true }).showWalletLink).toBe(
+      true,
     );
+    expect(selectSheetView({ ...base, isTouch: false }).showWalletLink).toBe(
+      false,
+    );
+  });
+
+  it("NEVER offers the deep link without a QR beside it", () => {
+    // The invariant the iPad bug violated.
+    for (const isTouch of [true, false]) {
+      const view = selectSheetView({ ...base, isTouch });
+      if (view.showWalletLink) expect(view.showQr).toBe(true);
+    }
+  });
+
+  it("offers no deep link under either DC API form", () => {
+    // Both inline their request object, so there is no URI to navigate to —
+    // the same reason neither draws a QR.
+    for (const transport of ["dc_api", "dc_api_signed"] as const) {
+      const view = selectSheetView({ ...base, transport, isTouch: true });
+      expect(view.showWalletLink).toBe(false);
+      expect(view.showQr).toBe(false);
+    }
+  });
+
+  it("withdraws the deep link once the payment is terminal", () => {
+    // A declined payment must not keep offering a wallet handover, for the
+    // same reason it must not keep offering a QR.
+    expect(
+      selectSheetView({ ...base, isTouch: true, state: "failed" })
+        .showWalletLink,
+    ).toBe(false);
+    expect(
+      selectSheetView({ ...base, isTouch: true, pollStatus: "timeout" })
+        .showWalletLink,
+    ).toBe(false);
+    expect(
+      selectSheetView({ ...base, isTouch: true, state: "completed" })
+        .showWalletLink,
+    ).toBe(false);
   });
 
   it("offers the wallet button and no pill before a dc_api press", () => {

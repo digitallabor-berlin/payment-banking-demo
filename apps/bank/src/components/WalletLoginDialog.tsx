@@ -19,6 +19,8 @@ import {
   loginFailureKey,
   selectLoginAffordance,
   selectLoginPhase,
+  showsQr,
+  showsWalletButton,
   type LoginDcError,
 } from "@/lib/login-dialog-state.js";
 import { AlertMark, CheckMark } from "./StatusMark.js";
@@ -204,7 +206,7 @@ export function WalletLoginDialog({
               </>
             ) : null}
 
-            {affordance === "deep-link" && uri ? (
+            {showsWalletButton(affordance) && uri ? (
               <>
                 <a href={uri} className="btn btn-primary mt-6 px-5 py-3">
                   {t.openInWallet}
@@ -215,7 +217,7 @@ export function WalletLoginDialog({
               </>
             ) : null}
 
-            {affordance === "qr" && uri ? (
+            {showsQr(affordance) && uri ? (
               <>
                 <div className="qr-frame mt-6 p-3">
                   <QrCanvas

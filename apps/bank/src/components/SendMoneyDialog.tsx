@@ -18,6 +18,8 @@ import { MESSAGES } from "@/lib/i18n/messages.js";
 import { needsQrRecovery } from "@/lib/limit-dialog-state.js";
 import {
   selectLoginAffordance,
+  showsQr,
+  showsWalletButton,
   type LoginDcError,
 } from "@/lib/login-dialog-state.js";
 import {
@@ -504,7 +506,7 @@ export function SendMoneyDialog({
               </>
             ) : null}
 
-            {affordance === "deep-link" && session?.uri ? (
+            {showsWalletButton(affordance) && session?.uri ? (
               <>
                 <a href={session.uri} className="btn btn-primary mt-6 px-5 py-3">
                   {t.openInWallet}
@@ -515,7 +517,7 @@ export function SendMoneyDialog({
               </>
             ) : null}
 
-            {affordance === "qr" && session?.uri ? (
+            {showsQr(affordance) && session?.uri ? (
               <>
                 <div className="qr-frame mt-6 p-3">
                   <QrCanvas

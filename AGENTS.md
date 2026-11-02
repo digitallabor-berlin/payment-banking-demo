@@ -53,8 +53,35 @@ Run from the repo root. `pnpm`, never `npm`.
 | `pnpm build` | Production build of both apps |
 
 `pnpm check` must be green before you claim work is done. Current baseline:
-**1323 tests** (979 bank + 291 merchant + 16 foundry-client + 37 ui), measured
-2026-10-20.
+**1334 tests** (986 bank + 295 merchant + 16 foundry-client + 37 ui), measured
+2026-11-02.
+
+That was **1323** before the iPad QR fix, and for the third time running every
+one of the four figures this file asserted was correct, so nothing had to be
+re-measured at the far end. It added **11**: +7 in `apps/bank`
+(`lib/login-dialog-state.test.ts`, 22 → 29, one new `showsWalletButton /
+showsQr` describe) and +4 **net** in `apps/merchant`
+(`lib/sheet-state.test.ts`, 28 → 32 — five added against one deleted).
+
+That deletion is the arithmetic's only trap and it is worth more than the
+number: `shows no QR while redirecting to a wallet deep link` pinned the
+BUG directly, in its name and its assertion, so it had to be inverted rather
+than extended. A grep for `redirecting` in that file before starting would
+have found it; a grep for the feature name would not. This is the same shape
+as the login-`transaction_data` entry below.
+
+Three things that number hides. Only **3 of the 5** new merchant tests were
+red — `NEVER offers the deep link without a QR beside it` was **vacuously
+green**, because `if (view.showWalletLink)` with an absent member never enters
+its body, which is the `toThrow()` trap this file records twice already. It
+was re-run against a deliberate mutation (`showQr: !input.isTouch`, i.e. the
+original bug) and does now fail, so it is a real regression guard rather than
+decoration. Nothing in `.tsx` or CSS is covered at all, so the removed
+auto-redirect, the new `.eudipay-wallet-link` anchor and all five bank dialogs
+rest entirely on the browser verification. And `messages.test.ts` added
+**zero** against zero new leaves — the fix needed no new copy in either
+catalog, because `confirmInApp`, `openInWallet`, `scanCode` and `qrAlt`
+already exist in all five blocks.
 
 That was **1182** before the phone-change work — and for the second time
 running, every one of the four figures this file asserted was correct, so
@@ -1568,6 +1595,91 @@ them without reading the linked reasoning first.
   `@theme` writes its tokens to `:root`, the same element `next/font` writes to,
   so a token defined as `var(--font-eudipay)` referring to itself resolves to
   nothing.
+
+### The coarse-pointer affordance
+
+- **`pointer: coarse` CANNOT answer "is a wallet installed on this device", and
+  both apps bet that it could.** Reported from a real iPad, 2026-11-02: the
+  shop and the bank both refused to show a QR. The DC API gate was innocent —
+  that iPad runs **Safari 18.7.5**, which predates the Digital Credentials API
+  entirely (it shipped in Safari 26), so `supportsDcApi` correctly returned
+  `false` and `selectTransport` correctly returned `request_uri`. A *second*,
+  unrelated heuristic then threw the QR away.
+
+  The assumption is false for an iPad, for a touchscreen laptop, and for any
+  phone without the wallet installed. No browser API can answer the question,
+  and user-agent sniffing cannot rescue it — this iPad reported itself as
+  `Macintosh; Intel Mac OS X 10_15_7`, which is iPadOS's desktop-class UA. So
+  the UI stops betting and **offers both**: the deep link first, the QR
+  beneath it. A phone holder loses nothing.
+
+- **The merchant's was the worse half: it auto-navigated ON MOUNT and
+  suppressed the QR while doing it.** `PaymentScreen` ran
+  `window.location.href = openid4vpUri` for any coarse pointer, and the
+  `setRedirecting(true)` beside it drove `selectSheetView` into a branch that
+  hard-coded `showQr: false`. Measured at HEAD in real headless Chrome under
+  coarse-pointer emulation: **0 QR canvases and 0 links** — nothing on screen
+  at all — under a pill reading *"Opening your wallet…"*, while the browser
+  had already tried a scheme with no handler. The `redirecting` flag is gone
+  and `SheetInput` carries `isTouch` instead; `SheetView.showWalletLink` is
+  the anchor, distinct from `showWalletButton`, which is the DC API handover
+  and has no URI.
+
+  There is deliberately **no on-mount navigation left**. An auto-redirect that
+  fails strands the holder with nothing, which is exactly what the iPad hit.
+
+- **The bank's five dialogs rendered the button and the QR as MUTUALLY
+  EXCLUSIVE branches**, so `"deep-link"` structurally excluded the QR.
+  `selectLoginAffordance` is unchanged; the rendering decision moved into two
+  tested predicates beside it, `showsWalletButton` (touch only) and `showsQr`
+  (touch **and** pointer). Keeping them in `.ts` is the usual reason — no
+  vitest project here matches `.tsx` — and it also means the five dialogs
+  cannot drift apart. `IssuanceDialog` had its own inline `isTouch ?` ternary
+  and now goes through the same function.
+
+  Both still answer false for `dc-api`: that session inlines its request
+  object and has no URI, so a QR there would encode an empty string.
+
+- **`NEVER offers the wallet button without a QR beside it` is the invariant,
+  in both apps, and it is a loop over every affordance rather than a named
+  case.** Narrowing `showsQr` back to `a === "qr"` fails it. Without that
+  test the fix is one keystroke from being reverted by someone tidying a
+  predicate that looks redundant.
+
+- **Verified by A/B in real headless Chrome, not by reading the diff.** Under
+  `Emulation.setDeviceMetricsOverride {mobile: true}` +
+  `setTouchEmulationEnabled` (`matchMedia("(pointer: coarse)")` confirmed
+  `true`), against a seeded `request_uri` session and with the poll held open
+  by `Fetch.enable` so the sheet could not go terminal: merchant **0 → 1** QR
+  canvas and **0 → 1** wallet link, URL still on `/pay/...` rather than
+  navigated away; bank `IssuanceDialog` **0 → 1** QR canvas with the link
+  kept. Fine pointer was **identical before and after** in both apps, which is
+  what shows the change is scoped to touch.
+
+  The iPad was reproduced by `Page.addScriptToEvaluateOnNewDocument` deleting
+  `window.DigitalCredential`, which is Safari 18.7.5 exactly. Note the local
+  trap it exposed: the girocard's **EUDI button issues `sparkassencard`**,
+  which no local foundry declares (400 → 502 → an inline error and **no
+  dialog**), while the **Google Wallet badge issues the EMVCo DPC**, which it
+  does. Only the badge opens a real `IssuanceDialog` locally.
+
+- **The four PRESENTATION dialogs were not browser-verified**, and the reason
+  is the usual one: `WalletLoginDialog`, `LimitChangeDialog`,
+  `SendMoneyDialog` and `PhoneChangeDialog` all need `sparkassen_auth`, which
+  no local foundry declares. Their change is a byte-identical two-condition
+  swap in each file, confirmed by grep and resting on the shared tested
+  predicates — but it is not the same as having clicked them. Ask the operator
+  to open one on the iPad.
+
+- **`apps/bank/public/dcapi-probe.html` is a kept diagnostic**, served at
+  `/dcapi-probe.html`. It prints `isSecureContext`, the DC API globals, every
+  protocol this demo feature-detects against plus a deliberately bogus control
+  string, and the two `supportsDcApi` verdicts. Two traps it caught on first
+  use, both of which would have sent a diagnosis the wrong way: an
+  `isSecureContext: false` reading makes **every** DC API value `undefined`
+  regardless of browser, so a probe served over `http://` says nothing at all;
+  and the UA string is reliable even then, which is what revealed the Safari
+  version and killed the original hypothesis.
 
 ### The payment sheet
 

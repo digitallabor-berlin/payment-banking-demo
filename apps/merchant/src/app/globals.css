@@ -608,6 +608,23 @@ body {
   background: rgb(255 255 255 / 0.22);
 }
 
+/*
+ * The same-device wallet handover, offered on touch ABOVE the QR rather than
+ * instead of it. An <a> rather than a <button> because it navigates to
+ * `openid4vp://`, so it needs the two things .eudipay-button does not supply
+ * to an anchor -- centred text and no underline -- plus its own top margin,
+ * since .eudipay-* classes own their vertical rhythm.
+ *
+ * It deliberately takes .eudipay-button-primary rather than a colour of its
+ * own, so both sheet faces (EudiPay and the neutral shop chrome, which
+ * overrides that class) pick it up with no second rule.
+ */
+.eudipay-wallet-link {
+  margin-top: 16px;
+  text-align: center;
+  text-decoration: none;
+}
+
 .eudipay-cancel {
   display: inline-block;
   background: none;

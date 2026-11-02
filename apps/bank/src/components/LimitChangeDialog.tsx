@@ -27,6 +27,8 @@ import {
 } from "@/lib/limit-presets.js";
 import {
   selectLoginAffordance,
+  showsQr,
+  showsWalletButton,
   type LoginDcError,
 } from "@/lib/login-dialog-state.js";
 import {
@@ -395,7 +397,7 @@ export function LimitChangeDialog({
               </>
             ) : null}
 
-            {affordance === "deep-link" && session?.uri ? (
+            {showsWalletButton(affordance) && session?.uri ? (
               <>
                 <a
                   href={session.uri}
@@ -409,7 +411,7 @@ export function LimitChangeDialog({
               </>
             ) : null}
 
-            {affordance === "qr" && session?.uri ? (
+            {showsQr(affordance) && session?.uri ? (
               <>
                 <div className="qr-frame mt-6 p-3">
                   <QrCanvas

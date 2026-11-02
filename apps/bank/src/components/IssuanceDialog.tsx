@@ -15,6 +15,11 @@ import {
 import type { IssuanceCopy } from "@/lib/credential-copy.js";
 import type { Locale } from "@/lib/i18n/locale.js";
 import { MESSAGES } from "@/lib/i18n/messages.js";
+import {
+  selectLoginAffordance,
+  showsQr,
+  showsWalletButton,
+} from "@/lib/login-dialog-state.js";
 import { AlertMark, CheckMark } from "./StatusMark.js";
 
 /** Sparkasse red, matching --color-primary, for the QR's dark modules. */
@@ -63,6 +68,19 @@ export function IssuanceDialog({
   );
 
   const { value, outcome } = useStatusPoll<string>({ fetchOnce, isTerminal });
+
+  /*
+   * The same decision the four presentation dialogs take, through the same
+   * tested function rather than a ternary of its own. This used to be an
+   * inline `isTouch ? deep-link : qr`, which is the shape that left an iPad
+   * holding a button to `openid-credential-offer://` -- a scheme no iPad app
+   * claims -- with no QR anywhere to fall back to.
+   */
+  const affordance = selectLoginAffordance(
+    dcSupported,
+    dcFailed ? "failed" : null,
+    isTouch,
+  );
 
   useEffect(() => {
     if (!outcome) return;
@@ -120,13 +138,13 @@ export function IssuanceDialog({
           <>
             <h2 className="panel-title">{copy.title}</h2>
 
-            {dcSupported === null ? (
+            {affordance === "preparing" ? (
               /* "Not yet known" is NOT "unavailable". Rendering the QR here
                  would flash it on Android before it disappears. */
               <p className="mt-6 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
                 {t.issuance.preparing}
               </p>
-            ) : dcSupported && !dcFailed ? (
+            ) : affordance === "dc-api" ? (
               <>
                 <button
                   type="button"
@@ -139,28 +157,40 @@ export function IssuanceDialog({
                   {t.issuance.confirmInApp}
                 </p>
               </>
-            ) : isTouch ? (
-              <>
-                <a href={offerUri} className="btn btn-primary mt-6 px-5 py-3">
-                  {t.issuance.openInWallet}
-                </a>
-                <p className="mt-4 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
-                  {t.issuance.confirmInApp}
-                </p>
-              </>
             ) : (
+              /* Touch gets the deep link AND the QR beneath it; a pointer
+                 device gets the QR alone. They are not alternatives -- see
+                 showsQr in login-dialog-state.ts. */
               <>
-                <div className="qr-frame mt-6 p-3">
-                  <QrCanvas
-                    value={offerUri}
-                    size={220}
-                    darkColor={QR_DARK}
-                    ariaLabel={t.issuance.qrAlt}
-                  />
-                </div>
-                <p className="mt-4 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
-                  {t.issuance.scanCode}
-                </p>
+                {showsWalletButton(affordance) ? (
+                  <>
+                    <a
+                      href={offerUri}
+                      className="btn btn-primary mt-6 px-5 py-3"
+                    >
+                      {t.issuance.openInWallet}
+                    </a>
+                    <p className="mt-4 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
+                      {t.issuance.confirmInApp}
+                    </p>
+                  </>
+                ) : null}
+
+                {showsQr(affordance) ? (
+                  <>
+                    <div className="qr-frame mt-6 p-3">
+                      <QrCanvas
+                        value={offerUri}
+                        size={220}
+                        darkColor={QR_DARK}
+                        ariaLabel={t.issuance.qrAlt}
+                      />
+                    </div>
+                    <p className="mt-4 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
+                      {t.issuance.scanCode}
+                    </p>
+                  </>
+                ) : null}
               </>
             )}
 
